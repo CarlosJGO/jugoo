@@ -1,0 +1,1 @@
+"""Composable desktop-shell modules."""

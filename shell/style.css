@@ -1,0 +1,1367 @@
+/* ==========================================================================
+   1. Design tokens
+   GTK3 exposes colors via @define-color. Spacing/radii are documented here
+   and mirrored in shell/ui/tokens.py where widgets need programmatic values.
+
+   Spacing scale:  2 · 4 · 6 · 8 · 10 · 12 · 16
+   Radius scale:   8 (sm) · 10 (md) · 12 (lg) · 14 (xl) · 16 (module)
+   ========================================================================== */
+
+@define-color shell_surface_bg rgba(18, 18, 24, 0.86);
+@define-color shell_bar_bg rgba(10, 10, 16, 0.94);
+@define-color shell_bar_border rgba(255, 255, 255, 0.08);
+@define-color shell_surface_bg_elevated rgba(18, 18, 24, 0.96);
+@define-color shell_surface_bg_panel rgba(18, 18, 24, 0.98);
+@define-color shell_text_primary #d9d9d9;
+@define-color shell_text_secondary rgba(255, 255, 255, 0.62);
+@define-color shell_text_muted rgba(255, 255, 255, 0.42);
+@define-color shell_accent #a58bff;
+@define-color shell_accent_soft rgba(124, 92, 255, 0.22);
+@define-color shell_special #74beff;
+@define-color shell_special_soft rgba(116, 190, 255, 0.12);
+@define-color shell_special_active rgba(116, 190, 255, 0.22);
+@define-color shell_border_subtle rgba(255, 255, 255, 0.10);
+@define-color shell_border_medium rgba(255, 255, 255, 0.12);
+@define-color shell_border_strong rgba(255, 255, 255, 0.15);
+@define-color shell_hover_bg rgba(255, 255, 255, 0.12);
+@define-color shell_hover_bg_soft rgba(255, 255, 255, 0.08);
+@define-color shell_hover_bg_faint rgba(255, 255, 255, 0.05);
+@define-color shell_danger rgba(255, 100, 100, 0.75);
+@define-color shell_success #5ddc8a;
+@define-color shell_warning #f2c14e;
+
+/* Shared thermal state palette (CPU bar, GPU fan, future sensors). */
+@define-color shell_temp_cold #5aa9ff;
+@define-color shell_temp_normal #5ddc8a;
+@define-color shell_temp_warm #f2c14e;
+@define-color shell_temp_hot #ff5f5f;
+
+
+/* ==========================================================================
+   2. Shell base
+   ========================================================================== */
+
+window#shell {
+    background-color: transparent;
+}
+
+box.shell-bar-host {
+    background-color: transparent;
+}
+
+box.shell-bar {
+    background-color: @shell_bar_bg;
+    border: 1px solid @shell_bar_border;
+    border-radius: 20px;
+    padding: 4px 10px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+}
+
+window#shell.compact box.shell-bar {
+    padding: 2px 10px;
+    border-radius: 12px;
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
+}
+
+window#shell.compact box.shell-module {
+    padding: 2px 8px;
+    margin: 0 3px;
+    min-height: 0;
+    border-radius: 10px;
+}
+
+window#shell.compact label.clock-time {
+    font-size: 12px;
+    padding: 0;
+    margin: 0;
+}
+
+window#shell.compact box.clock-widget {
+    padding: 1px 0;
+    min-height: 0;
+}
+
+window#shell.compact box.tray-widget {
+    padding: 1px 2px;
+    min-height: 0;
+}
+
+window#shell.compact button.power-button {
+    padding: 2px 4px;
+    min-height: 18px;
+    min-width: 18px;
+}
+
+window#shell.compact button.notifications-button {
+    padding: 2px 4px;
+    min-height: 18px;
+    min-width: 18px;
+}
+
+window#shell.compact box.ethernet-widget {
+    padding: 1px 2px;
+    min-height: 0;
+}
+
+window#shell.compact button.ethernet-button {
+    padding: 2px 4px;
+    min-height: 18px;
+    min-width: 18px;
+}
+
+
+/* ==========================================================================
+   3. UI Foundation — shared module surfaces & typography
+   ========================================================================== */
+
+box.shell-module {
+    background-color: @shell_surface_bg;
+    border-radius: 16px;
+    padding: 3px 10px;
+    margin: 0 3px;
+}
+
+label.shell-text {
+    font-family: sans-serif;
+}
+
+label.shell-text-title {
+    color: @shell_text_primary;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+label.shell-text-body {
+    color: @shell_text_primary;
+    font-weight: 500;
+    font-size: 13px;
+}
+
+label.shell-text-caption {
+    color: @shell_text_secondary;
+    font-weight: 400;
+    font-size: 11px;
+}
+
+label.shell-text-muted {
+    color: @shell_text_muted;
+    font-weight: 400;
+    font-size: 11px;
+}
+
+/* Thermal states: foreground color, reusable by any module. */
+.shell-temp-cold {
+    color: @shell_temp_cold;
+}
+
+.shell-temp-normal {
+    color: @shell_temp_normal;
+}
+
+.shell-temp-warm {
+    color: @shell_temp_warm;
+}
+
+.shell-temp-hot {
+    color: @shell_temp_hot;
+}
+
+
+/* ==========================================================================
+   4. Widgets — Workspaces
+   ========================================================================== */
+
+.workspace-strip {
+    background-color: @shell_surface_bg;
+    border-radius: 16px;
+    padding: 5px 10px;
+}
+
+button.workspace-button {
+    background: transparent;
+    border: 0;
+    border-radius: 10px;
+    box-shadow: none;
+    min-width: 24px;
+    min-height: 24px;
+    padding: 2px 5px;
+}
+
+button.workspace-button:hover {
+    background-color: @shell_hover_bg;
+}
+
+label.workspace-dot {
+    color: @shell_text_muted;
+    font-family: sans-serif;
+    font-size: 13px;
+}
+
+button.workspace-button.empty-active label.workspace-dot {
+    color: @shell_accent;
+}
+
+button.workspace-button.active {
+    background-color: @shell_accent_soft;
+}
+
+box.application-icons {
+    padding: 0 2px;
+}
+
+box.application-icons image {
+    min-width: 18px;
+    min-height: 18px;
+}
+
+button.workspace-button.special {
+    background-color: @shell_special_soft;
+    border: 1px solid rgba(116, 190, 255, 0.26);
+    border-radius: 8px;
+}
+
+button.workspace-button.special.active {
+    background-color: @shell_special_active;
+}
+
+label.workspace-overflow {
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 0 1px;
+}
+
+eventbox.workspace-application-icon.focused {
+    background-color: @shell_hover_bg;
+    border-radius: 8px;
+    padding: 1px;
+}
+
+eventbox.workspace-application-icon.focused image {
+    min-width: 21px;
+    min-height: 21px;
+}
+
+/* Audio status indicators on workspace buttons */
+button.workspace-button.audio-has-stream {
+    background-image: linear-gradient(
+        to top,
+        rgba(165, 139, 255, 0.55) 0,
+        rgba(165, 139, 255, 0.55) 3px,
+        transparent 3px
+    );
+}
+
+button.workspace-button.audio-playing {
+    background-image: linear-gradient(
+        to top,
+        @shell_accent 0,
+        @shell_accent 3px,
+        transparent 3px
+    );
+}
+
+button.workspace-button.audio-muted {
+    background-image: linear-gradient(
+        to top,
+        @shell_danger 0,
+        @shell_danger 3px,
+        transparent 3px
+    );
+}
+
+button.workspace-button.active.audio-has-stream,
+button.workspace-button.active.audio-playing {
+    background-color: @shell_accent_soft;
+}
+
+button.workspace-button.special.active.audio-has-stream,
+button.workspace-button.special.active.audio-playing {
+    background-color: @shell_special_active;
+}
+
+
+/* ==========================================================================
+   5. Widgets — Active window
+   ========================================================================== */
+
+eventbox.active-window-widget {
+    background-color: @shell_surface_bg;
+    border-radius: 16px;
+    padding: 5px 10px;
+    min-width: 0;
+}
+
+eventbox.active-window-widget.active-window-media {
+    background-color: rgba(18, 18, 24, 0.90);
+}
+
+box.active-window-header {
+    min-height: 24px;
+}
+
+image.active-window-icon {
+    min-width: 24px;
+    min-height: 24px;
+}
+
+label.active-window-application {
+    color: @shell_text_primary;
+    font-weight: 600;
+    min-width: 0;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.78);
+}
+
+label.active-window-title {
+    color: @shell_text_secondary;
+    font-size: 12px;
+    min-width: 0;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.72);
+}
+
+label.active-window-status {
+    color: @shell_text_secondary;
+    font-size: 11px;
+    min-width: 12px;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.72);
+}
+
+drawingarea.active-window-spectrum {
+    background-color: transparent;
+}
+
+/* ==========================================================================
+   5b. Widgets — Media popup
+   ========================================================================== */
+
+window#shell-media-popup {
+    background-color: transparent;
+}
+
+box.media-popup-content,
+box.notification-popup-content,
+box.notification-toast-content,
+box.control-center-popup-content,
+box.power-menu-content,
+box.power-confirm-content,
+box.workspace-audio-popup-content,
+box.workspace-panel-content,
+box.workspace-popup-content,
+box.volume-osd-content {
+    background-color: @shell_surface_bg_elevated;
+    border: 1px solid @shell_border_medium;
+    border-radius: 16px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+box.media-popup-content {
+    padding: 16px;
+    min-width: 440px;
+}
+
+label.media-popup-section-label {
+    color: @shell_text_secondary;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+box.media-popup-artwork-frame {
+    background-color: alpha(@shell_text_primary, 0.06);
+    border: 1px solid @shell_border_subtle;
+    border-radius: 12px;
+    min-width: 128px;
+    min-height: 128px;
+}
+
+image.media-popup-artwork {
+    min-width: 0;
+    min-height: 0;
+}
+
+label.media-popup-title {
+    color: @shell_text_primary;
+    font-size: 15px;
+    font-weight: 600;
+    min-width: 0;
+}
+
+label.media-popup-detail {
+    color: @shell_text_primary;
+    font-size: 13px;
+}
+
+label.media-popup-detail-muted {
+    color: @shell_text_secondary;
+    font-size: 12px;
+}
+
+label.media-popup-status {
+    color: @shell_text_secondary;
+    font-size: 11px;
+}
+
+label.media-popup-time {
+    color: @shell_text_secondary;
+    font-size: 11px;
+}
+
+scale.media-popup-progress {
+    min-height: 18px;
+}
+
+scale.media-popup-progress trough {
+    background-color: rgba(255, 255, 255, 0.14);
+    border-radius: 4px;
+    min-height: 4px;
+}
+
+scale.media-popup-progress highlight {
+    background-color: @shell_accent;
+    border-radius: 4px;
+}
+
+scale.media-popup-progress slider {
+    min-width: 10px;
+    min-height: 10px;
+    border-radius: 50%;
+    background-color: #ffffff;
+}
+
+button.media-popup-control {
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 18px;
+    padding: 6px;
+    background: transparent;
+    border: 0;
+}
+
+button.media-popup-control:hover {
+    background-color: alpha(@shell_text_primary, 0.08);
+}
+
+button.media-popup-control:active {
+    background-color: alpha(@shell_text_primary, 0.16);
+}
+
+button.media-popup-control:disabled {
+    opacity: 0.42;
+}
+
+
+/* ==========================================================================
+   6. Widgets — Clock
+   ========================================================================== */
+
+box.clock-widget {
+    min-height: 24px;
+    min-width: 52px;
+}
+
+label.clock-time {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+}
+
+label.clock-date {
+    font-size: 10px;
+    font-weight: 500;
+    margin-top: 1px;
+}
+
+
+/* ==========================================================================
+   7. Widgets — System stats
+   ========================================================================== */
+
+box.stats-widget {
+    min-height: 24px;
+}
+
+box.stats-cpu-bar {
+    background-color: rgba(255, 255, 255, 0.14);
+    border-radius: 6px;
+    min-height: 14px;
+}
+
+box.stats-cpu-fill {
+    border-radius: 6px;
+    background-color: @shell_text_muted;
+}
+
+box.stats-cpu-fill.shell-temp-cold {
+    background-color: @shell_temp_cold;
+}
+
+box.stats-cpu-fill.shell-temp-normal {
+    background-color: @shell_temp_normal;
+}
+
+box.stats-cpu-fill.shell-temp-warm {
+    background-color: @shell_temp_warm;
+}
+
+box.stats-cpu-fill.shell-temp-hot {
+    background-color: @shell_temp_hot;
+}
+
+label.stats-cpu-label {
+    color: @shell_text_primary;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+label.stats-cpu-temperature {
+    color: #ffffff;
+    font-size: 10px;
+    font-weight: 700;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+}
+
+label.stats-memory-label {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+}
+
+label.stats-memory-value {
+    color: @shell_text_primary;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+/* Base color applies while the GPU sensor is unavailable; the thermal variants
+   below need the extra class to outrank it. */
+.stats-gpu-fan {
+    color: @shell_text_muted;
+}
+
+.stats-gpu-fan.shell-temp-cold {
+    color: @shell_temp_cold;
+}
+
+.stats-gpu-fan.shell-temp-normal {
+    color: @shell_temp_normal;
+}
+
+.stats-gpu-fan.shell-temp-hot {
+    color: @shell_temp_hot;
+}
+
+
+/* ==========================================================================
+   8. Widgets — Audio popups & panels
+   ========================================================================== */
+
+window#shell-workspace-popup {
+    background-color: transparent;
+}
+
+box.workspace-popup-content {
+    padding: 7px 9px;
+}
+
+eventbox.workspace-popup-row {
+    border-radius: 8px;
+    padding: 4px 5px;
+}
+
+eventbox.workspace-popup-row:hover {
+    background-color: @shell_hover_bg_soft;
+}
+
+label.workspace-popup-application {
+    color: @shell_text_primary;
+    font-weight: 600;
+}
+
+label.workspace-popup-title {
+    color: @shell_text_secondary;
+    font-size: 11px;
+}
+
+window#shell-workspace-audio-popup {
+    background-color: transparent;
+}
+
+box.workspace-audio-popup-content {
+    padding: 10px 12px;
+    min-width: 320px;
+}
+
+box.audio-stream-row {
+    padding: 4px 0;
+}
+
+label.audio-stream-app-name {
+    color: @shell_text_primary;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+label.audio-stream-media-title,
+label.audio-stream-device-current,
+label.audio-stream-role-label {
+    color: alpha(@shell_text_primary, 0.78);
+    font-size: 11px;
+}
+
+box.audio-stream-role {
+    padding-left: 8px;
+}
+
+combobox.audio-stream-device-current {
+    min-width: 140px;
+}
+
+box.workspace-audio-row {
+    padding: 3px 2px;
+}
+
+label.audio-stream-name {
+    color: #e0e0e0;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+box.volume-slider {
+    min-width: 90px;
+}
+
+scale.audio-scale trough {
+    background-color: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    min-height: 4px;
+}
+
+scale.audio-scale highlight {
+    background-color: @shell_accent;
+    border-radius: 4px;
+}
+
+scale.audio-scale slider {
+    min-width: 10px;
+    min-height: 10px;
+    border-radius: 50%;
+    background-color: #ffffff;
+    box-shadow: none;
+}
+
+window#shell-workspace-panel {
+    background-color: transparent;
+}
+
+box.workspace-panel-content {
+    background-color: @shell_surface_bg_panel;
+    padding: 12px 16px;
+    min-width: 240px;
+}
+
+label.workspace-panel-header {
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: bold;
+    margin-bottom: 4px;
+}
+
+box.panel-audio-item {
+    background-color: @shell_hover_bg_faint;
+    border-radius: 8px;
+    padding: 4px 8px;
+}
+
+
+/* ==========================================================================
+   9. Widgets — Ethernet
+   ========================================================================== */
+
+box.ethernet-widget {
+    padding: 2px 6px;
+    min-height: 24px;
+}
+
+button.ethernet-button {
+    background: transparent;
+    border: 0;
+    border-radius: 10px;
+    box-shadow: none;
+    min-width: 24px;
+    min-height: 24px;
+    padding: 2px 4px;
+}
+
+button.ethernet-button:hover {
+    background-color: @shell_hover_bg;
+}
+
+button.ethernet-button image.ethernet-icon {
+    color: @shell_text_primary;
+}
+
+button.ethernet-button.ethernet-state-connected image.ethernet-icon {
+    color: @shell_success;
+}
+
+button.ethernet-button.ethernet-state-no-internet image.ethernet-icon,
+button.ethernet-button.ethernet-state-unavailable image.ethernet-icon {
+    color: @shell_warning;
+}
+
+button.ethernet-button.ethernet-state-disconnected image.ethernet-icon {
+    color: @shell_text_muted;
+}
+
+button.ethernet-button.ethernet-state-connecting image.ethernet-icon {
+    color: @shell_accent;
+}
+
+
+/* ==========================================================================
+   10. Widgets — Power menu
+   ========================================================================== */
+
+box.power-widget {
+    padding: 2px 6px;
+    min-height: 24px;
+}
+
+button.power-button {
+    background: transparent;
+    border: 0;
+    border-radius: 10px;
+    box-shadow: none;
+    min-width: 24px;
+    min-height: 24px;
+    padding: 2px 4px;
+}
+
+button.power-button:hover {
+    background-color: @shell_hover_bg;
+}
+
+button.power-button image {
+    color: @shell_text_primary;
+}
+
+box.notifications-widget {
+    padding: 2px 6px;
+    min-height: 24px;
+}
+
+button.notifications-button {
+    background: transparent;
+    border: 0;
+    border-radius: 10px;
+    box-shadow: none;
+    min-width: 24px;
+    min-height: 24px;
+    padding: 2px 4px;
+}
+
+button.notifications-button:hover {
+    background-color: @shell_hover_bg;
+}
+
+button.notifications-button-paused {
+    opacity: 0.72;
+}
+
+button.notifications-button image,
+drawingarea.notifications-bell {
+    color: @shell_text_primary;
+}
+
+label.notifications-badge {
+    background-color: @shell_accent;
+    color: #ffffff;
+    border-radius: 999px;
+    font-size: 9px;
+    font-weight: 700;
+    min-width: 14px;
+    min-height: 14px;
+    padding: 0 3px;
+}
+
+window#shell-notifications {
+    background-color: transparent;
+}
+
+box.notification-popup-content {
+    background-color: @shell_surface_bg_panel;
+    background-image: -gtk-gradient(
+        linear,
+        left top,
+        right bottom,
+        from(rgba(116, 190, 255, 0.16)),
+        color-stop(0.48, rgba(255, 255, 255, 0.035)),
+        to(rgba(116, 190, 255, 0.10))
+    );
+    border: 1px solid rgba(116, 190, 255, 0.34);
+    border-radius: 16px;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.20),
+        inset 1px 0 0 rgba(116, 190, 255, 0.14),
+        inset 0 -1px 0 rgba(116, 190, 255, 0.22),
+        inset -1px 0 0 rgba(255, 255, 255, 0.12),
+        0 6px 18px rgba(0, 0, 0, 0.35);
+    min-width: 440px;
+}
+
+box.notification-popup-header {
+    padding: 10px 12px 8px 12px;
+    border-bottom: 1px solid @shell_border_strong;
+}
+
+label.notification-popup-title {
+    color: @shell_text_primary;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+button.notification-popup-clear {
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    color: @shell_text_secondary;
+    font-size: 11px;
+    padding: 4px 8px;
+}
+
+button.notification-popup-clear:hover {
+    background-color: @shell_hover_bg_soft;
+    color: @shell_text_primary;
+}
+
+box.notification-popup-scroll {
+    min-width: 0;
+}
+
+box.notification-popup-list {
+    padding: 8px;
+}
+
+label.notification-popup-empty {
+    color: @shell_text_secondary;
+    font-size: 12px;
+}
+
+label.notification-popup-paused {
+    color: @shell_text_secondary;
+    font-size: 11px;
+    padding: 0 12px 4px 12px;
+}
+
+box.notification-popup-muted-apps {
+    padding: 0 12px 4px 12px;
+}
+
+label.notification-popup-muted-title {
+    color: @shell_text_secondary;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+label.notification-popup-muted-app {
+    color: @shell_text_primary;
+    font-size: 11px;
+}
+
+box.notification-item {
+    background-color: @shell_surface_bg;
+    border: 1px solid @shell_border_strong;
+    border-radius: 10px;
+    padding: 12px 14px;
+    min-width: 0;
+}
+
+box.notification-item-unread {
+    border-left: 3px solid @shell_accent;
+    padding-left: 9px;
+}
+
+box.notification-item-expired {
+    opacity: 0.82;
+}
+
+box.notification-item-low {
+    opacity: 0.88;
+}
+
+box.notification-item-critical {
+    border-color: rgba(255, 95, 95, 0.45);
+}
+
+image.notification-item-icon {
+    min-width: 20px;
+    min-height: 20px;
+}
+
+label.notification-item-app {
+    color: @shell_text_primary;
+    font-size: 11px;
+    min-width: 0;
+}
+
+label.notification-item-urgency {
+    color: #ff8a8a;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+label.notification-item-urgency-low {
+    color: @shell_text_secondary;
+    font-weight: 600;
+}
+
+label.notification-item-urgency-critical {
+    color: #ff8a8a;
+}
+
+label.notification-item-summary {
+    color: @shell_text_primary;
+    font-size: 12px;
+    font-weight: 600;
+    min-width: 0;
+}
+
+label.notification-item-body {
+    color: @shell_text_secondary;
+    font-size: 11px;
+    min-width: 0;
+}
+
+button.notification-item-action {
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    min-width: 32px;
+    min-height: 32px;
+    padding: 4px;
+}
+
+button.notification-item-action:hover {
+    background-color: @shell_hover_bg_soft;
+}
+
+box.notification-item-actions {
+    padding-top: 2px;
+}
+
+button.notification-item-action-btn {
+    background: @shell_surface_bg;
+    border: 1px solid @shell_border_strong;
+    border-radius: 8px;
+    color: @shell_text_primary;
+    font-size: 11px;
+    padding: 4px 8px;
+}
+
+button.notification-item-action-btn:hover {
+    background-color: @shell_hover_bg_soft;
+}
+
+window#shell-notification-toast,
+window#shell-notification-toast-layer {
+    background-color: transparent;
+}
+
+box.notification-toast-container {
+    background-color: transparent;
+    padding: 0;
+}
+
+.notification-toast-content,
+.notification-toast-card,
+box.notification-toast-content {
+    background-color: @shell_surface_bg_panel;
+    border: 1px solid @shell_border_strong;
+    border-radius: 14px;
+    padding: 12px 14px;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 8px 24px rgba(0, 0, 0, 0.50);
+}
+
+.notification-toast-content:hover,
+.notification-toast-card:hover {
+    border-color: rgba(255, 255, 255, 0.28);
+}
+
+.notification-toast-critical,
+box.notification-toast-critical {
+    border: 1px solid rgba(255, 95, 95, 0.70);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 95, 95, 0.40),
+        0 8px 24px rgba(255, 50, 50, 0.28);
+}
+
+.notification-toast-low,
+box.notification-toast-low {
+    opacity: 0.90;
+    border-color: @shell_border_subtle;
+}
+
+box.notification-toast-header {
+    min-height: 22px;
+}
+
+image.notification-toast-icon {
+    min-width: 20px;
+    min-height: 20px;
+}
+
+label.notification-toast-app {
+    color: @shell_text_secondary;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+label.notification-toast-urgency {
+    color: #ff8a8a;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background-color: rgba(255, 95, 95, 0.18);
+}
+
+label.notification-toast-urgency-critical {
+    color: #ff8a8a;
+    background-color: rgba(255, 95, 95, 0.22);
+}
+
+label.notification-toast-urgency-low {
+    color: @shell_text_muted;
+    background-color: transparent;
+}
+
+button.notification-toast-close {
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    color: @shell_text_muted;
+    min-width: 20px;
+    min-height: 20px;
+    padding: 2px 4px;
+}
+
+button.notification-toast-close:hover {
+    background-color: @shell_hover_bg_soft;
+    color: @shell_text_primary;
+}
+
+box.notification-toast-body-box {
+    padding-top: 2px;
+}
+
+label.notification-toast-summary {
+    color: @shell_text_primary;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+label.notification-toast-body {
+    color: @shell_text_secondary;
+    font-size: 11.5px;
+}
+
+box.notification-toast-actions {
+    padding-top: 4px;
+}
+
+button.notification-toast-action-btn {
+    background: @shell_surface_bg;
+    border: 1px solid @shell_border_medium;
+    border-radius: 8px;
+    color: @shell_text_primary;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+}
+
+button.notification-toast-action-btn:hover {
+    background-color: @shell_hover_bg;
+    border-color: @shell_border_strong;
+    color: #ffffff;
+}
+
+window#shell-power-menu,
+window#shell-power-confirm {
+    background-color: transparent;
+}
+
+box.power-menu-content,
+box.power-confirm-content {
+    background-color: @shell_surface_bg_panel;
+    padding: 6px;
+    min-width: 180px;
+}
+
+button.power-menu-item {
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    box-shadow: none;
+    padding: 6px 8px;
+}
+
+button.power-menu-item:hover {
+    background-color: @shell_hover_bg_soft;
+}
+
+button.power-menu-item:active {
+    background-color: @shell_hover_bg;
+}
+
+button.power-menu-item label {
+    color: @shell_text_primary;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+button.power-menu-item-destructive label {
+    color: @shell_temp_hot;
+}
+
+label.power-confirm-message {
+    color: @shell_text_primary;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 4px 0 4px;
+}
+
+button.power-confirm-cancel {
+    background-color: @shell_hover_bg_faint;
+    border: 1px solid @shell_border_subtle;
+    border-radius: 8px;
+    color: @shell_text_primary;
+    padding: 4px 10px;
+}
+
+button.power-confirm-cancel:hover {
+    background-color: @shell_hover_bg_soft;
+}
+
+button.power-confirm-action {
+    background-color: @shell_accent_soft;
+    border: 1px solid @shell_border_medium;
+    border-radius: 8px;
+    color: @shell_text_primary;
+    padding: 4px 10px;
+    font-weight: 600;
+}
+
+button.power-confirm-action-destructive {
+    background-color: rgba(255, 95, 95, 0.18);
+    border-color: rgba(255, 95, 95, 0.35);
+    color: @shell_temp_hot;
+}
+
+button.power-confirm-action-destructive:hover {
+    background-color: rgba(255, 95, 95, 0.28);
+}
+
+
+/* ==========================================================================
+   10. Widgets — Control center
+   ========================================================================== */
+
+window#shell-control-center {
+    background-color: transparent;
+}
+
+box.control-center-popup-content {
+    background-color: @shell_surface_bg_elevated;
+    padding: 12px;
+    min-width: 360px;
+}
+
+box.control-center-popup-header {
+    padding-bottom: 8px;
+}
+
+label.control-center-popup-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: @shell_text_primary;
+}
+
+box.control-center-popup-body {
+    padding-top: 4px;
+}
+
+box.control-center-section,
+box.control-center-subsection {
+    padding: 8px;
+    background-color: @shell_hover_bg_faint;
+    border: 1px solid @shell_border_subtle;
+    border-radius: 12px;
+}
+
+box.control-center-subsection {
+    padding: 8px 6px;
+    background-color: transparent;
+    border: 0;
+}
+
+label.control-center-section-title,
+label.control-center-subsection-title {
+    color: @shell_text_primary;
+    font-weight: 600;
+}
+
+label.control-center-detail {
+    color: @shell_text_primary;
+    font-size: 12px;
+}
+
+label.control-center-detail-muted,
+label.control-center-placeholder {
+    color: alpha(@shell_text_primary, 0.62);
+    font-size: 12px;
+}
+
+button.control-center-action {
+    background: @shell_hover_bg_faint;
+    border: 1px solid @shell_border_medium;
+    border-radius: 8px;
+    color: @shell_text_primary;
+    padding: 4px 10px;
+}
+
+button.control-center-action:hover {
+    background-color: @shell_hover_bg;
+}
+
+button.control-center-action:active {
+    background-color: @shell_accent_soft;
+}
+
+switch {
+    background-color: rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    min-width: 40px;
+    min-height: 22px;
+}
+
+switch:checked {
+    background-color: @shell_accent_soft;
+}
+
+switch slider {
+    background-color: #ffffff;
+    border-radius: 50%;
+    min-width: 18px;
+    min-height: 18px;
+}
+
+listbox.control-center-wifi-list {
+    background: transparent;
+}
+
+row.control-center-wifi-row {
+    border-radius: 8px;
+    margin: 2px 0;
+}
+
+row.control-center-wifi-row-active {
+    background-color: @shell_hover_bg_faint;
+}
+
+label.control-center-wifi-ssid {
+    color: @shell_text_primary;
+}
+
+label.control-center-hotspot-sharing {
+    color: @shell_text_primary;
+    font-size: 12px;
+}
+
+
+/* ==========================================================================
+   11. Widgets — System tray
+   ========================================================================== */
+
+box.tray-widget {
+    padding: 2px 4px;
+    min-height: 24px;
+}
+
+box.tray-items {
+    padding: 0;
+}
+
+eventbox.tray-item {
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    box-shadow: none;
+    padding: 0;
+}
+
+eventbox.tray-item:hover {
+    background-color: @shell_hover_bg_soft;
+}
+
+eventbox.tray-item-attention {
+    background-color: rgba(255, 95, 95, 0.12);
+}
+
+menu.tray-menu {
+    background-color: @shell_surface_bg_panel;
+    border: 1px solid @shell_border_strong;
+    border-radius: 10px;
+    padding: 4px;
+}
+
+/* ==========================================================================
+   Volume OSD (informational, non-interactive)
+   ========================================================================== */
+
+window#shell-volume-osd {
+    background-color: transparent;
+}
+
+box.volume-osd-content {
+    padding: 14px 18px;
+    min-width: 260px;
+}
+
+label.volume-osd-headline {
+    color: @shell_text_primary;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+progressbar.volume-osd-bar {
+    min-height: 10px;
+}
+
+progressbar.volume-osd-bar trough {
+    background-color: alpha(@shell_text_primary, 0.12);
+    border-radius: 999px;
+    min-height: 10px;
+}
+
+progressbar.volume-osd-bar progress {
+    background-color: @shell_accent;
+    border-radius: 999px;
+    min-height: 10px;
+}
+
+label.volume-osd-bar-text {
+    color: @shell_text_secondary;
+    font-family: monospace;
+    font-size: 11px;
+    letter-spacing: 1px;
+}
+
+label.volume-osd-device {
+    color: @shell_text_secondary;
+    font-size: 12px;
+}
+
+window#shell-volume-osd.volume-osd-muted label.volume-osd-headline {
+    color: @shell_text_secondary;
+}

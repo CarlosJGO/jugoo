@@ -1,0 +1,1 @@
+"""Workspace interaction widgets."""
