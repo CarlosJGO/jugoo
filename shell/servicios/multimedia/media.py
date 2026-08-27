@@ -221,6 +221,7 @@ class MediaService:
         self._activity_rank: dict[str, float] = {}
         self._artwork_cache = MediaArtworkCache()
         self._artwork_paths: dict[str, str] = {}
+        self._artwork_requests: dict[str, str] = {}
         self._refresh_source_id = 0
         self._position_source_id = 0
         self._track_refresh_source_id = 0
