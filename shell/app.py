@@ -138,10 +138,7 @@ class ShellApplication(Gtk.Window):
             self.event_bus,
             self.hyprland,
             shell_window=self,
-            hide_in_compact=(
-                self.layout.center,
-                self.stats_widget,
-            ),
+            hide_in_compact=(),
             compact_adapters=(
                 self.clock_widget,
                 self.ethernet_widget,

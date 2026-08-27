@@ -70,6 +70,35 @@ window#shell.compact box.shell-module {
     border-radius: 10px;
 }
 
+window#shell.compact .workspace-strip {
+    padding: 2px 6px;
+    border-radius: 10px;
+}
+
+window#shell.compact button.workspace-button {
+    min-width: 20px;
+    min-height: 20px;
+    padding: 1px 3px;
+}
+
+window#shell.compact eventbox.active-window-widget {
+    padding: 2px 6px;
+    border-radius: 10px;
+}
+
+window#shell.compact box.active-window-header {
+    min-height: 20px;
+}
+
+window#shell.compact image.active-window-icon {
+    min-width: 18px;
+    min-height: 18px;
+}
+
+window#shell.compact box.stats-widget {
+    padding: 1px 4px;
+}
+
 window#shell.compact label.clock-time {
     font-size: 12px;
     padding: 0;

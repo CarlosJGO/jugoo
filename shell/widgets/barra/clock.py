@@ -46,10 +46,7 @@ class ClockWidget(ShellModule):
         self._schedule_next_tick()
 
     def apply_shell_compact(self, compact: bool) -> None:
-        if compact:
-            self._date_label.hide()
-        else:
-            self._date_label.show()
+        return
 
     def _refresh_display(self) -> None:
         now = datetime.now()
