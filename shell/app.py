@@ -69,31 +69,48 @@ class ShellApplication(Gtk.Window):
         self.set_name(APP_ID)
         configure_toplevel(self, title=TITLE_BAR)
         self.set_decorated(False)
-        self.set_resizable(False)
+        # Layer-shell surfaces anchored to LEFT+RIGHT must remain resizable:
+        # with resizable=False GTK rejects the compositor-assigned width and
+        # falls back to the natural size, leaving the bar short of the edges.
+        self.set_resizable(True)
         self._configure_layer_shell()
         self._load_css()
 
         self.layout = ShellLayout()
+        monitor = Gdk.Display.get_default().get_primary_monitor()
+        if monitor is not None:
+            self.layout.set_size_request(monitor.get_geometry().width, -1)
         self._bar_host = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         self._bar_host.get_style_context().add_class("shell-bar-host")
         self._bar_host.set_hexpand(True)
-        self._bar_host.pack_start(Gtk.Box(), True, True, 0)
-        self._bar_host.pack_start(self.layout, False, False, 0)
-        self._bar_host.pack_start(Gtk.Box(), True, True, 0)
+        self._bar_host.set_halign(Gtk.Align.FILL)
+        self.layout.set_hexpand(True)
+        self.layout.set_halign(Gtk.Align.FILL)
+        self._bar_host.pack_start(self.layout, True, True, 0)
 
         self._overlay = Gtk.Overlay()
+        self._overlay.set_hexpand(True)
+        self._overlay.set_halign(Gtk.Align.FILL)
+        monitor = Gdk.Display.get_default().get_primary_monitor()
+        if monitor is not None:
+            self._overlay.set_size_request(monitor.get_geometry().width, -1)
         self._overlay.add(self._bar_host)
         self.add(self._overlay)
+        if monitor is not None:
+            self.set_size_request(monitor.get_geometry().width, -1)
 
         self.workspace_widget = WorkspaceWidget(self.event_bus)
         self.layout.center.add(self.workspace_widget)
-        self.active_window_widget = ActiveWindowWidget(self.event_bus, self.media_service)
-        self.layout.center.add(self.active_window_widget)
 
         self.stats_widget = StatsWidget(self.system_stats)
-        self.layout.right.add(self.stats_widget)
+        self.layout.left.add(self.stats_widget)
+
+        self.active_window_widget = ActiveWindowWidget(self.event_bus, self.media_service)
+        self.layout.left.set_spacing(0)
+        self.layout.left.set_halign(Gtk.Align.START)
+        self.layout.left.add(self.active_window_widget)
+
         self.ethernet_widget = EthernetWidget(self.event_bus, self.network_service)
-        self.layout.right.add(self.ethernet_widget)
         self.tray_widget = SystemTrayWidget(self.tray_service)
         self.layout.right.add(self.tray_widget)
         self.notifications_widget = NotificationsWidget(
@@ -102,6 +119,7 @@ class ShellApplication(Gtk.Window):
             self,
         )
         self.layout.right.add(self.notifications_widget)
+        self.layout.right.add(self.ethernet_widget)
         self.clock_widget = ClockWidget()
         self.layout.right.add(self.clock_widget)
         self.power_widget = PowerWidget(self.power_service, self, self.event_bus)
@@ -179,6 +197,9 @@ class ShellApplication(Gtk.Window):
             GtkLayerShell.Edge.RIGHT,
         ):
             GtkLayerShell.set_anchor(self, edge, True)
+        monitor = Gdk.Display.get_default().get_primary_monitor()
+        if monitor is not None:
+            GtkLayerShell.set_size(self, monitor.get_geometry().width, -1)
         GtkLayerShell.set_margin(self, GtkLayerShell.Edge.TOP, TOP_MARGIN)
         GtkLayerShell.auto_exclusive_zone_enable(self)
         GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.NONE)

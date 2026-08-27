@@ -52,14 +52,23 @@ box.shell-bar-host {
 box.shell-bar {
     background-color: @shell_bar_bg;
     border: 1px solid @shell_bar_border;
-    border-radius: 20px;
-    padding: 4px 10px;
+    border-radius: 0 0 20px 20px;
+    padding: 4px 0;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
 }
 
+box#shell-left {
+    margin-left: 0;
+}
+
+box#shell-left > box.stats-widget {
+    margin-left: -1px;
+    border-radius: 0 16px 16px 0;
+}
+
 window#shell.compact box.shell-bar {
-    padding: 2px 10px;
-    border-radius: 12px;
+    padding: 2px 0;
+    border-radius: 0 0 12px 12px;
     box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
 }
 
@@ -82,7 +91,7 @@ window#shell.compact button.workspace-button {
 }
 
 window#shell.compact eventbox.active-window-widget {
-    padding: 2px 6px;
+    padding: 2px 6px 2px 0;
     border-radius: 10px;
 }
 
@@ -316,8 +325,10 @@ button.workspace-button.special.active.audio-playing {
 
 eventbox.active-window-widget {
     background-color: @shell_surface_bg;
-    border-radius: 16px;
+    border-radius: 0 16px 16px 0;
     padding: 5px 10px;
+    padding-left: 0;
+    margin-left: -1px;
     min-width: 0;
 }
 

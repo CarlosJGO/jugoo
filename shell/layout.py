@@ -62,5 +62,5 @@ class ShellLayout(Gtk.Box):
         self.right = RightContainer()
 
         self.pack_start(self.left, False, False, 0)
-        self.pack_start(self.center, False, False, 0)
+        self.pack_start(self.center, True, True, 0)
         self.pack_start(self.right, False, False, 0)

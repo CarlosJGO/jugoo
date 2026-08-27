@@ -104,8 +104,8 @@ class ActiveWindowWidget(Gtk.EventBox):
 
     @staticmethod
     def _configure_stable_label(label: Gtk.Label) -> None:
-        """Keep label text centered and ellipsized inside the fixed-width block."""
-        label.set_xalign(0.5)
+        """Keep label text left-aligned and ellipsized inside the fixed-width block."""
+        label.set_xalign(0.0)
         label.set_halign(Gtk.Align.FILL)
         label.set_hexpand(True)
         label.set_ellipsize(Pango.EllipsizeMode.END)
