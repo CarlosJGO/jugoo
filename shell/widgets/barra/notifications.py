@@ -109,6 +109,7 @@ class NotificationsWidget(ShellModule):
             on_dismiss=self._dismiss,
             on_clear_all=self._clear_all,
             on_invoke_action=self._invoke_action,
+            on_open_app=self._open_app,
             on_toggle_paused=self._toggle_paused,
             on_toggle_app_sound_mute=self._toggle_app_sound_mute,
         )
@@ -229,6 +230,10 @@ class NotificationsWidget(ShellModule):
 
     def _invoke_action(self, notification_id: int, action_key: str) -> None:
         self._service.invoke_action(notification_id, action_key)
+
+    def _open_app(self, snapshot: NotificationSnapshot) -> None:
+        from ..notificaciones.notification_popup import open_notification_app
+        open_notification_app(snapshot)
 
     def _toggle_paused(self) -> None:
         self._service.toggle_paused()

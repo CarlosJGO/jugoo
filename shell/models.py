@@ -360,6 +360,7 @@ class NotificationSnapshot:
     expired: bool = False
     icon_name: str = ""
     image_path: str = ""
+    desktop_entry: str = ""
 
 
 def compose_workspaces(

@@ -117,6 +117,7 @@ def _snapshot_to_dict(snapshot: NotificationSnapshot) -> dict[str, Any]:
         "app_icon": snapshot.app_icon,
         "icon_name": snapshot.icon_name,
         "image_path": snapshot.image_path,
+        "desktop_entry": snapshot.desktop_entry,
         "summary": snapshot.summary,
         "body": snapshot.body,
         "actions": [
@@ -156,6 +157,7 @@ def _snapshot_from_dict(raw: Any) -> NotificationSnapshot | None:
             app_icon=str(raw.get("app_icon", "") or ""),
             icon_name=str(raw.get("icon_name", "") or ""),
             image_path=str(raw.get("image_path", "") or ""),
+            desktop_entry=str(raw.get("desktop_entry", "") or ""),
             summary=str(raw.get("summary", "") or ""),
             body=str(raw.get("body", "") or ""),
             actions=actions,

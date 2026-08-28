@@ -1001,6 +1001,108 @@ button.notification-item-action-btn:hover {
     background-color: @shell_hover_bg_soft;
 }
 
+box.notification-group-row {
+    background-color: @shell_surface_bg;
+    border: 1px solid @shell_border_strong;
+    border-radius: 10px;
+    padding: 10px 12px;
+    min-width: 0;
+}
+
+box.notification-group-row-unread {
+    border-left: 3px solid @shell_accent;
+    padding-left: 7px;
+}
+
+box.notification-group-row-critical {
+    border-color: rgba(255, 95, 95, 0.45);
+}
+
+box.notification-group-row-low {
+    opacity: 0.88;
+}
+
+image.notification-group-row-icon {
+    min-width: 20px;
+    min-height: 20px;
+}
+
+label.notification-group-row-app {
+    color: @shell_text_primary;
+    font-size: 11px;
+    font-weight: 700;
+    min-width: 0;
+}
+
+label.notification-group-row-urgency {
+    color: #ff8a8a;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+label.notification-group-row-urgency-low {
+    color: @shell_text_secondary;
+    font-weight: 600;
+}
+
+label.notification-group-row-urgency-critical {
+    color: #ff8a8a;
+}
+
+label.notification-group-row-summary {
+    color: @shell_text_primary;
+    font-size: 12px;
+    font-weight: 600;
+    min-width: 0;
+}
+
+label.notification-group-row-badge {
+    background-color: @shell_accent;
+    color: @shell_text_primary;
+    font-size: 10px;
+    font-weight: 700;
+    border-radius: 10px;
+    padding: 2px 6px;
+    min-width: 18px;
+    min-height: 18px;
+}
+
+popover.notification-group-popover {
+    background-color: @shell_surface_bg_panel;
+    border: 1px solid @shell_border_strong;
+    border-radius: 12px;
+    padding: 4px;
+}
+
+eventbox.notification-mini-row {
+    background-color: transparent;
+    border-radius: 8px;
+    padding: 4px;
+}
+
+eventbox.notification-mini-row:hover {
+    background-color: @shell_hover_bg_soft;
+}
+
+label.notification-mini-row-summary {
+    color: @shell_text_primary;
+    font-size: 11px;
+    font-weight: 600;
+    min-width: 0;
+}
+
+label.notification-mini-row-body {
+    color: @shell_text_secondary;
+    font-size: 10px;
+    min-width: 0;
+}
+
+label.notification-mini-row-time {
+    color: @shell_text_secondary;
+    font-size: 10px;
+    min-width: 0;
+}
+
 window#shell-notification-toast,
 window#shell-notification-toast-layer {
     background-color: transparent;

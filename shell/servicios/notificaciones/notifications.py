@@ -178,6 +178,7 @@ class NotificationStore:
         app_icon: str,
         icon_name: str,
         image_path: str,
+        desktop_entry: str = "",
         summary: str,
         body: str,
         actions: tuple[NotificationAction, ...],
@@ -202,6 +203,7 @@ class NotificationStore:
             app_icon=app_icon or "",
             icon_name=icon_name or "",
             image_path=image_path or "",
+            desktop_entry=desktop_entry or "",
             summary=summary or "",
             body=body or "",
             actions=actions,
@@ -731,7 +733,7 @@ class NotificationService:
         hints = normalize_hints(dict(hints_variant) if hints_variant else {})
         replaces_id = int(replaces_id or 0)
         provisional_id = replaces_id if replaces_id else self._store.next_id
-        icon_name, image_path, normalized_app_icon = resolve_icon_fields(
+        icon_name, image_path, normalized_app_icon, desktop_entry = resolve_icon_fields(
             app_icon=str(app_icon or ""),
             hints=hints,
             notification_id=provisional_id,
@@ -743,6 +745,7 @@ class NotificationService:
             app_icon=normalized_app_icon,
             icon_name=icon_name,
             image_path=image_path,
+            desktop_entry=desktop_entry,
             summary=str(summary or ""),
             body=str(body or ""),
             actions=parse_notification_actions(list(actions or [])),

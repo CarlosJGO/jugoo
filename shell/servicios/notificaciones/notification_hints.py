@@ -39,9 +39,10 @@ def resolve_icon_fields(
     hints: dict[str, Any],
     notification_id: int,
     cache_dir: Path,
-) -> tuple[str, str, str]:
-    """Return ``(icon_name, image_path, normalized_app_icon)``."""
+) -> tuple[str, str, str, str]:
+    """Return ``(icon_name, image_path, normalized_app_icon, desktop_entry)``."""
     icon_name = _hint_string(hints, "icon-name", "desktop-entry")
+    desktop_entry = _hint_string(hints, "desktop-entry")
     image_path = _hint_string(hints, "image-path")
 
     cached = _cache_image_data(hints.get("image-data"), notification_id, cache_dir)
@@ -59,7 +60,7 @@ def resolve_icon_fields(
     if not icon_name and normalized_app_icon and not normalized_app_icon.startswith("/"):
         icon_name = normalized_app_icon
 
-    return icon_name, image_path, normalized_app_icon
+    return icon_name, image_path, normalized_app_icon, desktop_entry
 
 
 def _hint_string(hints: dict[str, Any], *keys: str) -> str:
