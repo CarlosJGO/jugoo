@@ -263,6 +263,7 @@ class NotificationsWidget(ShellModule):
             on_open_app=self._open_app,
             anchor=anchor,
             popup_window=popup,
+            notifications_position=popup.position,
         )
         self._group_window = window
         self._outside_click.set_extra_windows((window,))

@@ -29,11 +29,15 @@ from ...servicios.notificaciones.notifications import NotificationService
 from ...ui.notification_icon import apply_notification_icon
 from ...window_identity import (
     TITLE_NOTIFICATIONS,
+    compute_popup_top_left,
     configure_interactive_popup,
     configure_toplevel,
     position_popup_below_anchor,
+    popup_window_size,
     register_shell_popup,
     schedule_popup_position,
+    monitor_containing_point,
+    anchor_button_geometry,
 )
 
 _URGENCY_LABELS = {
@@ -46,90 +50,14 @@ _URGENCY_LABELS = {
 def _grouping_context(snapshot: NotificationSnapshot) -> tuple[str, ...]:
     app_name = (snapshot.app_name or "").strip().casefold()
     desktop = (snapshot.desktop_entry or "").strip()
-    summary = (snapshot.summary or "").strip()
-    body = (snapshot.body or "").strip()
+    summary = " ".join((snapshot.summary or "").split()).casefold()
 
     context_parts = [app_name or "application"]
     if desktop:
         context_parts.append(Path(desktop).stem.casefold())
-
-    app_hint = _extract_app_hint(summary, body)
-    if app_hint:
-        context_parts.append(app_hint)
-
-    sender = _extract_sender(summary, body, app_name)
-    if sender:
-        context_parts.append(sender)
+    context_parts.append(summary or "untitled")
 
     return tuple(context_parts)
-
-
-def _extract_app_hint(summary: str, body: str) -> str:
-    haystack = f"{summary} {body}".strip().casefold()
-    if not haystack:
-        return ""
-
-    candidates = (
-        "whatsapp web",
-        "whatsapp",
-        "telegram web",
-        "telegram",
-        "discord",
-        "slack",
-        "messenger",
-        "signal",
-        "teams",
-        "zoom",
-        "skype",
-        "viber",
-        "line",
-        "wechat",
-        "kakao",
-    )
-    for candidate in candidates:
-        if candidate in haystack:
-            return candidate
-    return ""
-
-
-def _extract_sender(summary: str, body: str, app_name: str) -> str:
-    haystack = f"{summary} {body}".strip()
-    if not haystack:
-        return ""
-
-    normalized = haystack.casefold()
-    prefix = app_name.casefold().strip()
-    if prefix and normalized.startswith(prefix):
-        normalized = normalized[len(prefix):].lstrip(" -:|")
-
-    if ":" in normalized:
-        before = normalized.split(":", 1)[0].strip()
-        words = before.split()
-        if words:
-            last = words[-1]
-            if len(last) > 1 and last not in {"de", "from", "von", "a", "an", "la", "el", "los", "las", "un", "una"}:
-                return last
-
-    separators = (" - ", " – ", " — ", " | ")
-    for sep in separators:
-        idx = normalized.rfind(sep)
-        if idx != -1:
-            candidate = normalized[idx + len(sep):].strip()
-            candidate = candidate.split(":")[0].split("-")[0].strip()
-            words = candidate.split()
-            if words:
-                return words[0].casefold()
-
-    separators = (" de ", " from ", " von ")
-    for sep in separators:
-        idx = normalized.find(sep)
-        if idx != -1:
-            candidate = normalized[idx + len(sep):].strip()
-            candidate = candidate.split(":")[0].split("-")[0].strip()
-            words = candidate.split()
-            if words:
-                return words[0].casefold()
-    return ""
 
 
 def open_notification_app(snapshot: NotificationSnapshot) -> None:
@@ -172,7 +100,7 @@ class NotificationItemRow(Gtk.EventBox):
             (action.key for action in snapshot.actions if action.key == "default"),
             snapshot.actions[0].key if snapshot.actions else None,
         )
-        if self._default_action is not None:
+        if self._default_action is not None or self._snapshot.desktop_entry:
             self.connect("button-press-event", self._on_row_clicked)
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -305,14 +233,17 @@ class NotificationItemRow(Gtk.EventBox):
             content.pack_start(action_row, False, False, 0)
 
     def _on_row_clicked(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
-        if event.button != 1 or self._default_action is None:
+        if event.button != 1:
             return False
         target = event.widget
         while target is not None:
             if isinstance(target, Gtk.Button):
                 return False
             target = target.get_parent()
-        self._on_invoke_action(self._snapshot.id, self._default_action)
+        if self._default_action is not None:
+            self._on_invoke_action(self._snapshot.id, self._default_action)
+        else:
+            self._on_open_app(self._snapshot)
         return True
 
 
@@ -351,6 +282,7 @@ class NotificationPopup(Gtk.Window):
         self._on_toggle_app_sound_mute = on_toggle_app_sound_mute
         self._anchor_button: Gtk.Widget | None = None
         self._fixed_popup_top: int | None = None
+        self._position: tuple[int, int, int] | None = None
 
         self.set_name("shell-notifications")
         register_shell_popup(self, shell_window)
@@ -422,6 +354,7 @@ class NotificationPopup(Gtk.Window):
     def open_for(self, anchor_button: Gtk.Widget) -> None:
         self._anchor_button = anchor_button
         self._fixed_popup_top = None
+        self._position = None
         self.refresh()
         present_popup(self)
         schedule_popup_position(self._position_after_show)
@@ -433,6 +366,10 @@ class NotificationPopup(Gtk.Window):
 
     def pointer_is_inside(self) -> bool:
         return pointer_inside_widget(self)
+
+    @property
+    def position(self) -> tuple[int, int, int] | None:
+        return self._position
 
     def refresh(self) -> None:
         self._sync_paused_ui()
@@ -542,6 +479,20 @@ class NotificationPopup(Gtk.Window):
 
     def _position_after_show(self) -> bool:
         if self._anchor_button is not None:
+            geometry = anchor_button_geometry(self._anchor_button)
+            if geometry is not None:
+                width, height = popup_window_size(self)
+                monitor = monitor_containing_point(geometry.center_x, geometry.bottom)
+                position = compute_popup_top_left(
+                    button_center_x=geometry.center_x,
+                    button_bottom=geometry.bottom,
+                    popup_width=width,
+                    popup_height=height,
+                    offset=NOTIFICATION_POPUP_OFFSET,
+                    fixed_top=self._fixed_popup_top,
+                    monitor=monitor,
+                )
+                self._position = (position[0], position[1], width)
             top = position_popup_below_anchor(
                 self,
                 self._anchor_button,
@@ -718,7 +669,6 @@ class NotificationGroupRow(Gtk.EventBox):
     def _on_enter_notify(self, _widget: Gtk.Widget, event: Gdk.EventCrossing) -> bool:
         if event.window != self.get_window():
             return False
-        self._cancel_leave_timeout()
         if len(self._group_snapshots) > 1:
             self._hover_opened = True
             self._open_group_window()
@@ -729,9 +679,7 @@ class NotificationGroupRow(Gtk.EventBox):
             return False
         self._hover_opened = False
         if self._popover is not None and self._popover.get_visible():
-            self._popover_leave_timeout_id = GLib.timeout_add(150, self._leave_popover)
-        else:
-            self._cancel_leave_timeout()
+            self._popover.hide()
         return False
 
     def _on_motion_notify(self, _widget: Gtk.Widget, event: Gdk.EventMotion) -> bool:

@@ -103,6 +103,10 @@ def pointer_inside_widget(widget: Gtk.Widget) -> bool:
     )
 
 
+def pointer_inside_window(window: Gtk.Window) -> bool:
+    return pointer_inside_widget(window)
+
+
 class PopupHandle(Generic[T]):
     """Create-on-demand popup that clears its reference on Gtk destroy."""
 
@@ -183,6 +187,8 @@ class PopupOutsideDismiss:
         self._active_window_handler = None
         self._extra_windows: tuple[Gtk.Window, ...] = ()
         self._extra_focus_out_ids: list[int] = []
+        self._extra_enter_ids: list[int] = []
+        self._extra_leave_ids: list[int] = []
 
     def install(
         self,
@@ -218,6 +224,12 @@ class PopupOutsideDismiss:
         for extra in extra_windows:
             focus_id = extra.connect("focus-out-event", self._on_focus_out)
             self._extra_focus_out_ids.append(focus_id)
+            self._extra_enter_ids.append(
+                extra.connect("enter-notify-event", self._on_pointer_enter)
+            )
+            self._extra_leave_ids.append(
+                extra.connect("leave-notify-event", self._on_pointer_leave)
+            )
         self._active_window_handler = self._on_active_window_changed
         event_bus.subscribe(ACTIVE_WINDOW_CHANGED, self._active_window_handler)
 
@@ -245,6 +257,12 @@ class PopupOutsideDismiss:
         for extra, handler_id in zip(self._extra_windows, self._extra_focus_out_ids):
             if extra and handler_id:
                 extra.disconnect(handler_id)
+        for extra, handler_id in zip(self._extra_windows, self._extra_enter_ids):
+            if extra and handler_id:
+                extra.disconnect(handler_id)
+        for extra, handler_id in zip(self._extra_windows, self._extra_leave_ids):
+            if extra and handler_id:
+                extra.disconnect(handler_id)
         self._popup = None
         self._shell_window = None
         self._anchors = ()
@@ -258,19 +276,39 @@ class PopupOutsideDismiss:
         self._anchor_leave_ids = []
         self._extra_windows = ()
         self._extra_focus_out_ids = []
+        self._extra_enter_ids = []
+        self._extra_leave_ids = []
         self._install_grace_until = 0
         self._event_bus = None
         self._active_window_handler = None
 
     def set_extra_windows(self, extra_windows: tuple[Gtk.Window, ...]) -> None:
-        self._extra_windows = extra_windows
-        for extra, handler_id in zip(self._extra_windows, self._extra_focus_out_ids):
+        previous_windows = self._extra_windows
+        previous_handlers = self._extra_focus_out_ids
+        previous_enter_handlers = self._extra_enter_ids
+        previous_leave_handlers = self._extra_leave_ids
+        for extra, handler_id in zip(previous_windows, previous_handlers):
             if extra and handler_id:
                 extra.disconnect(handler_id)
+        for extra, handler_id in zip(previous_windows, previous_enter_handlers):
+            if extra and handler_id:
+                extra.disconnect(handler_id)
+        for extra, handler_id in zip(previous_windows, previous_leave_handlers):
+            if extra and handler_id:
+                extra.disconnect(handler_id)
+        self._extra_windows = extra_windows
         self._extra_focus_out_ids = []
+        self._extra_enter_ids = []
+        self._extra_leave_ids = []
         for extra in extra_windows:
             focus_id = extra.connect("focus-out-event", self._on_focus_out)
             self._extra_focus_out_ids.append(focus_id)
+            self._extra_enter_ids.append(
+                extra.connect("enter-notify-event", self._on_pointer_enter)
+            )
+            self._extra_leave_ids.append(
+                extra.connect("leave-notify-event", self._on_pointer_leave)
+            )
 
     def _cancel_deferred_dismiss(self) -> None:
         if self._deferred_dismiss_source_id:
