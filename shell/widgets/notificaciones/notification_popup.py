@@ -53,11 +53,43 @@ def _grouping_context(snapshot: NotificationSnapshot) -> tuple[str, ...]:
     if desktop:
         context_parts.append(Path(desktop).stem.casefold())
 
+    app_hint = _extract_app_hint(summary, body)
+    if app_hint:
+        context_parts.append(app_hint)
+
     sender = _extract_sender(summary, body, app_name)
     if sender:
         context_parts.append(sender)
 
     return tuple(context_parts)
+
+
+def _extract_app_hint(summary: str, body: str) -> str:
+    haystack = f"{summary} {body}".strip().casefold()
+    if not haystack:
+        return ""
+
+    candidates = (
+        "whatsapp web",
+        "whatsapp",
+        "telegram web",
+        "telegram",
+        "discord",
+        "slack",
+        "messenger",
+        "signal",
+        "teams",
+        "zoom",
+        "skype",
+        "viber",
+        "line",
+        "wechat",
+        "kakao",
+    )
+    for candidate in candidates:
+        if candidate in haystack:
+            return candidate
+    return ""
 
 
 def _extract_sender(summary: str, body: str, app_name: str) -> str:
@@ -69,6 +101,24 @@ def _extract_sender(summary: str, body: str, app_name: str) -> str:
     prefix = app_name.casefold().strip()
     if prefix and normalized.startswith(prefix):
         normalized = normalized[len(prefix):].lstrip(" -:|")
+
+    if ":" in normalized:
+        before = normalized.split(":", 1)[0].strip()
+        words = before.split()
+        if words:
+            last = words[-1]
+            if len(last) > 1 and last not in {"de", "from", "von", "a", "an", "la", "el", "los", "las", "un", "una"}:
+                return last
+
+    separators = (" - ", " – ", " — ", " | ")
+    for sep in separators:
+        idx = normalized.rfind(sep)
+        if idx != -1:
+            candidate = normalized[idx + len(sep):].strip()
+            candidate = candidate.split(":")[0].split("-")[0].strip()
+            words = candidate.split()
+            if words:
+                return words[0].casefold()
 
     separators = (" de ", " from ", " von ")
     for sep in separators:
@@ -541,13 +591,16 @@ class NotificationGroupRow(Gtk.EventBox):
         )
         self._popover: Gtk.Popover | None = None
         self._popover_leave_timeout_id = 0
+        self._hover_opened = False
 
         self.add_events(
             Gdk.EventMask.ENTER_NOTIFY_MASK
             | Gdk.EventMask.LEAVE_NOTIFY_MASK
+            | Gdk.EventMask.POINTER_MOTION_MASK
         )
         self.connect("enter-notify-event", self._on_enter_notify)
         self.connect("leave-notify-event", self._on_leave_notify)
+        self.connect("motion-notify-event", self._on_motion_notify)
         if self._default_action is not None or self._representative.desktop_entry:
             self.connect("button-press-event", self._on_row_clicked)
 
@@ -662,17 +715,31 @@ class NotificationGroupRow(Gtk.EventBox):
         actions.pack_start(dismiss_button, False, False, 0)
         content.pack_start(actions, False, False, 0)
 
-    def _on_enter_notify(self, _widget: Gtk.Widget, _event: Gdk.EventCrossing) -> bool:
+    def _on_enter_notify(self, _widget: Gtk.Widget, event: Gdk.EventCrossing) -> bool:
+        if event.window != self.get_window():
+            return False
         self._cancel_leave_timeout()
         if len(self._group_snapshots) > 1:
+            self._hover_opened = True
             self._open_group_window()
         return False
 
-    def _on_leave_notify(self, _widget: Gtk.Widget, _event: Gdk.EventCrossing) -> bool:
+    def _on_leave_notify(self, _widget: Gtk.Widget, event: Gdk.EventCrossing) -> bool:
+        if event.window != self.get_window():
+            return False
+        self._hover_opened = False
         if self._popover is not None and self._popover.get_visible():
             self._popover_leave_timeout_id = GLib.timeout_add(150, self._leave_popover)
         else:
             self._cancel_leave_timeout()
+        return False
+
+    def _on_motion_notify(self, _widget: Gtk.Widget, event: Gdk.EventMotion) -> bool:
+        if event.window != self.get_window():
+            return False
+        if len(self._group_snapshots) > 1 and not self._hover_opened:
+            self._hover_opened = True
+            self._open_group_window()
         return False
 
     def _on_row_clicked(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:

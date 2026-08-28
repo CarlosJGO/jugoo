@@ -29,6 +29,7 @@ TITLE_POWER_CONFIRM = "Shell Power Confirm"
 TITLE_WORKSPACE_PANEL = "Shell Workspace Panel"
 TITLE_WORKSPACE_AUDIO = "Shell Workspace Audio"
 TITLE_NOTIFICATIONS = "Shell Notifications"
+TITLE_NOTIFICATION_GROUP = "Shell Notification Group"
 TITLE_NOTIFICATION_TOAST = "Shell Notification Toast"
 TITLE_CONTROL_CENTER = "Shell Control Center"
 TITLE_NETWORK_PANEL = "Shell Network Panel"
@@ -305,10 +306,9 @@ def apply_popup_position(window: Gtk.Window, *, title: str, x: int, y: int) -> N
 
 
 def reposition_popup(window: Gtk.Window, *, title: str, x: int, y: int) -> None:
-    if is_wayland_session():
-        _hyprland_move_popup(title, int(x), int(y))
-        return
     window.move(int(x), int(y))
+    if is_wayland_session():
+        schedule_hyprland_popup_move(title, int(x), int(y))
 
 
 def schedule_hyprland_popup_move(title: str, x: int, y: int) -> None:

@@ -261,10 +261,12 @@ class NotificationsWidget(ShellModule):
             on_invoke_action=self._invoke_action,
             on_dismiss=self._dismiss,
             on_open_app=self._open_app,
+            anchor=anchor,
+            popup_window=popup,
         )
-        window.present_group()
-        window.position_left_of(anchor, popup)
         self._group_window = window
+        self._outside_click.set_extra_windows((window,))
+        window.present_group()
 
     def _close_group_window(self) -> None:
         if self._group_window is not None:

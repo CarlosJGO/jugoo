@@ -1081,12 +1081,6 @@ box.notification-group-window-content {
         0 8px 24px rgba(0, 0, 0, 0.50);
 }
 
-scrolledwindow.notification-group-window-scroll {
-    background-color: transparent;
-    border: none;
-    padding: 0;
-}
-
 box.notification-group-window-list {
     background-color: transparent;
     padding: 0;

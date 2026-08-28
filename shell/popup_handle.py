@@ -262,6 +262,16 @@ class PopupOutsideDismiss:
         self._event_bus = None
         self._active_window_handler = None
 
+    def set_extra_windows(self, extra_windows: tuple[Gtk.Window, ...]) -> None:
+        self._extra_windows = extra_windows
+        for extra, handler_id in zip(self._extra_windows, self._extra_focus_out_ids):
+            if extra and handler_id:
+                extra.disconnect(handler_id)
+        self._extra_focus_out_ids = []
+        for extra in extra_windows:
+            focus_id = extra.connect("focus-out-event", self._on_focus_out)
+            self._extra_focus_out_ids.append(focus_id)
+
     def _cancel_deferred_dismiss(self) -> None:
         if self._deferred_dismiss_source_id:
             GLib.source_remove(self._deferred_dismiss_source_id)

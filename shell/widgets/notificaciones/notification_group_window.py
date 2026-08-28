@@ -14,23 +14,21 @@ from gi.repository import Gdk, Gtk, Pango
 
 from ...config import (
     NOTIFICATION_POPUP_ICON_SIZE,
-    NOTIFICATION_POPUP_WIDTH,
     NOTIFICATION_POPUP_LIST_SPACING,
+    NOTIFICATION_POPUP_MAX_HEIGHT,
+    NOTIFICATION_POPUP_WIDTH,
 )
 from ...models import NotificationSnapshot
-from ...popup_handle import present_popup, hide_popup
+from ...popup_handle import hide_popup, present_popup
 from ...servicios.notificaciones.notifications import NotificationService
 from ...ui.notification_icon import apply_notification_icon
 from ...window_identity import (
-    TITLE_NOTIFICATIONS,
     anchor_button_geometry,
     configure_interactive_popup,
     configure_toplevel,
     monitor_containing_point,
-    popup_window_size,
     reposition_popup,
     register_shell_popup,
-    schedule_popup_position,
 )
 from .notification_mini_row import NotificationMiniRow
 
@@ -47,6 +45,8 @@ class NotificationGroupWindow(Gtk.Window):
         on_invoke_action: Callable[[int, str], None],
         on_dismiss: Callable[[int], None],
         on_open_app: Callable[[NotificationSnapshot], None],
+        anchor: Gtk.Widget | None = None,
+        popup_window: Gtk.Window | None = None,
     ) -> None:
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
 
@@ -57,66 +57,77 @@ class NotificationGroupWindow(Gtk.Window):
         self._on_dismiss = on_dismiss
         self._on_open_app = on_open_app
         self._fade_source_id = 0
+        self._popup_window = popup_window
+        self._anchor_widget = anchor
 
         self.set_name("shell-notification-group-window")
         register_shell_popup(self, shell_window)
-        configure_toplevel(self, title=TITLE_NOTIFICATIONS)
+        configure_toplevel(self, title="Shell Notification Group")
         configure_interactive_popup(self)
-        self.set_default_size(NOTIFICATION_POPUP_WIDTH, 320)
-        self.set_size_request(NOTIFICATION_POPUP_WIDTH, 240)
+        self.set_default_size(NOTIFICATION_POPUP_WIDTH, -1)
 
         self.connect("focus-out-event", self._on_focus_out)
         self.connect("focus-in-event", self._on_focus_in)
         self.connect("delete-event", self._on_delete)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        outer.set_size_request(NOTIFICATION_POPUP_WIDTH, -1)
         outer.get_style_context().add_class("notification-group-window-content")
+        outer.set_size_request(NOTIFICATION_POPUP_WIDTH, -1)
         self.add(outer)
-
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scrolled.set_propagate_natural_height(True)
-        scrolled.get_style_context().add_class("notification-group-window-scroll")
-        outer.pack_start(scrolled, False, False, 0)
 
         list_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=NOTIFICATION_POPUP_LIST_SPACING,
         )
         list_box.get_style_context().add_class("notification-group-window-list")
-        scrolled.add(list_box)
+        list_box.set_size_request(NOTIFICATION_POPUP_WIDTH, -1)
+        outer.pack_start(list_box, False, False, 0)
 
         for snapshot in group_snapshots:
             row = NotificationMiniRow(snapshot)
             row.connect("button-press-event", self._on_row_clicked, snapshot)
             list_box.pack_start(row, False, False, 0)
 
-    def position_left_of(self, anchor: Gtk.Widget, popup_window: Gtk.Window) -> None:
-        geometry = anchor_button_geometry(anchor)
-        if geometry is None:
+        if group_snapshots:
+            row_height = 52
+            spacing = NOTIFICATION_POPUP_LIST_SPACING
+            padding = 8
+            total_height = (
+                len(group_snapshots) * row_height
+                + max(0, len(group_snapshots) - 1) * spacing
+                + padding * 2
+            )
+            total_height = min(total_height, NOTIFICATION_POPUP_MAX_HEIGHT + padding * 2)
+            outer.set_size_request(NOTIFICATION_POPUP_WIDTH, max(total_height, 220))
+
+    def position_left_of_popup(
+        self,
+        anchor: Gtk.Widget,
+        popup_window: Gtk.Window,
+    ) -> None:
+        anchor_geometry = anchor_button_geometry(anchor)
+        if anchor_geometry is None:
             return
 
-        popup_width, popup_height = popup_window_size(popup_window)
-        group_width, group_height = popup_window_size(self)
-        if group_width <= 1:
-            group_width = NOTIFICATION_POPUP_WIDTH
-        if group_height <= 1:
-            group_height = 300
+        popup_left = int(popup_window.get_position()[0])
+        popup_top = int(popup_window.get_position()[1])
 
-        margin = 8
-        left = geometry.left - group_width - margin
-        top = geometry.top
+        group_width = NOTIFICATION_POPUP_WIDTH
+        group_height = 220
+        margin = 6
 
-        if left < geometry.left - margin:
-            left = geometry.left - margin
+        left = popup_left - group_width - margin
+        top = popup_top
 
-        monitor = monitor_containing_point(geometry.center_x, geometry.bottom)
+        if left < anchor_geometry.left - margin:
+            left = anchor_geometry.left - margin
+
+        monitor = monitor_containing_point(anchor_geometry.center_x, anchor_geometry.bottom)
         if monitor is not None:
             left = max(monitor.x, min(left, monitor.x + monitor.width - group_width))
             top = max(monitor.y, min(top, monitor.y + monitor.height - group_height))
 
-        reposition_popup(self, title=TITLE_NOTIFICATIONS, x=int(left), y=int(top))
+        self.move(int(left), int(top))
 
     def present_group(self) -> None:
         self.set_opacity(0.0)
@@ -124,6 +135,11 @@ class NotificationGroupWindow(Gtk.Window):
         self.present()
         source_id = GLib.timeout_add(16, self._fade_in_tick)
         self._fade_source_id = source_id
+        if self._popup_window is not None and self._anchor_widget is not None:
+            if self.get_mapped():
+                self.position_left_of_popup(self._anchor_widget, self._popup_window)
+            else:
+                self.connect("map-event", self._on_first_map)
 
     def hide_group(self) -> None:
         if self._fade_source_id:
@@ -131,6 +147,11 @@ class NotificationGroupWindow(Gtk.Window):
             self._fade_source_id = 0
         self.hide()
         self.set_opacity(1.0)
+
+    def _on_first_map(self, _widget: Gtk.Widget, _event: Gdk.EventAny) -> bool:
+        self.disconnect_by_func(self._on_first_map)
+        self.position_left_of_popup(self._anchor_widget, self._popup_window)
+        return False
 
     def _fade_in_tick(self) -> bool:
         next_opacity = min(1.0, self.get_opacity() + 0.20)

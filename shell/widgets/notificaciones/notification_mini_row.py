@@ -25,6 +25,7 @@ class NotificationMiniRow(Gtk.EventBox):
     def __init__(self, snapshot: NotificationSnapshot) -> None:
         super().__init__()
         self._snapshot = snapshot
+        self.set_size_request(-1, 52)
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         row.get_style_context().add_class("notification-mini-row")
@@ -38,6 +39,7 @@ class NotificationMiniRow(Gtk.EventBox):
         icon.get_style_context().add_class("notification-mini-row-icon")
         icon.set_halign(Gtk.Align.CENTER)
         icon.set_valign(Gtk.Align.CENTER)
+        icon.set_size_request(NOTIFICATION_POPUP_ICON_SIZE, NOTIFICATION_POPUP_ICON_SIZE)
         row.pack_start(icon, False, False, 0)
 
         text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
