@@ -181,6 +181,8 @@ class PopupOutsideDismiss:
         self._dismiss_generation: int = 0
         self._event_bus = None
         self._active_window_handler = None
+        self._extra_windows: tuple[Gtk.Window, ...] = ()
+        self._extra_focus_out_ids: list[int] = []
 
     def install(
         self,
@@ -189,6 +191,7 @@ class PopupOutsideDismiss:
         anchor_widgets: tuple[Gtk.Widget, ...],
         on_dismiss: Callable[[], None],
         event_bus,
+        extra_windows: tuple[Gtk.Window, ...] = (),
     ) -> None:
         self.uninstall()
         self._dismiss_generation += 1
@@ -199,6 +202,7 @@ class PopupOutsideDismiss:
         self._popup_title = popup.get_title() or ""
         self._install_grace_until = GLib.get_monotonic_time() + self._INSTALL_GRACE_USEC
         self._event_bus = event_bus
+        self._extra_windows = extra_windows
         self._shell_press_id = shell_window.connect(
             "button-press-event",
             self._on_shell_button_press,
@@ -211,6 +215,9 @@ class PopupOutsideDismiss:
             leave_id = anchor.connect("leave-notify-event", self._on_pointer_leave)
             self._anchor_enter_ids.append((anchor, enter_id))
             self._anchor_leave_ids.append((anchor, leave_id))
+        for extra in extra_windows:
+            focus_id = extra.connect("focus-out-event", self._on_focus_out)
+            self._extra_focus_out_ids.append(focus_id)
         self._active_window_handler = self._on_active_window_changed
         event_bus.subscribe(ACTIVE_WINDOW_CHANGED, self._active_window_handler)
 
@@ -235,6 +242,9 @@ class PopupOutsideDismiss:
             anchor.disconnect(handler_id)
         for anchor, handler_id in self._anchor_leave_ids:
             anchor.disconnect(handler_id)
+        for extra, handler_id in zip(self._extra_windows, self._extra_focus_out_ids):
+            if extra and handler_id:
+                extra.disconnect(handler_id)
         self._popup = None
         self._shell_window = None
         self._anchors = ()
@@ -246,6 +256,8 @@ class PopupOutsideDismiss:
         self._popup_leave_id = None
         self._anchor_enter_ids = []
         self._anchor_leave_ids = []
+        self._extra_windows = ()
+        self._extra_focus_out_ids = []
         self._install_grace_until = 0
         self._event_bus = None
         self._active_window_handler = None
@@ -270,6 +282,9 @@ class PopupOutsideDismiss:
         popup = self._popup
         if popup is not None and pointer_inside_widget(popup):
             return True
+        for extra in self._extra_windows:
+            if pointer_inside_window(extra):
+                return True
         for anchor in self._anchors:
             if pointer_inside_widget(anchor):
                 return True
@@ -309,16 +324,23 @@ class PopupOutsideDismiss:
             return False
         if self._pointer_over_popup_or_anchor():
             return False
+        if self._any_window_has_focus():
+            return False
         self._schedule_deferred_dismiss(restart=False)
+        return False
+
+    def _any_window_has_focus(self) -> bool:
+        if self._popup is not None and self._popup.get_visible() and self._popup.has_focus():
+            return True
+        for extra in self._extra_windows:
+            if extra.get_visible() and extra.has_focus():
+                return True
         return False
 
     def _on_active_window_changed(self, active_window: ActiveWindow) -> None:
         if GLib.get_monotonic_time() < self._install_grace_until:
             return
-        popup = self._popup
-        if popup is None or not popup.get_visible():
-            return
-        if active_window.title == self._popup_title and active_window.address:
+        if self._any_window_has_focus():
             return
         if self._pointer_over_popup_or_anchor():
             return
@@ -332,10 +354,6 @@ class PopupOutsideDismiss:
         return False
 
     def _dismiss_unless_pointer_inside(self) -> bool:
-        popup = self._popup
-        if popup is None or not popup.get_visible():
-            self.uninstall()
-            return False
         if self._pointer_over_popup_or_anchor():
             return False
         self._dismiss()

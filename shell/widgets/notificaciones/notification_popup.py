@@ -43,6 +43,45 @@ _URGENCY_LABELS = {
 }
 
 
+def _grouping_context(snapshot: NotificationSnapshot) -> tuple[str, ...]:
+    app_name = (snapshot.app_name or "").strip().casefold()
+    desktop = (snapshot.desktop_entry or "").strip()
+    summary = (snapshot.summary or "").strip()
+    body = (snapshot.body or "").strip()
+
+    context_parts = [app_name or "application"]
+    if desktop:
+        context_parts.append(Path(desktop).stem.casefold())
+
+    sender = _extract_sender(summary, body, app_name)
+    if sender:
+        context_parts.append(sender)
+
+    return tuple(context_parts)
+
+
+def _extract_sender(summary: str, body: str, app_name: str) -> str:
+    haystack = f"{summary} {body}".strip()
+    if not haystack:
+        return ""
+
+    normalized = haystack.casefold()
+    prefix = app_name.casefold().strip()
+    if prefix and normalized.startswith(prefix):
+        normalized = normalized[len(prefix):].lstrip(" -:|")
+
+    separators = (" de ", " from ", " von ")
+    for sep in separators:
+        idx = normalized.find(sep)
+        if idx != -1:
+            candidate = normalized[idx + len(sep):].strip()
+            candidate = candidate.split(":")[0].split("-")[0].strip()
+            words = candidate.split()
+            if words:
+                return words[0].casefold()
+    return ""
+
+
 def open_notification_app(snapshot: NotificationSnapshot) -> None:
     desktop = snapshot.desktop_entry.strip() if snapshot else ""
     if desktop:
@@ -241,6 +280,9 @@ class NotificationPopup(Gtk.Window):
         on_clear_all: Callable[[], None],
         on_invoke_action: Callable[[int, str], None],
         on_open_app: Callable[[NotificationSnapshot], None],
+        on_open_group_window: Callable[
+            [list[NotificationSnapshot], Gtk.Widget, Gtk.Window], None
+        ],
         on_toggle_paused: Callable[[], None],
         on_toggle_app_sound_mute: Callable[[str], None],
     ) -> None:
@@ -254,6 +296,7 @@ class NotificationPopup(Gtk.Window):
         self._on_clear_all = on_clear_all
         self._on_invoke_action = on_invoke_action
         self._on_open_app = on_open_app
+        self._on_open_group_window = on_open_group_window
         self._on_toggle_paused = on_toggle_paused
         self._on_toggle_app_sound_mute = on_toggle_app_sound_mute
         self._anchor_button: Gtk.Widget | None = None
@@ -364,9 +407,9 @@ class NotificationPopup(Gtk.Window):
 
         self._empty_label.hide()
 
-        groups: dict[str, list[NotificationSnapshot]] = {}
+        groups: dict[tuple[str, ...], list[NotificationSnapshot]] = {}
         for snapshot in snapshots:
-            key = snapshot.app_name.casefold().strip() or "application"
+            key = _grouping_context(snapshot)
             groups.setdefault(key, []).append(snapshot)
 
         grouped_snapshots = sorted(
@@ -388,6 +431,7 @@ class NotificationPopup(Gtk.Window):
                 on_invoke_action=self._on_invoke_action,
                 on_open_app=self._on_open_app,
                 on_toggle_app_sound_mute=self._on_toggle_app_sound_mute,
+                on_open_group_window=self._on_open_group_window,
             )
             self._list_box.pack_start(row, False, False, 0)
 
@@ -460,58 +504,6 @@ class NotificationPopup(Gtk.Window):
         return False
 
 
-class NotificationMiniRow(Gtk.EventBox):
-    """Compact read-only row shown inside the group hover popover."""
-
-    def __init__(self, snapshot: NotificationSnapshot) -> None:
-        super().__init__()
-        self._snapshot = snapshot
-
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        row.get_style_context().add_class("notification-mini-row")
-
-        icon = Gtk.Image()
-        apply_notification_icon(
-            icon,
-            snapshot,
-            pixel_size=NOTIFICATION_POPUP_ICON_SIZE,
-        )
-        icon.get_style_context().add_class("notification-mini-row-icon")
-        icon.set_halign(Gtk.Align.CENTER)
-        icon.set_valign(Gtk.Align.CENTER)
-        row.pack_start(icon, False, False, 0)
-
-        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
-        text_box.set_hexpand(True)
-
-        if snapshot.summary:
-            summary = Gtk.Label(label=snapshot.summary, xalign=0)
-            summary.get_style_context().add_class("notification-mini-row-summary")
-            summary.set_hexpand(True)
-            summary.set_single_line_mode(True)
-            summary.set_ellipsize(Pango.EllipsizeMode.END)
-            text_box.pack_start(summary, False, False, 0)
-
-        if snapshot.body:
-            body = Gtk.Label(label=snapshot.body, xalign=0)
-            body.get_style_context().add_class("notification-mini-row-body")
-            body.set_hexpand(True)
-            body.set_line_wrap(True)
-            body.set_lines(2)
-            body.set_ellipsize(Pango.EllipsizeMode.END)
-            text_box.pack_start(body, False, False, 0)
-
-        timestamp = Gtk.Label(
-            label=_format_timestamp(snapshot.timestamp),
-            xalign=0,
-        )
-        timestamp.get_style_context().add_class("notification-mini-row-time")
-        text_box.pack_start(timestamp, False, False, 0)
-
-        row.pack_start(text_box, True, True, 0)
-        self.add(row)
-
-
 class NotificationGroupRow(Gtk.EventBox):
     """Grouped notification entry inside the popup list."""
 
@@ -526,6 +518,9 @@ class NotificationGroupRow(Gtk.EventBox):
         on_invoke_action: Callable[[int, str], None],
         on_open_app: Callable[[NotificationSnapshot], None],
         on_toggle_app_sound_mute: Callable[[str], None],
+        on_open_group_window: Callable[
+            [list[NotificationSnapshot], Gtk.Widget, Gtk.Window], None
+        ],
     ) -> None:
         super().__init__()
 
@@ -533,6 +528,7 @@ class NotificationGroupRow(Gtk.EventBox):
         self._representative = group_snapshots[0]
         self._on_invoke_action = on_invoke_action
         self._on_open_app = on_open_app
+        self._on_open_group_window = on_open_group_window
         self._default_action = next(
             (
                 action.key
@@ -546,6 +542,10 @@ class NotificationGroupRow(Gtk.EventBox):
         self._popover: Gtk.Popover | None = None
         self._popover_leave_timeout_id = 0
 
+        self.add_events(
+            Gdk.EventMask.ENTER_NOTIFY_MASK
+            | Gdk.EventMask.LEAVE_NOTIFY_MASK
+        )
         self.connect("enter-notify-event", self._on_enter_notify)
         self.connect("leave-notify-event", self._on_leave_notify)
         if self._default_action is not None or self._representative.desktop_entry:
@@ -665,7 +665,7 @@ class NotificationGroupRow(Gtk.EventBox):
     def _on_enter_notify(self, _widget: Gtk.Widget, _event: Gdk.EventCrossing) -> bool:
         self._cancel_leave_timeout()
         if len(self._group_snapshots) > 1:
-            self._show_popover()
+            self._open_group_window()
         return False
 
     def _on_leave_notify(self, _widget: Gtk.Widget, _event: Gdk.EventCrossing) -> bool:
@@ -687,51 +687,15 @@ class NotificationGroupRow(Gtk.EventBox):
         snapshot = self._representative
         if self._default_action is not None:
             self._on_invoke_action(snapshot.id, self._default_action)
+        elif len(self._group_snapshots) > 1:
+            pass
         else:
             self._on_open_app(snapshot)
         return True
 
-    def _show_popover(self) -> None:
-        if self._popover is not None:
-            self._popover.show_all()
-            return
-
-        popover = Gtk.Popover(relative_to=self)
-        popover.get_style_context().add_class("notification-group-popover")
-        popover.set_position(Gtk.PositionType.RIGHT)
-        popover.set_modal(False)
-
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        box.set_border_width(6)
-        for snapshot in self._group_snapshots:
-            box.pack_start(NotificationMiniRow(snapshot), False, False, 0)
-        popover.add(box)
-
-        popover.connect("leave-notify-event", lambda _w, _e: self._schedule_leave_popover())
-        popover.connect("enter-notify-event", lambda _w, _e: self._cancel_leave_timeout() or False)
-        popover.connect("closed", lambda _w: self._on_popover_closed())
-
-        self._popover = popover
-        popover.show_all()
-
-    def _schedule_leave_popover(self) -> bool:
-        self._popover_leave_timeout_id = GLib.timeout_add(150, self._leave_popover)
-        return False
-
-    def _leave_popover(self) -> bool:
-        if self._popover is not None:
-            self._popover.hide()
-        self._popover_leave_timeout_id = 0
-        return False
-
-    def _cancel_leave_timeout(self) -> None:
-        if self._popover_leave_timeout_id:
-            GLib.source_remove(self._popover_leave_timeout_id)
-            self._popover_leave_timeout_id = 0
-
-    def _on_popover_closed(self) -> None:
-        self._popover = None
-        self._popover_leave_timeout_id = 0
+    def _open_group_window(self) -> None:
+        if self._on_open_group_window is not None:
+            self._on_open_group_window(self._group_snapshots, self, self.get_toplevel())
 
 
 def _format_timestamp(timestamp: float) -> str:

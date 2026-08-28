@@ -84,6 +84,7 @@ class NotificationsWidget(ShellModule):
             on_mark_read=self._mark_read,
         )
         self._outside_click = PopupOutsideDismiss()
+        self._group_window: Gtk.Window | None = None
 
         self._event_bus.subscribe(NOTIFICATIONS_CHANGED, self._on_notifications_changed)
         self._event_bus.subscribe(NOTIFICATION_RECEIVED, self._on_notification_received)
@@ -110,6 +111,7 @@ class NotificationsWidget(ShellModule):
             on_clear_all=self._clear_all,
             on_invoke_action=self._invoke_action,
             on_open_app=self._open_app,
+            on_open_group_window=self._open_group_window,
             on_toggle_paused=self._toggle_paused,
             on_toggle_app_sound_mute=self._toggle_app_sound_mute,
         )
@@ -121,6 +123,7 @@ class NotificationsWidget(ShellModule):
         self._event_bus.unsubscribe(NOTIFICATIONS_PAUSED_CHANGED, self._on_paused_changed)
         self._event_bus.unsubscribe(NOTIFICATIONS_SOUND_MUTE_CHANGED, self._on_sound_mute_changed)
         self.close_popup()
+        self._close_group_window()
         self._toast_manager.destroy()
 
     def _on_notifications_changed(self, _snapshots: object) -> None:
@@ -202,16 +205,21 @@ class NotificationsWidget(ShellModule):
         self._ensure_shell_press_handler()
         popup = self._popup.get()
         popup.open_for(self._button)
+        extra_windows = ()
+        if self._group_window is not None:
+            extra_windows = (self._group_window,)
         self._outside_click.install(
             popup,
             self._shell_window,
             (self._button,),
             self.close_popup,
             self._event_bus,
+            extra_windows=extra_windows,
         )
 
     def close_popup(self) -> None:
         self._outside_click.uninstall()
+        self._close_group_window()
         popup = self._popup.maybe
         if popup is not None:
             popup.close_popup()
@@ -235,6 +243,34 @@ class NotificationsWidget(ShellModule):
         from ..notificaciones.notification_popup import open_notification_app
         open_notification_app(snapshot)
 
+    def _open_group_window(
+        self,
+        group_snapshots: list[NotificationSnapshot],
+        anchor: Gtk.Widget,
+        popup: Gtk.Window,
+    ) -> None:
+        from ..notificaciones.notification_group_window import NotificationGroupWindow
+
+        if self._group_window is not None:
+            self._group_window.hide_group()
+
+        window = NotificationGroupWindow(
+            self._shell_window,
+            self._service,
+            group_snapshots,
+            on_invoke_action=self._invoke_action,
+            on_dismiss=self._dismiss,
+            on_open_app=self._open_app,
+        )
+        window.present_group()
+        window.position_left_of(anchor, popup)
+        self._group_window = window
+
+    def _close_group_window(self) -> None:
+        if self._group_window is not None:
+            self._group_window.hide_group()
+            self._group_window = None
+
     def _toggle_paused(self) -> None:
         self._service.toggle_paused()
 
@@ -252,6 +288,8 @@ class NotificationsWidget(ShellModule):
             return False
 
         if pointer_inside_widget(self._button) or popup.pointer_is_inside():
+            return False
+        if self._group_window is not None and pointer_inside_window(self._group_window):
             return False
 
         self.close_popup()
