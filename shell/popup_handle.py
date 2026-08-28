@@ -372,8 +372,6 @@ class PopupOutsideDismiss:
             return False
         if self._pointer_over_popup_or_anchor():
             return False
-        if self._any_window_has_focus():
-            return False
         self._schedule_deferred_dismiss(restart=False)
         return False
 
@@ -402,7 +400,7 @@ class PopupOutsideDismiss:
         return False
 
     def _dismiss_unless_pointer_inside(self) -> bool:
-        if self._pointer_over_popup_or_anchor():
+        if self._pointer_over_popup_or_anchor() or self._any_window_has_focus():
             return False
         self._dismiss()
         return False

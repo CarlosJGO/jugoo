@@ -22,7 +22,12 @@ if TYPE_CHECKING:
 class NotificationMiniRow(Gtk.EventBox):
     """Compact read-only row shown inside the group hover popover."""
 
-    def __init__(self, snapshot: NotificationSnapshot) -> None:
+    def __init__(
+        self,
+        snapshot: NotificationSnapshot,
+        *,
+        on_dismiss: Callable[[int], None],
+    ) -> None:
         super().__init__()
         self._snapshot = snapshot
         self.set_size_request(-1, 52)
@@ -72,4 +77,16 @@ class NotificationMiniRow(Gtk.EventBox):
         text_box.pack_start(timestamp, False, False, 0)
 
         row.pack_start(text_box, True, True, 0)
+
+        dismiss_button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
+        dismiss_button.set_tooltip_text("Eliminar")
+        dismiss_button.get_style_context().add_class("notification-item-action")
+        dismiss_button.add(
+            Gtk.Image.new_from_icon_name("window-close-symbolic", Gtk.IconSize.MENU)
+        )
+        dismiss_button.connect(
+            "clicked",
+            lambda _button, notification_id=snapshot.id: on_dismiss(notification_id),
+        )
+        row.pack_start(dismiss_button, False, False, 0)
         self.add(row)

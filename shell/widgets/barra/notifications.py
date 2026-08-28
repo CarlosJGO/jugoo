@@ -112,6 +112,8 @@ class NotificationsWidget(ShellModule):
             on_invoke_action=self._invoke_action,
             on_open_app=self._open_app,
             on_open_group_window=self._open_group_window,
+            on_mark_group_read=self._mark_group_read,
+            on_dismiss_group=self._dismiss_group,
             on_toggle_paused=self._toggle_paused,
             on_toggle_app_sound_mute=self._toggle_app_sound_mute,
         )
@@ -227,11 +229,19 @@ class NotificationsWidget(ShellModule):
     def _mark_read(self, notification_id: int) -> None:
         self._service.mark_read(notification_id)
 
+    def _mark_group_read(self, snapshots: list[NotificationSnapshot]) -> None:
+        for snapshot in snapshots:
+            self._service.mark_read(snapshot.id)
+
     def _mark_all_read(self) -> None:
         self._service.mark_all_read()
 
     def _dismiss(self, notification_id: int) -> None:
         self._service.dismiss(notification_id)
+
+    def _dismiss_group(self, snapshots: list[NotificationSnapshot]) -> None:
+        for snapshot in snapshots:
+            self._service.dismiss(snapshot.id)
 
     def _clear_all(self) -> None:
         self._service.dismiss_all()

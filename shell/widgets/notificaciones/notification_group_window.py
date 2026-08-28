@@ -94,7 +94,7 @@ class NotificationGroupWindow(Gtk.Window):
         scrolled.add(list_box)
 
         for snapshot in group_snapshots:
-            row = NotificationMiniRow(snapshot)
+            row = NotificationMiniRow(snapshot, on_dismiss=self._on_dismiss)
             row.connect("button-press-event", self._on_row_clicked, snapshot)
             list_box.pack_start(row, False, False, 0)
 
@@ -182,11 +182,6 @@ class NotificationGroupWindow(Gtk.Window):
     ) -> bool:
         if event.button != 1:
             return False
-        target = event.widget
-        while target is not None and target != _widget:
-            if isinstance(target, Gtk.Button):
-                return False
-            target = target.get_parent()
         default = next(
             (action.key for action in snapshot.actions if action.key == "default"),
             None,

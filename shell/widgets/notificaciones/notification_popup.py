@@ -264,6 +264,8 @@ class NotificationPopup(Gtk.Window):
         on_open_group_window: Callable[
             [list[NotificationSnapshot], Gtk.Widget, Gtk.Window], None
         ],
+        on_mark_group_read: Callable[[list[NotificationSnapshot]], None],
+        on_dismiss_group: Callable[[list[NotificationSnapshot]], None],
         on_toggle_paused: Callable[[], None],
         on_toggle_app_sound_mute: Callable[[str], None],
     ) -> None:
@@ -278,6 +280,8 @@ class NotificationPopup(Gtk.Window):
         self._on_invoke_action = on_invoke_action
         self._on_open_app = on_open_app
         self._on_open_group_window = on_open_group_window
+        self._on_mark_group_read = on_mark_group_read
+        self._on_dismiss_group = on_dismiss_group
         self._on_toggle_paused = on_toggle_paused
         self._on_toggle_app_sound_mute = on_toggle_app_sound_mute
         self._anchor_button: Gtk.Widget | None = None
@@ -413,8 +417,8 @@ class NotificationPopup(Gtk.Window):
                 group,
                 app_key=app_key,
                 app_sound_muted=self._service.is_app_sound_muted(app_key),
-                on_mark_read=self._on_mark_read,
-                on_dismiss=self._on_dismiss,
+                on_mark_group_read=self._on_mark_group_read,
+                on_dismiss_group=self._on_dismiss_group,
                 on_invoke_action=self._on_invoke_action,
                 on_open_app=self._on_open_app,
                 on_toggle_app_sound_mute=self._on_toggle_app_sound_mute,
@@ -514,8 +518,8 @@ class NotificationGroupRow(Gtk.EventBox):
         *,
         app_key: str,
         app_sound_muted: bool,
-        on_mark_read: Callable[[int], None],
-        on_dismiss: Callable[[int], None],
+        on_mark_group_read: Callable[[list[NotificationSnapshot]], None],
+        on_dismiss_group: Callable[[list[NotificationSnapshot]], None],
         on_invoke_action: Callable[[int, str], None],
         on_open_app: Callable[[NotificationSnapshot], None],
         on_toggle_app_sound_mute: Callable[[str], None],
@@ -530,6 +534,8 @@ class NotificationGroupRow(Gtk.EventBox):
         self._on_invoke_action = on_invoke_action
         self._on_open_app = on_open_app
         self._on_open_group_window = on_open_group_window
+        self._on_mark_group_read = on_mark_group_read
+        self._on_dismiss_group = on_dismiss_group
         self._default_action = next(
             (
                 action.key
@@ -649,7 +655,7 @@ class NotificationGroupRow(Gtk.EventBox):
             )
             read_button.connect(
                 "clicked",
-                lambda _btn, nid=self._representative.id: on_mark_read(nid),
+                lambda _btn: on_mark_group_read(group_snapshots),
             )
             actions.pack_start(read_button, False, False, 0)
 
@@ -661,7 +667,7 @@ class NotificationGroupRow(Gtk.EventBox):
         )
         dismiss_button.connect(
             "clicked",
-            lambda _btn, nid=self._representative.id: on_dismiss(nid),
+            lambda _btn: on_dismiss_group(group_snapshots),
         )
         actions.pack_start(dismiss_button, False, False, 0)
         content.pack_start(actions, False, False, 0)
@@ -693,11 +699,6 @@ class NotificationGroupRow(Gtk.EventBox):
     def _on_row_clicked(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
         if event.button != 1:
             return False
-        target = event.widget
-        while target is not None and target != self:
-            if isinstance(target, Gtk.Button):
-                return False
-            target = target.get_parent()
 
         snapshot = self._representative
         if self._default_action is not None:
