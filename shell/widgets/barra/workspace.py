@@ -26,6 +26,7 @@ from ...models import (
     Window,
     Workspace,
     WorkspaceAudioState,
+    reorder_workspace_order,
 )
 
 WORKSPACE_CHANGED = "workspace_changed"
@@ -234,6 +235,9 @@ class WorkspaceWidget(Gtk.Box):
         self._event_bus = event_bus
         self.buttons: dict[int, WorkspaceButton] = {}
         self._audio_snapshot: AudioSnapshot | None = None
+        self._current_workspaces: tuple[Workspace, ...] = ()
+        self._manual_order: tuple[int, ...] = ()
+        self._drag_targets = [Gtk.TargetEntry.new("text/plain", Gtk.TargetFlags.SAME_APP, 0)]
         self.get_style_context().add_class("workspace-strip")
 
         self._event_bus.subscribe(WORKSPACE_CHANGED, self._on_workspace_changed)
@@ -243,7 +247,9 @@ class WorkspaceWidget(Gtk.Box):
         self.connect("destroy", self._on_destroy)
 
     def render(self, workspaces: Iterable[Workspace]) -> None:
-        workspaces = tuple(workspaces)
+        workspaces = self._apply_manual_order(tuple(workspaces))
+        self._current_workspaces = workspaces
+        self._manual_order = tuple(workspace.id for workspace in workspaces)
         for position, workspace in enumerate(workspaces):
             button = self._button_for(workspace.id)
             button.update(workspace)
@@ -259,6 +265,43 @@ class WorkspaceWidget(Gtk.Box):
         if self._audio_snapshot is not None:
             GLib.idle_add(self._apply_audio_snapshot, self._audio_snapshot)
 
+    def _apply_manual_order(self, workspaces: tuple[Workspace, ...]) -> tuple[Workspace, ...]:
+        ids = {workspace.id for workspace in workspaces}
+        if not self._manual_order:
+            return workspaces
+        ordered_ids = [workspace_id for workspace_id in self._manual_order if workspace_id in ids]
+        for workspace in workspaces:
+            if workspace.id not in ordered_ids:
+                ordered_ids.append(workspace.id)
+        lookup = {workspace.id: workspace for workspace in workspaces}
+        return tuple(lookup[workspace_id] for workspace_id in ordered_ids)
+
+    def _reorder_workspace_block(self, source_id: int, target_id: int) -> None:
+        if source_id == target_id:
+            return
+        self._manual_order = tuple(
+            workspace.id
+            for workspace in reorder_workspace_order(
+                tuple(self._current_workspaces),
+                source_id,
+                target_id,
+            )
+        )
+        self.render(self._current_workspaces)
+
+    def _on_drag_data_get(self, widget: Gtk.Widget, _context: Gdk.DragContext, selection_data: Gtk.SelectionData, _info: int, _time: int, workspace_id: int) -> None:
+        selection_data.set_text(str(workspace_id), -1)
+
+    def _on_drag_data_received(self, widget: Gtk.Widget, _context: Gdk.DragContext, _x: int, _y: int, selection_data: Gtk.SelectionData, _info: int, _time: int, target_id: int) -> None:
+        text = selection_data.get_text()
+        if text is None:
+            return
+        try:
+            source_id = int(text)
+        except ValueError:
+            return
+        self._reorder_workspace_block(source_id, target_id)
+
     def get_button(self, workspace_id: int) -> WorkspaceButton | None:
         return self.buttons.get(workspace_id)
 
@@ -272,6 +315,12 @@ class WorkspaceWidget(Gtk.Box):
             )
             button.connect("workspace-entered", self._on_workspace_entered)
             button.connect("workspace-left", self._on_workspace_left)
+            button.drag_source_set(Gdk.ModifierType.BUTTON1_MASK, self._drag_targets, Gdk.DragAction.MOVE)
+            button.drag_source_add_text_targets()
+            button.drag_dest_set(Gtk.DestDefaults.MOTION | Gtk.DestDefaults.HIGHLIGHT, self._drag_targets, Gdk.DragAction.MOVE)
+            button.drag_dest_add_text_targets()
+            button.connect("drag-data-get", self._on_drag_data_get, workspace_id)
+            button.connect("drag-data-received", self._on_drag_data_received, workspace_id)
             self.buttons[workspace_id] = button
             self.pack_start(button, False, False, 0)
         return button

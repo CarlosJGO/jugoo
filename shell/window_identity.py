@@ -35,6 +35,7 @@ TITLE_CONTROL_CENTER = "Shell Control Center"
 TITLE_NETWORK_PANEL = "Shell Network Panel"
 TITLE_MEDIA_POPUP = "Shell Media Popup"
 TITLE_VOLUME_OSD = "Shell Volume OSD"
+TITLE_CLOCK_CALENDAR = "Shell Clock Calendar"
 
 # Interactive popups that keep keyboard focus on purpose:
 # - Control Center / Network: WiFi password entry

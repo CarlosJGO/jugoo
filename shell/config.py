@@ -37,7 +37,7 @@ WORKSPACE_POPUP_OFFSET = 6
 AUDIO_POLL_INTERVAL_SEC = 0.5
 
 # Clock display formats (strftime).
-CLOCK_TIME_FORMAT = "%H:%M"
+CLOCK_TIME_FORMAT = "%I:%M %p"
 CLOCK_DATE_FORMAT = "%a · %d %b"
 
 # System statistics module. Thermal thresholds live in shell/servicios/sistema/system.py.

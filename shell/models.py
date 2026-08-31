@@ -363,6 +363,28 @@ class NotificationSnapshot:
     desktop_entry: str = ""
 
 
+def reorder_workspace_order(
+    workspaces: Sequence[Workspace],
+    source_id: int,
+    target_id: int,
+) -> tuple[Workspace, ...]:
+    """Move a workspace block to a new position while keeping the IDs attached to each block."""
+    if source_id == target_id:
+        return tuple(workspaces)
+
+    ordered = list(workspaces)
+    source_index = next((index for index, workspace in enumerate(ordered) if workspace.id == source_id), None)
+    target_index = next((index for index, workspace in enumerate(ordered) if workspace.id == target_id), None)
+    if source_index is None or target_index is None:
+        return tuple(workspaces)
+
+    workspace = ordered.pop(source_index)
+    if source_index < target_index:
+        target_index -= 1
+    ordered.insert(target_index, workspace)
+    return tuple(ordered)
+
+
 def compose_workspaces(
     records: Iterable[WorkspaceRecord],
     windows: Iterable[Window],
