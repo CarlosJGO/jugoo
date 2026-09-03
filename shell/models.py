@@ -31,6 +31,14 @@ class Workspace:
 
 
 @dataclass(frozen=True)
+class WorkspaceBlock:
+    """Visual group of consecutive workspaces; workspace IDs and contents stay unchanged."""
+
+    block_index: int
+    workspaces: tuple[Workspace, ...]
+
+
+@dataclass(frozen=True)
 class WorkspaceRecord:
     """Hyprland's workspace metadata before it is composed for display."""
 
@@ -318,6 +326,8 @@ class NetworkSnapshot:
     wireless_enabled: bool = False
     wireless_hardware_enabled: bool = True
     wifi_access_points: tuple[WifiAccessPointSnapshot, ...] = ()
+    wifi_connection_target: str = ""
+    wifi_connection_error: str = ""
     hotspot: HotspotSnapshot = field(default_factory=HotspotSnapshot.empty)
 
     @staticmethod
@@ -330,6 +340,8 @@ class NetworkSnapshot:
             wireless_enabled=False,
             wireless_hardware_enabled=True,
             wifi_access_points=(),
+            wifi_connection_target="",
+            wifi_connection_error="",
             hotspot=HotspotSnapshot.empty(),
         )
 
@@ -382,6 +394,51 @@ def reorder_workspace_order(
     if source_index < target_index:
         target_index -= 1
     ordered.insert(target_index, workspace)
+    return tuple(ordered)
+
+
+def compose_workspace_blocks(
+    workspaces: Iterable[Workspace],
+    workspaces_per_block: int,
+) -> tuple[WorkspaceBlock, ...]:
+    """Group regular workspaces by their stable Hyprland IDs."""
+    if workspaces_per_block < 1:
+        raise ValueError("workspaces_per_block must be positive")
+    grouped: dict[int, list[Workspace]] = {}
+    for workspace in workspaces:
+        if workspace.is_special or workspace.id < 1:
+            continue
+        block_index = (workspace.id - 1) // workspaces_per_block
+        grouped.setdefault(block_index, []).append(workspace)
+    return tuple(
+        WorkspaceBlock(index, tuple(grouped[index]))
+        for index in sorted(grouped)
+    )
+
+
+def swap_workspace_blocks(
+    blocks: Sequence[WorkspaceBlock],
+    source_index: int,
+    target_index: int,
+) -> tuple[WorkspaceBlock, ...]:
+    """Swap complete block objects without changing their workspace contents."""
+    if source_index == target_index:
+        return tuple(blocks)
+    ordered = list(blocks)
+    source_position = next(
+        (position for position, block in enumerate(ordered) if block.block_index == source_index),
+        None,
+    )
+    target_position = next(
+        (position for position, block in enumerate(ordered) if block.block_index == target_index),
+        None,
+    )
+    if source_position is None or target_position is None:
+        return tuple(blocks)
+    ordered[source_position], ordered[target_position] = (
+        ordered[target_position],
+        ordered[source_position],
+    )
     return tuple(ordered)
 
 

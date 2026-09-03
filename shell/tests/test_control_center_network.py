@@ -18,6 +18,7 @@ from shell.servicios.red.network import (
     NetworkService,
     _decode_ssid,
     _wifi_connection_settings_variant,
+    _wifi_settings_with_password,
     compose_network_snapshot,
     read_wireless_radio_state,
     wifi_scan_allowed,
@@ -189,6 +190,28 @@ def test_wifi_connection_settings_variant_includes_security() -> None:
     assert _decode_ssid(ssid) == "Cafe"
 
 
+def test_wifi_settings_with_password_preserves_profile_and_updates_security() -> None:
+    settings = {
+        "connection": {
+            "id": GLib.Variant("s", "Cafe"),
+            "uuid": GLib.Variant("s", "profile-uuid"),
+        },
+        "802-11-wireless": {
+            "ssid": GLib.Variant("ay", b"Cafe"),
+            "mode": GLib.Variant("s", "infrastructure"),
+        },
+    }
+
+    updated = _wifi_settings_with_password(settings, "new-secret")
+    unpacked = updated.unpack()
+
+    assert unpacked["connection"]["uuid"] == "profile-uuid"
+    assert _decode_ssid(unpacked["802-11-wireless"]["ssid"]) == "Cafe"
+    security = unpacked["802-11-wireless-security"]
+    assert security["key-mgmt"] == "wpa-psk"
+    assert security["psk"] == "new-secret"
+
+
 def test_network_section_refresh_updates_ethernet_labels() -> None:
     from shell.widgets.centro_control.network_section import ControlCenterNetworkSection
 
@@ -214,6 +237,63 @@ def test_network_section_refresh_updates_ethernet_labels() -> None:
     section.refresh(snapshot)
     assert "Conectado" in section._ethernet_status.get_text()
     assert "192.168.1.9" in section._ethernet_details.get_text()
+
+
+def test_network_section_shows_password_row_for_secured_wifi() -> None:
+    from shell.widgets.centro_control.network_section import ControlCenterNetworkSection
+
+    service = NetworkService(EventBus())
+    section = ControlCenterNetworkSection(
+        service,
+        on_toggle_ethernet=lambda: None,
+        on_toggle_wireless=lambda _enabled: None,
+        on_request_wifi_scan=lambda: None,
+        on_connect_wifi=lambda *_args: None,
+        on_disconnect_wifi=lambda: None,
+        on_toggle_hotspot=lambda *_args: None,
+        on_apply_hotspot=lambda *_args: None,
+    )
+    access_point = WifiAccessPointSnapshot(
+        path="/ap/secured",
+        ssid="Secure Wi-Fi",
+        strength=80,
+        secured=True,
+        frequency_mhz=2412,
+    )
+
+    section._on_wifi_row_connect(access_point)
+
+    assert section._wifi_password_row.get_visible() is True
+    assert section._pending_ap_path == "/ap/secured"
+
+
+def test_network_section_shows_wifi_connection_error() -> None:
+    from shell.widgets.centro_control.network_section import ControlCenterNetworkSection
+
+    service = NetworkService(EventBus())
+    section = ControlCenterNetworkSection(
+        service,
+        on_toggle_ethernet=lambda: None,
+        on_toggle_wireless=lambda _enabled: None,
+        on_request_wifi_scan=lambda: None,
+        on_connect_wifi=lambda *_args: None,
+        on_disconnect_wifi=lambda: None,
+        on_toggle_hotspot=lambda *_args: None,
+        on_apply_hotspot=lambda *_args: None,
+    )
+    snapshot = compose_network_snapshot(
+        (_iface(interface="wlan0", device_type="wifi", state="failed"),),
+        connectivity=NetworkConnectivitySnapshot(level="none"),
+        wireless_enabled=True,
+        wifi_connection_target="Home",
+        wifi_connection_error="No se pudo conectar a Home. Comprueba la contraseña.",
+    )
+
+    section.refresh(snapshot)
+
+    assert section._wifi_status.get_text() == (
+        "No se pudo conectar a Home. Comprueba la contraseña."
+    )
 
 
 def test_hotspot_section_refresh_distinguishes_sharing_from_active() -> None:
@@ -436,7 +516,10 @@ if __name__ == "__main__":
     test_read_wireless_radio_state_from_nm_proxy()
     test_set_wireless_enabled_uses_dbus_properties_set()
     test_wifi_connection_settings_variant_includes_security()
+    test_wifi_settings_with_password_preserves_profile_and_updates_security()
     test_network_section_refresh_updates_ethernet_labels()
+    test_network_section_shows_password_row_for_secured_wifi()
+    test_network_section_shows_wifi_connection_error()
     test_hotspot_section_refresh_distinguishes_sharing_from_active()
     test_network_panel_popup_uses_network_view()
     test_full_control_center_popup_uses_full_view()

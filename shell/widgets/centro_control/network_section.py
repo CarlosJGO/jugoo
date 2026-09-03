@@ -149,8 +149,8 @@ class ControlCenterNetworkSection(ShellModule):
         self._wifi_password_button.connect("clicked", self._on_wifi_password_connect)
         password_row.pack_start(self._wifi_password_button, False, False, 0)
         self._wifi_password_row = password_row
-        self._wifi_password_row.set_no_show_all(True)
         box.pack_start(self._wifi_password_row, False, False, 0)
+        self._wifi_password_row.hide()
         return box
 
     def _sync_ethernet(self, snapshot: NetworkSnapshot) -> None:
@@ -208,6 +208,10 @@ class ControlCenterNetworkSection(ShellModule):
             self._wifi_status.set_text("Wi-Fi desactivado")
         elif wifi is None:
             self._wifi_status.set_text("Sin adaptador Wi-Fi gestionado")
+        elif snapshot.wifi_connection_error:
+            self._wifi_status.set_text(snapshot.wifi_connection_error)
+        elif snapshot.wifi_connection_target and wifi.state in {"connecting", "failed"}:
+            self._wifi_status.set_text(f"Conectando a {snapshot.wifi_connection_target}…")
         elif wifi.state == "connected":
             ssid = wifi.connection_name or wifi.interface
             self._wifi_status.set_text(f"Conectado a {ssid}")
@@ -284,9 +288,13 @@ class ControlCenterNetworkSection(ShellModule):
         self._on_toggle_wireless(switch.get_active())
 
     def _on_wifi_row_connect(self, access_point: WifiAccessPointSnapshot) -> None:
+        self._wifi_status.set_text(f"Preparando conexión a {access_point.ssid}…")
         if access_point.secured:
             self._pending_ap_path = access_point.path
             self._wifi_password_entry.set_text("")
+            self._wifi_password_entry.set_placeholder_text(
+                f"Contraseña de {access_point.ssid}",
+            )
             self._wifi_password_row.show_all()
             self._wifi_password_entry.grab_focus()
             return
@@ -297,6 +305,7 @@ class ControlCenterNetworkSection(ShellModule):
     def _on_wifi_password_connect(self, *_args) -> None:
         if self._pending_ap_path is None:
             return
+        self._wifi_status.set_text("Conectando…")
         self._on_connect_wifi(
             self._pending_ap_path,
             self._wifi_password_entry.get_text(),

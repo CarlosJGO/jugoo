@@ -12,6 +12,7 @@ import threading
 from typing import Any
 
 from ...eventbus import EventBus
+from ...config import WORKSPACES_PER_BLOCK
 from ...icons import DESKTOP_ICON, application_for_window, icon_for_window
 from ...models import (
     ActiveWindow,
@@ -26,6 +27,7 @@ from ...models import (
 
 WORKSPACE_CHANGED = "workspace_changed"
 WORKSPACE_REQUESTED = "workspace_requested"
+WORKSPACE_REORDER_REQUESTED = "workspace_reorder_requested"
 ACTIVE_WINDOW_CHANGED = "active_window_changed"
 WINDOW_OPENED = "window_opened"
 WINDOW_CLOSED = "window_closed"
@@ -56,6 +58,11 @@ class HyprlandService:
             self._on_workspace_requested,
             on_main=False,
         )
+        self._event_bus.subscribe(
+            WORKSPACE_REORDER_REQUESTED,
+            self._on_workspace_reorder_requested,
+            on_main=False,
+        )
 
     @property
     def snapshot(self) -> HyprlandSnapshot | None:
@@ -75,6 +82,10 @@ class HyprlandService:
     def close(self) -> None:
         self._stop_event.set()
         self._event_bus.unsubscribe(WORKSPACE_REQUESTED, self._on_workspace_requested)
+        self._event_bus.unsubscribe(
+            WORKSPACE_REORDER_REQUESTED,
+            self._on_workspace_reorder_requested,
+        )
         with self._socket_lock:
             if self._socket is not None:
                 try:
@@ -113,6 +124,114 @@ class HyprlandService:
         with self._command_threads_lock:
             self._command_threads.add(command_thread)
         command_thread.start()
+
+    def _on_workspace_reorder_requested(self, payload: Any) -> None:
+        """Swap windows between two normal workspace blocks off GTK's thread."""
+        if self._stop_event.is_set() or not isinstance(payload, dict):
+            return
+        try:
+            source_block = int(payload["source_block"])
+            target_block = int(payload["target_block"])
+        except (KeyError, TypeError, ValueError):
+            return
+        if source_block < 0 or target_block < 0 or source_block == target_block:
+            return
+
+        def worker() -> None:
+            try:
+                self._swap_workspace_block_windows(source_block, target_block)
+            except (HyprlandError, TypeError, ValueError) as error:
+                print(f"shell: {error}")
+            finally:
+                with self._command_threads_lock:
+                    self._command_threads.discard(threading.current_thread())
+
+        command_thread = threading.Thread(
+            target=worker,
+            name="hyprland-workspace-block-swap",
+            daemon=True,
+        )
+        with self._command_threads_lock:
+            self._command_threads.add(command_thread)
+        command_thread.start()
+
+    def _swap_workspace_block_windows(self, source_block: int, target_block: int) -> None:
+        source_start = source_block * WORKSPACES_PER_BLOCK + 1
+        target_start = target_block * WORKSPACES_PER_BLOCK + 1
+        source_ids = tuple(
+            source_start + offset for offset in range(WORKSPACES_PER_BLOCK)
+        )
+        target_ids = tuple(
+            target_start + offset for offset in range(WORKSPACES_PER_BLOCK)
+        )
+        destinations = dict(zip(source_ids, target_ids))
+        destinations.update(zip(target_ids, source_ids))
+
+        clients = self._json("clients")
+        print("BLOCK SWAP")
+        print("source block:", source_block)
+        print("target block:", target_block)
+        print("source workspaces:", source_ids)
+        print("target workspaces:", target_ids)
+        print("windows before:", self._workspace_client_map(clients))
+        moving_clients: list[tuple[str, int, int]] = []
+        for client in clients:
+            workspace_id = int((client.get("workspace") or {}).get("id", 0))
+            destination_id = destinations.get(workspace_id)
+            address = str(client.get("address", ""))
+            if destination_id is not None and address:
+                moving_clients.append((address, workspace_id, destination_id))
+        if not moving_clients:
+            return
+
+        highest_workspace_id = max(
+            [source_start, target_start]
+            + [int((client.get("workspace") or {}).get("id", 0)) for client in clients],
+        )
+        temporary_base = highest_workspace_id + 1000
+        print("temporary workspace base:", temporary_base)
+        temporary_destinations: list[tuple[str, int]] = []
+        for offset, (address, workspace_id, destination_id) in enumerate(moving_clients, 1):
+            temporary_id = temporary_base + offset
+            print("moving:", address, "WS", workspace_id, "-> temp", temporary_id)
+            self._dispatch_lua(
+                'hl.dsp.window.move({'
+                f'window="address:{address}", workspace="{temporary_id}"'
+                '})'
+            )
+            temporary_destinations.append((address, destination_id))
+
+        print("windows after temporary phase:", self._workspace_client_map(self._json("clients")))
+
+        for address, destination_id in temporary_destinations:
+            print("moving:", address, "temp -> WS", destination_id)
+            self._dispatch_lua(
+                'hl.dsp.window.move({'
+                f'window="address:{address}", workspace="{destination_id}"'
+                '})'
+            )
+        final_clients = self._json("clients")
+        print("windows after:", self._workspace_client_map(final_clients))
+        print(
+            "temporary clients:",
+            [
+                client.get("address")
+                for client in final_clients
+                if int((client.get("workspace") or {}).get("id", 0)) > temporary_base
+            ],
+        )
+
+    @staticmethod
+    def _workspace_client_map(clients: Any) -> dict[int, list[str]]:
+        result: dict[int, list[str]] = {}
+        if not isinstance(clients, list):
+            return result
+        for client in clients:
+            workspace_id = int((client.get("workspace") or {}).get("id", 0))
+            address = str(client.get("address", ""))
+            if address:
+                result.setdefault(workspace_id, []).append(address)
+        return result
 
     def _handle_workspace_requested(self, workspace_id: Any) -> None:
         try:

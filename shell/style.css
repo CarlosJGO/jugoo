@@ -215,6 +215,15 @@ label.shell-text-muted {
     padding: 5px 10px;
 }
 
+eventbox.workspace-block {
+    border-radius: 10px;
+    padding: 1px;
+}
+
+eventbox.workspace-block:hover {
+    background-color: @shell_hover_bg;
+}
+
 button.workspace-button {
     background: transparent;
     border: 0;
@@ -227,6 +236,22 @@ button.workspace-button {
 
 button.workspace-button:hover {
     background-color: @shell_hover_bg;
+}
+
+button.workspace-button.dragging {
+    background-color: @shell_accent_soft;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+button.workspace-button.drag-ghost {
+    background-color: @shell_accent_soft;
+    border: 1px solid @shell_accent;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+button.workspace-button.drop-target {
+    background-color: @shell_accent_soft;
+    box-shadow: inset 0 -3px 0 @shell_accent;
 }
 
 label.workspace-dot {

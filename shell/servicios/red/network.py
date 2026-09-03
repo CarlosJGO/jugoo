@@ -54,6 +54,7 @@ from .network_hotspot import (
 NETWORK_CHANGED = "network_changed"
 NETWORK_ETHERNET_CLICKED = "network_ethernet_clicked"
 NETWORK_DBUS_TIMEOUT_MS = 3_000
+NETWORK_WIFI_CONNECT_TIMEOUT_MS = 15_000
 
 NM_BUS_NAME = "org.freedesktop.NetworkManager"
 NM_OBJECT_PATH = "/org/freedesktop/NetworkManager"
@@ -327,6 +328,8 @@ def compose_network_snapshot(
     wireless_enabled: bool = False,
     wireless_hardware_enabled: bool = True,
     wifi_access_points: tuple[WifiAccessPointSnapshot, ...] = (),
+    wifi_connection_target: str = "",
+    wifi_connection_error: str = "",
     hotspot: HotspotSnapshot | None = None,
 ) -> NetworkSnapshot:
     ethernet = select_ethernet_interface(interfaces)
@@ -340,6 +343,8 @@ def compose_network_snapshot(
         wireless_enabled=wireless_enabled,
         wireless_hardware_enabled=wireless_hardware_enabled,
         wifi_access_points=wifi_access_points,
+        wifi_connection_target=wifi_connection_target,
+        wifi_connection_error=wifi_connection_error,
         hotspot=hotspot if hotspot is not None else HotspotSnapshot.empty(),
     )
 
@@ -501,6 +506,21 @@ def _wifi_connection_settings_variant(ssid: str, password: str) -> GLib.Variant:
         )
 
     return GLib.Variant("a{sa{sv}}", sections)
+
+
+def _wifi_settings_with_password(
+    settings: dict[str, Any],
+    password: str,
+) -> GLib.Variant:
+    updated_settings = dict(settings)
+    security = settings.get("802-11-wireless-security", {})
+    if isinstance(security, GLib.Variant):
+        security = security.unpack()
+    security = dict(security) if isinstance(security, dict) else {}
+    security["key-mgmt"] = GLib.Variant("s", "wpa-psk")
+    security["psk"] = GLib.Variant("s", password)
+    updated_settings["802-11-wireless-security"] = security
+    return GLib.Variant("a{sa{sv}}", updated_settings)
 
 
 def _primary_ipv4_from_ip4_config(
@@ -757,6 +777,9 @@ class NetworkService:
         self._wifi_scan_followup_source_id = 0
         self._wifi_scan_followup_delays: list[int] = []
         self._wifi_scan_pending = False
+        self._wifi_connection_target = ""
+        self._wifi_connection_error = ""
+        self._wifi_connection_timeout_source_id = 0
         self._hotspot_pending_enable = False
         self._hotspot_last_error_status = ""
         self._hotspot_last_error_message = ""
@@ -787,6 +810,7 @@ class NetworkService:
         self._cancel_refresh()
         self._cancel_connectivity_followup()
         self._cancel_wifi_scan_followup()
+        self._cancel_wifi_connection_timeout()
         self._cancel_hotspot_activate_retry()
         if self._fallback_source_id:
             GLib.source_remove(self._fallback_source_id)
@@ -907,8 +931,26 @@ class NetworkService:
         return False
 
     def _connect_wifi_idle(self, access_point_path: str, password: str) -> bool:
+        access_point = None
+        if self._bus is not None:
+            access_point = read_access_point_snapshot(self._bus, access_point_path)
+        if access_point is not None:
+            self._wifi_connection_target = access_point.ssid
+            self._wifi_connection_error = ""
+            self._cancel_wifi_connection_timeout()
+            self._schedule_refresh()
         if self._connect_wifi_access_point(access_point_path, password):
+            self._wifi_connection_timeout_source_id = GLib.timeout_add(
+                NETWORK_WIFI_CONNECT_TIMEOUT_MS,
+                self._wifi_connection_timeout,
+            )
             self._schedule_connectivity_followup(trigger="wifi-connect")
+        else:
+            if access_point is not None:
+                self._wifi_connection_error = (
+                    f"No se pudo conectar a {access_point.ssid}. Comprueba la contraseña."
+                )
+            self._schedule_refresh()
         return False
 
     def _disconnect_wifi_idle(self) -> bool:
@@ -916,6 +958,10 @@ class NetworkService:
         if device_path is None:
             return False
         self._disconnect_device(device_path)
+        self._cancel_wifi_connection_timeout()
+        self._wifi_connection_target = ""
+        self._wifi_connection_error = ""
+        self._schedule_refresh()
         return False
 
     def _connect_wifi_access_point(self, access_point_path: str, password: str) -> bool:
@@ -963,9 +1009,22 @@ class NetworkService:
                     ssid_value = ssid_value.unpack()
                 ssid = _decode_ssid(ssid_value)
                 if ssid == ap.ssid:
+                    if password:
+                        settings_proxy.call_sync(
+                            "Update",
+                            GLib.Variant.new_tuple(
+                                _wifi_settings_with_password(settings, password),
+                            ),
+                            Gio.DBusCallFlags.NONE,
+                            NETWORK_DBUS_TIMEOUT_MS,
+                            None,
+                        )
                     self._nm_proxy.call_sync(
                         "ActivateConnection",
-                        GLib.Variant("(ooo)", (str(connection_path), device_path, "/")),
+                        GLib.Variant(
+                            "(ooo)",
+                            (str(connection_path), device_path, access_point_path),
+                        ),
                         Gio.DBusCallFlags.NONE,
                         NETWORK_DBUS_TIMEOUT_MS,
                         None,
@@ -1022,6 +1081,24 @@ class NetworkService:
             self._clear_hotspot_error()
             self._deactivate_hotspot()
         self._schedule_refresh()
+        return False
+
+    def _cancel_wifi_connection_timeout(self) -> None:
+        if self._wifi_connection_timeout_source_id:
+            GLib.source_remove(self._wifi_connection_timeout_source_id)
+            self._wifi_connection_timeout_source_id = 0
+
+    def _wifi_connection_timeout(self) -> bool:
+        self._wifi_connection_timeout_source_id = 0
+        wifi = self._snapshot.wifi
+        if wifi is not None and wifi.connected:
+            return False
+        if self._wifi_connection_target:
+            self._wifi_connection_error = (
+                f"No se pudo conectar a {self._wifi_connection_target} en 15 segundos. "
+                "Comprueba la contraseña y vuelve a intentarlo."
+            )
+            self._schedule_refresh()
         return False
 
     def _apply_hotspot_config_idle(self, ssid: str, password: str, band: str) -> bool:
@@ -1943,8 +2020,39 @@ class NetworkService:
             wireless_enabled=wireless_enabled,
             wireless_hardware_enabled=wireless_hardware_enabled,
             wifi_access_points=wifi_access_points,
+            wifi_connection_target=self._wifi_connection_target,
+            wifi_connection_error=self._wifi_connection_error,
             hotspot=hotspot,
         )
+        if wifi_iface is not None and wifi_iface.connected:
+            if self._wifi_connection_target:
+                self._cancel_wifi_connection_timeout()
+                self._wifi_connection_target = ""
+                self._wifi_connection_error = ""
+                next_snapshot = compose_network_snapshot(
+                    tuple(interfaces),
+                    connectivity=connectivity,
+                    wireless_enabled=wireless_enabled,
+                    wireless_hardware_enabled=wireless_hardware_enabled,
+                    wifi_access_points=wifi_access_points,
+                    wifi_connection_target="",
+                    wifi_connection_error="",
+                    hotspot=hotspot,
+                )
+        elif wifi_iface is not None and wifi_iface.state == "failed" and self._wifi_connection_target:
+            self._wifi_connection_error = (
+                f"No se pudo conectar a {self._wifi_connection_target}. Comprueba la contraseña."
+            )
+            next_snapshot = compose_network_snapshot(
+                tuple(interfaces),
+                connectivity=connectivity,
+                wireless_enabled=wireless_enabled,
+                wireless_hardware_enabled=wireless_hardware_enabled,
+                wifi_access_points=wifi_access_points,
+                wifi_connection_target=self._wifi_connection_target,
+                wifi_connection_error=self._wifi_connection_error,
+                hotspot=hotspot,
+            )
         if next_snapshot == self._snapshot:
             return
         self._snapshot = next_snapshot

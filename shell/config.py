@@ -6,6 +6,9 @@ from __future__ import annotations
 # ``None`` mirrors Hyprland exactly. Set an integer to retain empty targets 1..N.
 PERSISTENT_WORKSPACES: int | None = None
 
+# Number of consecutive Hyprland workspaces represented by one draggable block.
+WORKSPACES_PER_BLOCK = 3
+
 # Layer-shell top inset. 0 anchors the bar flush with the monitor edge (y=0).
 TOP_MARGIN = 0
 
