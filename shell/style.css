@@ -62,7 +62,7 @@ box#shell-left {
 }
 
 box#shell-left > box.stats-widget {
-    margin-left: -1px;
+    margin-left: -4px;
     border-radius: 0 16px 16px 0;
 }
 
@@ -594,6 +594,35 @@ label.stats-memory-value {
     color: @shell_text_primary;
     font-size: 11px;
     font-weight: 600;
+}
+
+window#shell-memory-popup {
+    background-color: transparent;
+}
+
+box.memory-popup-content {
+    background-color: @shell_surface_bg_elevated;
+    border: 1px solid @shell_border_medium;
+    border-radius: 10px;
+    padding: 10px 12px;
+    min-width: 190px;
+}
+
+label.memory-popup-title {
+    color: @shell_text_primary;
+    margin-bottom: 4px;
+}
+
+box.memory-popup-row {
+    min-height: 18px;
+}
+
+box.memory-popup-row label.shell-text-muted {
+    color: @shell_text_secondary;
+}
+
+box.memory-popup-row label.shell-text-body {
+    color: @shell_text_primary;
 }
 
 /* Base color applies while the GPU sensor is unavailable; the thermal variants

@@ -7,7 +7,8 @@ Sources used (no subprocess, no background threads):
 * CPU temperature  -- ``hwmon`` device exposed by ``k10temp`` (AMD Zen).  On
   Ryzen 5000 desktop parts ``Tctl`` carries no offset, so it equals ``Tdie``;
   ``Tdie`` is still preferred when the kernel exports it.
-* Memory           -- ``/proc/meminfo`` (``MemTotal`` minus ``MemAvailable``).
+* Memory           -- ``/proc/meminfo`` plus process PSS from ``smaps_rollup``
+    and zram accounting from ``/sys/block/zram*/mm_stat``.
 * GPU temperatures -- ``hwmon`` device exposed by ``amdgpu``: ``edge`` is the
   package temperature used for UI state, ``junction`` (hot spot) and ``mem``
   are collected for future use only.
@@ -23,6 +24,8 @@ HWMON_ROOT = Path("/sys/class/hwmon")
 DRM_ROOT = Path("/sys/class/drm")
 PROC_STAT = Path("/proc/stat")
 PROC_MEMINFO = Path("/proc/meminfo")
+PROC_PROCESSES = Path("/proc")
+ZRAM_ROOT = Path("/sys/block")
 PCI_IDS_FILES = (
     Path("/usr/share/hwdata/pci.ids"),
     Path("/usr/share/misc/pci.ids"),
@@ -61,6 +64,7 @@ GPU_JUNCTION_LABELS = ("junction", "hotspot")
 GPU_MEMORY_LABELS = ("mem",)
 
 SENSOR_REDISCOVERY_INTERVAL_SEC = 30.0
+PROCESS_PSS_REFRESH_INTERVAL_SEC = 5.0
 
 
 def temperature_level(
@@ -88,8 +92,21 @@ class CpuStats:
 
 @dataclass(frozen=True)
 class MemoryStats:
-    used_bytes: int | None = None
     total_bytes: int | None = None
+    available_bytes: int | None = None
+    free_bytes: int | None = None
+    applications_bytes: int | None = None
+    cache_bytes: int | None = None
+    zram_data_bytes: int | None = None
+    zram_compressed_bytes: int | None = None
+    zram_physical_bytes: int | None = None
+
+    @property
+    def used_bytes(self) -> int | None:
+        """Compatibility value: physical RAM not considered readily available."""
+        if self.total_bytes is None or self.available_bytes is None:
+            return None
+        return max(0, self.total_bytes - self.available_bytes)
 
     @property
     def usage_percent(self) -> float | None:
@@ -158,6 +175,8 @@ class SystemStatsService:
         self._last_discovery_monotonic = 0.0
         self._cpu_sample: tuple[int, int] | None = None
         self._last_cpu_usage: float | None = None
+        self._cached_process_pss: int | None = None
+        self._last_process_pss_monotonic = 0.0
 
         self._discover_sensors()
         self._cpu_sample = self._read_cpu_sample()
@@ -250,13 +269,19 @@ class SystemStatsService:
             return None
         return sum(values), values[3] + values[4]
 
-    @staticmethod
-    def _read_memory() -> MemoryStats:
+    def _read_memory(self) -> MemoryStats:
         content = _read_text(PROC_MEMINFO)
         if content is None:
             return MemoryStats()
 
-        wanted = {"MemTotal:", "MemAvailable:"}
+        wanted = {
+            "MemTotal:",
+            "MemAvailable:",
+            "MemFree:",
+            "Cached:",
+            "Buffers:",
+            "SReclaimable:",
+        }
         values: dict[str, int] = {}
         for line in content.splitlines():
             fields = line.split()
@@ -268,11 +293,24 @@ class SystemStatsService:
                 if len(values) == len(wanted):
                     break
 
-        total = values.get("MemTotal:")
-        available = values.get("MemAvailable:")
-        if total is None or available is None:
-            return MemoryStats(total_bytes=total)
-        return MemoryStats(used_bytes=max(0, total - available), total_bytes=total)
+        now = time.monotonic()
+        if now - self._last_process_pss_monotonic >= PROCESS_PSS_REFRESH_INTERVAL_SEC:
+            self._cached_process_pss = _read_process_pss()
+            self._last_process_pss_monotonic = now
+        zram_data, zram_compressed, zram_physical = _read_zram_stats()
+        return MemoryStats(
+            total_bytes=values.get("MemTotal:"),
+            available_bytes=values.get("MemAvailable:"),
+            free_bytes=values.get("MemFree:"),
+            applications_bytes=self._cached_process_pss,
+            # Cached, buffers, and reclaimable slab are recoverable by Linux.
+            cache_bytes=sum(values.get(key, 0) for key in (
+                "Cached:", "Buffers:", "SReclaimable:"
+            )),
+            zram_data_bytes=zram_data,
+            zram_compressed_bytes=zram_compressed,
+            zram_physical_bytes=zram_physical,
+        )
 
     def _read_gpu(self) -> GpuStats:
         return GpuStats(
@@ -316,6 +354,57 @@ def _read_integer(path: Path | None) -> int | None:
         return int(raw)
     except ValueError:
         return None
+
+
+def _read_process_pss() -> int | None:
+    """Sum process PSS so shared pages are charged proportionally once."""
+    total = 0
+    found = False
+    try:
+        process_dirs = tuple(PROC_PROCESSES.iterdir())
+    except OSError:
+        return None
+    for process_dir in process_dirs:
+        if not process_dir.name.isdigit():
+            continue
+        raw = _read_text(process_dir / "smaps_rollup")
+        if raw is None:
+            continue
+        for line in raw.splitlines():
+            fields = line.split()
+            if len(fields) >= 2 and fields[0] == "Pss:":
+                try:
+                    total += int(fields[1]) * 1024
+                    found = True
+                except ValueError:
+                    pass
+                break
+    return total if found else None
+
+
+def _read_zram_stats() -> tuple[int | None, int | None, int | None]:
+    """Return logical data, compressed data, and physical zram bytes."""
+    data = compressed = physical = 0
+    found = False
+    try:
+        devices = tuple(sorted(ZRAM_ROOT.glob("zram*/mm_stat")))
+    except OSError:
+        return None, None, None
+    for path in devices:
+        raw = _read_text(path)
+        if not raw:
+            continue
+        fields = raw.split()
+        if len(fields) < 3:
+            continue
+        try:
+            data += int(fields[0])
+            compressed += int(fields[1])
+            physical += int(fields[2])
+            found = True
+        except ValueError:
+            continue
+    return (data, compressed, physical) if found else (None, None, None)
 
 
 def _find_amdgpu_vram_paths() -> tuple[Path | None, Path | None]:

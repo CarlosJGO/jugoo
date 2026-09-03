@@ -8,8 +8,9 @@ import cairo
 import gi
 
 gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
 
-from gi.repository import GLib, Gtk
+from gi.repository import Gdk, GLib, Gtk
 
 from ...config import (
     STATS_CPU_BAR_TEMP_MAX_C,
@@ -19,6 +20,8 @@ from ...config import (
     STATS_SECTION_SPACING,
     SYSTEM_STATS_UPDATE_INTERVAL,
 )
+from ...eventbus import EventBus
+from ...popup_handle import PopupHandle, PopupOutsideDismiss, hide_popup, present_popup
 from ...servicios.sistema.system import (
     TEMPERATURE_COLD,
     TEMPERATURE_HOT,
@@ -28,6 +31,14 @@ from ...servicios.sistema.system import (
     SystemStatsService,
 )
 from ...ui import SHELL_MODULE_STACK_SPACING, ShellModule, shell_label
+from ...window_identity import (
+    TITLE_MEMORY_POPUP,
+    configure_passive_popup,
+    configure_toplevel,
+    position_popup_below_anchor,
+    register_shell_popup,
+    schedule_popup_position,
+)
 
 TEMPERATURE_CSS_CLASSES = {
     TEMPERATURE_COLD: "shell-temp-cold",
@@ -47,6 +58,93 @@ BYTES_PER_GIB = 1024**3
 MIN_VISIBLE_FILL_PX = 6
 UNKNOWN_TEMPERATURE = "-- °C"
 UNKNOWN_VALUE = "--"
+
+
+def _format_bytes(value: int | None) -> str:
+    if value is None:
+        return UNKNOWN_VALUE
+    if value < 1024**2:
+        return f"{value / 1024:.0f} KB"
+    if value < BYTES_PER_GIB:
+        return f"{value / 1024**2:.0f} MB"
+    return f"{value / BYTES_PER_GIB:.1f} GB"
+
+
+class MemoryPopup(Gtk.Window):
+    """Read-only memory breakdown anchored to the compact RAM indicator."""
+
+    def __init__(self, shell_window: Gtk.Window) -> None:
+        super().__init__(type=Gtk.WindowType.TOPLEVEL)
+        self._anchor: Gtk.Widget | None = None
+        self.set_name("shell-memory-popup")
+        register_shell_popup(self, shell_window)
+        configure_toplevel(self, title=TITLE_MEMORY_POPUP)
+        configure_passive_popup(self)
+        self.connect("focus-out-event", self._on_focus_out)
+
+        self._rows: dict[str, Gtk.Label] = {}
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        content.get_style_context().add_class("memory-popup-content")
+        title = shell_label("RAM", role="title", css_classes=("memory-popup-title",))
+        content.pack_start(title, False, False, 0)
+        self._zram_rows: list[Gtk.Box] = []
+        for key, label in (
+            ("applications", "Apps"),
+            ("cache", "Caché"),
+            ("free", "Libre"),
+            ("available", "Disponible"),
+            ("total", "Total"),
+            ("zram_data", "ZRAM datos"),
+            ("zram_compressed", "Comprimida"),
+            ("zram_physical", "Física"),
+        ):
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+            row.get_style_context().add_class("memory-popup-row")
+            row.pack_start(shell_label(label, role="muted"), False, False, 0)
+            value = shell_label(UNKNOWN_VALUE, role="body", xalign=1.0)
+            value.set_hexpand(True)
+            row.pack_start(value, True, True, 0)
+            content.pack_start(row, False, False, 0)
+            self._rows[key] = value
+            if key.startswith("zram_"):
+                self._zram_rows.append(row)
+        self.add(content)
+
+    def open_for(self, anchor: Gtk.Widget, stats: SystemStats) -> None:
+        self._anchor = anchor
+        memory = stats.memory
+        values = {
+            "applications": memory.applications_bytes,
+            "cache": memory.cache_bytes,
+            "free": memory.free_bytes,
+            "available": memory.available_bytes,
+            "total": memory.total_bytes,
+            "zram_data": memory.zram_data_bytes,
+            "zram_compressed": memory.zram_compressed_bytes,
+            "zram_physical": memory.zram_physical_bytes,
+        }
+        for key, value in values.items():
+            self._rows[key].set_text(_format_bytes(value))
+        has_zram = memory.zram_data_bytes is not None
+        for row in self._zram_rows:
+            row.set_visible(has_zram)
+        present_popup(self)
+        schedule_popup_position(self._position)
+
+    def close_popup(self) -> None:
+        self._anchor = None
+        hide_popup(self)
+
+    def _on_focus_out(self, _window: Gtk.Window, _event: object) -> bool:
+        self.close_popup()
+        return False
+
+    def _position(self) -> bool:
+        if self._anchor is not None:
+            position_popup_below_anchor(
+                self, self._anchor, title=TITLE_MEMORY_POPUP, offset=6
+            )
+        return False
 
 
 class FanIcon(Gtk.DrawingArea):
@@ -159,7 +257,7 @@ class FanIcon(Gtk.DrawingArea):
 class StatsWidget(ShellModule):
     """Renders the periodic system snapshot; owns no sensor access of its own."""
 
-    def __init__(self, stats_service: SystemStatsService) -> None:
+    def __init__(self, stats_service: SystemStatsService, shell_window: Gtk.Window, event_bus: EventBus) -> None:
         super().__init__(
             "stats-widget",
             orientation=Gtk.Orientation.HORIZONTAL,
@@ -167,6 +265,8 @@ class StatsWidget(ShellModule):
         )
         self._stats_service = stats_service
         self._timer_id: int | None = None
+        self._popup = PopupHandle(lambda: MemoryPopup(shell_window))
+        self._popup_dismiss = PopupOutsideDismiss()
 
         self.pack_start(self._build_cpu_section(), False, False, 0)
         self.pack_start(self._build_memory_section(), False, False, 0)
@@ -177,6 +277,10 @@ class StatsWidget(ShellModule):
         self._timer_id = GLib.timeout_add_seconds(
             SYSTEM_STATS_UPDATE_INTERVAL,
             self._on_timer,
+        )
+        self._popup_dismiss.install(
+            self._popup.get(), shell_window, (self._memory_section,),
+            self._close_memory_popup, event_bus,
         )
 
     def _build_cpu_section(self) -> Gtk.Box:
@@ -217,24 +321,20 @@ class StatsWidget(ShellModule):
         section.pack_start(overlay, False, False, 0)
         return section
 
-    def _build_memory_section(self) -> Gtk.Box:
+    def _build_memory_section(self) -> Gtk.Widget:
         section = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=SHELL_MODULE_STACK_SPACING,
         )
         section.get_style_context().add_class("stats-memory")
 
-        section.pack_start(
-            shell_label(
-                "RAM",
-                role="muted",
-                css_classes=("stats-memory-label",),
-                xalign=0.0,
-            ),
-            False,
-            False,
-            0,
+        self._memory_percent_label = shell_label(
+            "",
+            role="caption",
+            css_classes=("stats-memory-label",),
+            xalign=0.0,
         )
+        section.pack_start(self._memory_percent_label, False, False, 0)
         self._memory_value_label = shell_label(
             "",
             role="caption",
@@ -242,7 +342,13 @@ class StatsWidget(ShellModule):
             xalign=0.0,
         )
         section.pack_start(self._memory_value_label, False, False, 0)
-        return section
+        anchor = Gtk.EventBox()
+        anchor.set_visible_window(False)
+        anchor.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK)
+        anchor.connect("enter-notify-event", self._on_memory_enter)
+        anchor.add(section)
+        self._memory_section = anchor
+        return anchor
 
     def _build_gpu_section(self) -> Gtk.Box:
         section = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
@@ -277,14 +383,26 @@ class StatsWidget(ShellModule):
         _apply_temperature_class(self._cpu_bar_fill, stats.cpu.temperature_level)
 
     def _update_memory(self, stats: SystemStats) -> None:
-        used = stats.memory.used_bytes
+        used = stats.memory.applications_bytes
         total = stats.memory.total_bytes
         if used is None or not total:
+            self._memory_percent_label.set_text(f"RAM {UNKNOWN_VALUE}%")
             self._memory_value_label.set_text(UNKNOWN_VALUE)
-            return
-        self._memory_value_label.set_text(
-            f"{used / BYTES_PER_GIB:.1f} / {total / BYTES_PER_GIB:.1f} GB"
-        )
+        else:
+            self._memory_percent_label.set_text(f"RAM {used / total * 100:.0f}%")
+            self._memory_value_label.set_text(_format_bytes(used))
+        popup = self._popup.maybe
+        if popup is not None and popup.get_visible():
+            popup.open_for(self._memory_section, stats)
+
+    def _on_memory_enter(self, _widget: Gtk.Widget, _event: object) -> bool:
+        self._popup.get().open_for(self._memory_section, self._stats_service.read())
+        return False
+
+    def _close_memory_popup(self) -> None:
+        popup = self._popup.maybe
+        if popup is not None:
+            popup.close_popup()
 
     def _update_gpu(self, stats: SystemStats) -> None:
         gpu = stats.gpu
@@ -340,6 +458,7 @@ class StatsWidget(ShellModule):
         if self._timer_id is not None:
             GLib.source_remove(self._timer_id)
             self._timer_id = None
+        self._popup_dismiss.uninstall()
 
 
 def _apply_temperature_class(widget: Gtk.Widget, level: str | None) -> None:

@@ -102,7 +102,7 @@ class ShellApplication(Gtk.Window):
         self.workspace_widget = WorkspaceWidget(self.event_bus)
         self.layout.center.add(self.workspace_widget)
 
-        self.stats_widget = StatsWidget(self.system_stats)
+        self.stats_widget = StatsWidget(self.system_stats, self, self.event_bus)
         self.layout.left.add(self.stats_widget)
 
         self.active_window_widget = ActiveWindowWidget(self.event_bus, self.media_service)
