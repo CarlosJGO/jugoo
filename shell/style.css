@@ -52,23 +52,36 @@ box.shell-bar-host {
 box.shell-bar {
     background-color: @shell_bar_bg;
     border: 1px solid @shell_bar_border;
-    border-radius: 0 0 20px 20px;
-    padding: 4px 0;
+    /* Flush to the top/left screen edges; only the trailing bottom corner stays rounded. */
+    border-radius: 0 0 20px 0;
+    /* No padding: GTK3 clips children to the content box, so negative child
+       margins cannot reach the screen edge — they only crop the widget. */
+    padding: 0;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
 }
 
 box#shell-left {
-    margin-left: 0;
+    margin: 0;
+    padding: 0;
 }
 
-box#shell-left > box.stats-widget {
-    margin-left: -4px;
+/* Full margin shorthand required: .shell-module { margin: 0 3px } must not win. */
+window#shell box#shell-left > box.stats-widget {
+    margin: 0 3px 0 0;
+    padding: 7px 8px 7px 6px;
     border-radius: 0 16px 16px 0;
 }
 
+/* Restore the old 4px bar inset for regions that should not touch the edges. */
+box#shell-center,
+box#shell-right {
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
 window#shell.compact box.shell-bar {
-    padding: 2px 0;
-    border-radius: 0 0 12px 12px;
+    padding: 0;
+    border-radius: 0 0 12px 0;
     box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
 }
 
@@ -104,8 +117,16 @@ window#shell.compact image.active-window-icon {
     min-height: 18px;
 }
 
-window#shell.compact box.stats-widget {
-    padding: 1px 4px;
+window#shell.compact box#shell-center,
+window#shell.compact box#shell-right {
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
+window#shell.compact box#shell-left > box.stats-widget {
+    margin: 0 3px 0 0;
+    padding: 3px 4px;
+    border-radius: 0 10px 10px 0;
 }
 
 window#shell.compact label.clock-time {

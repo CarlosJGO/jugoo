@@ -45,6 +45,17 @@ from .window_identity import APPLICATION_ID, TITLE_BAR, configure_toplevel, init
 APP_ID = "shell"
 
 
+def _gdk_monitor() -> Gdk.Monitor | None:
+    """GDK often leaves the only output unmarked as primary on wlroots."""
+    display = Gdk.Display.get_default()
+    if display is None:
+        return None
+    monitor = display.get_primary_monitor()
+    if monitor is None and display.get_n_monitors() > 0:
+        monitor = display.get_monitor(0)
+    return monitor
+
+
 class ShellApplication(Gtk.Window):
     """Mounts modules and coordinates state updates without putting IPC in a widget."""
 
@@ -77,21 +88,18 @@ class ShellApplication(Gtk.Window):
         self._load_css()
 
         self.layout = ShellLayout()
-        monitor = Gdk.Display.get_default().get_primary_monitor()
+        monitor = _gdk_monitor()
         if monitor is not None:
             self.layout.set_size_request(monitor.get_geometry().width, -1)
         self._bar_host = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         self._bar_host.get_style_context().add_class("shell-bar-host")
         self._bar_host.set_hexpand(True)
         self._bar_host.set_halign(Gtk.Align.FILL)
-        self.layout.set_hexpand(True)
-        self.layout.set_halign(Gtk.Align.FILL)
         self._bar_host.pack_start(self.layout, True, True, 0)
 
         self._overlay = Gtk.Overlay()
         self._overlay.set_hexpand(True)
         self._overlay.set_halign(Gtk.Align.FILL)
-        monitor = Gdk.Display.get_default().get_primary_monitor()
         if monitor is not None:
             self._overlay.set_size_request(monitor.get_geometry().width, -1)
         self._overlay.add(self._bar_host)
@@ -103,6 +111,8 @@ class ShellApplication(Gtk.Window):
         self.layout.center.add(self.workspace_widget)
 
         self.stats_widget = StatsWidget(self.system_stats, self, self.event_bus)
+        self.stats_widget.set_halign(Gtk.Align.START)
+        self.stats_widget.set_valign(Gtk.Align.FILL)
         self.layout.left.add(self.stats_widget)
 
         self.active_window_widget = ActiveWindowWidget(self.event_bus, self.media_service)
@@ -197,9 +207,6 @@ class ShellApplication(Gtk.Window):
             GtkLayerShell.Edge.RIGHT,
         ):
             GtkLayerShell.set_anchor(self, edge, True)
-        monitor = Gdk.Display.get_default().get_primary_monitor()
-        if monitor is not None:
-            GtkLayerShell.set_size(self, monitor.get_geometry().width, -1)
         GtkLayerShell.set_margin(self, GtkLayerShell.Edge.TOP, TOP_MARGIN)
         GtkLayerShell.auto_exclusive_zone_enable(self)
         GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.NONE)

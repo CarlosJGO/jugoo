@@ -50,17 +50,40 @@ class RightContainer(ShellRegion):
         super().__init__("shell-right")
 
 
+def _flex_slot() -> Gtk.Box:
+    """Empty expanding slot so left/right can pin to the screen edges."""
+    slot = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+    slot.set_hexpand(True)
+    slot.set_halign(Gtk.Align.FILL)
+    return slot
+
+
 class ShellLayout(Gtk.Box):
     """Root bar container: one outer capsule wrapping left/center/right regions."""
 
     def __init__(self) -> None:
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL)
         self.get_style_context().add_class(SHELL_BAR_CLASS)
+        self.set_hexpand(True)
+        self.set_halign(Gtk.Align.FILL)
         self.set_spacing(SHELL_BAR_REGION_SPACING)
         self.left = LeftContainer()
         self.center = CenterContainer()
         self.right = RightContainer()
 
+        # Pin edges with flex slots. Giving the center region expand=True does
+        # not consume leftover width here: CenterContainer reports no hexpand
+        # (its child is packed non-expanding), so GTK treats the three regions
+        # as a centered group and leaves a large gutter on the left.
+        self.left.set_hexpand(False)
+        self.left.set_halign(Gtk.Align.START)
+        self.center.set_hexpand(False)
+        self.center.set_halign(Gtk.Align.CENTER)
+        self.right.set_hexpand(False)
+        self.right.set_halign(Gtk.Align.END)
+
         self.pack_start(self.left, False, False, 0)
-        self.pack_start(self.center, True, True, 0)
+        self.pack_start(_flex_slot(), True, True, 0)
+        self.pack_start(self.center, False, False, 0)
+        self.pack_start(_flex_slot(), True, True, 0)
         self.pack_start(self.right, False, False, 0)
