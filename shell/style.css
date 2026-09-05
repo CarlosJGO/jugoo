@@ -977,6 +977,29 @@ label.task-row-meta {
     font-size: 10px;
 }
 
+image.task-row-chevron {
+    color: @shell_text_muted;
+}
+
+button.task-row-chevron-button {
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    min-width: 20px;
+    min-height: 20px;
+    padding: 2px;
+}
+
+button.task-row-chevron-button:hover {
+    background-color: @shell_hover_bg;
+}
+
+label.task-row-notes {
+    color: @shell_text_secondary;
+    font-size: 11px;
+    padding: 0 8px 2px 28px;
+}
+
 button.task-row-delete {
     background: transparent;
     border: 0;

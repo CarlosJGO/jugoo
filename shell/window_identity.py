@@ -223,10 +223,9 @@ def compute_popup_top_left(
             mon_left + margin,
             min(popup_left, mon_right - popup_width - margin),
         )
-        popup_top = max(
-            mon_top + margin,
-            min(popup_top, mon_bottom - popup_height - margin),
-        )
+        # Never slide the window up to fit a taller size: that overlaps the bar.
+        # Popups grow downward; content that does not fit scrolls.
+        popup_top = max(mon_top + margin, popup_top)
 
     return int(popup_left), int(popup_top)
 

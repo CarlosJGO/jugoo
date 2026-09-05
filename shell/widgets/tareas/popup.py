@@ -36,6 +36,7 @@ class TasksPopup(Gtk.Window):
         self._service = tasks_service
         self._anchor_button: Gtk.Widget | None = None
         self._fixed_popup_top: int | None = None
+        self._last_height = 0
 
         self.set_name("shell-tasks")
         register_shell_popup(self, shell_window)
@@ -83,11 +84,13 @@ class TasksPopup(Gtk.Window):
         self._empty.get_style_context().add_class("tasks-popup-empty")
         self._empty.set_margin_top(12)
         self._empty.set_margin_bottom(12)
+        self.connect("size-allocate", self._on_size_allocate)
 
     def open_for(self, anchor_button: Gtk.Widget) -> None:
         self._anchor_button = anchor_button
         self._fixed_popup_top = None
-        self._composer.hide()
+        self._last_height = 0
+        self._hide_composer()
         self.refresh()
         present_popup(self)
         schedule_popup_position(self._position_after_show)
@@ -95,7 +98,8 @@ class TasksPopup(Gtk.Window):
     def close_popup(self) -> None:
         self._anchor_button = None
         self._fixed_popup_top = None
-        self._composer.hide()
+        self._last_height = 0
+        self._hide_composer()
         hide_popup(self)
 
     def pointer_is_inside(self) -> bool:
@@ -162,10 +166,14 @@ class TasksPopup(Gtk.Window):
             self._hide_composer()
             return
         self._composer.reveal()
+        self.queue_resize()
+        self._reposition()
 
     def _hide_composer(self) -> None:
         self._composer.hide()
         self._composer.set_no_show_all(True)
+        self.queue_resize()
+        self._reposition()
 
     def _on_composer_submit(self, payload: dict) -> None:
         self._service.add_task(
@@ -175,7 +183,18 @@ class TasksPopup(Gtk.Window):
             due_date=payload.get("due_date"),
             month_day=payload.get("month_day", 1),
         )
-        self._composer.hide()
+        self._hide_composer()
+
+    def _on_size_allocate(self, _widget: Gtk.Widget, allocation: Gtk.Allocation) -> None:
+        height = int(allocation.height)
+        if height <= 1 or height == self._last_height:
+            return
+        self._last_height = height
+        self._reposition()
+
+    def _reposition(self) -> None:
+        if self.get_visible() and self._anchor_button is not None:
+            schedule_popup_position(self._position_after_show)
 
     def _position_after_show(self) -> bool:
         if self._anchor_button is not None:
