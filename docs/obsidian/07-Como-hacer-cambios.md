@@ -34,3 +34,29 @@ python3 -m shell
 ```
 
 La sesión debe tener GTK 3, PyGObject, Cairo, GTK Layer Shell y los servicios del escritorio disponibles.
+
+## Identidad de aplicación
+
+El application ID oficial es `com.jugoo.Shell`. Ese valor es también el Wayland `app_id` / Hyprland `class`. Los títulos (`Jugoo Launcher`, `Jugoo Pinned Overflow`, …) identifican la superficie, no la aplicación.
+
+Desarrollo: sigue funcionando `python3 -m shell` desde el checkout.
+
+Para registrar Jugoo en XDG (launcher `jugoo`, `.desktop` e icono si existe):
+
+```sh
+python3 -m shell --install
+```
+
+Es idempotente. Para quitar esa integración, sin borrar pins ni historial:
+
+```sh
+python3 -m shell --uninstall
+```
+
+El logo oficial todavía no está. Cuando exista, colócalo en [`shell/assets/`](../../shell/assets/) como `jugoo.svg`, `jugoo.png`, `com.jugoo.Shell.svg` o `logo.svg` y vuelve a ejecutar `--install`. Los archivos con `placeholder` en el nombre se ignoran.
+
+Tras un arranque, comprueba que Hyprland ya no muestra `class: __main__.py`:
+
+```sh
+hyprctl clients
+```

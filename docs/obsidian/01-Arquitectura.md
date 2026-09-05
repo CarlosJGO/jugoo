@@ -20,7 +20,8 @@ flowchart TD
 ### Entrada y composición
 
 - [`shell/__main__.py`](../../shell/__main__.py) llama a `main`.
-- [`shell/app.py`](../../shell/app.py) crea servicios, widgets, controllers, CSS y la ventana principal.
+- [`shell/app.py`](../../shell/app.py) crea servicios, widgets, controllers, CSS y la ventana principal. `--install` registra la identidad XDG sin arrancar la barra.
+- [`shell/identity.py`](../../shell/identity.py) define `com.jugoo.Shell` y los títulos de superficie.
 - [`shell/layout.py`](../../shell/layout.py) define las zonas izquierda, centro y derecha de la barra.
 
 ### Servicios

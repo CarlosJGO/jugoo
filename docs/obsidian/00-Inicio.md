@@ -17,9 +17,9 @@ Esta carpeta es un vault pequeño para entender y modificar el proyecto sin depe
 
 - El proyecto es un shell GTK 3 propio que se dibuja como barra superior mediante GTK Layer Shell.
 - El shell propio arranca desde `shell/__main__.py` y monta sus widgets desde `shell/app.py`.
+- La identidad Linux oficial es `com.jugoo.Shell`. En desarrollo: `python3 -m shell`. Integración de escritorio: `python3 -m shell --install`.
 - El icono de la Radeon y su tooltip están en `shell/widgets/barra/stats.py`.
 - Las lecturas Radeon vienen de `/sys/class/hwmon` a través de `shell/servicios/sistema/system.py`.
-- No hay documentación de proyecto ni archivos de servicio visibles en esta carpeta; el modo de lanzamiento depende de cómo se invoque `python3 -m shell` o de la configuración externa del escritorio.
 
 ## Pregunta concreta: ¿dónde está el popup de la Radeon?
 

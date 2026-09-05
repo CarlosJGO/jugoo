@@ -38,3 +38,14 @@ python3 -m pytest shell/tests
 - Tooltip `GPU: sin datos`: no existe temperatura `edge`.
 - Icono quieto: temperatura por debajo de `GPU_FAN_START_TEMP` o dato ausente.
 - Icono con color inesperado: revisa `GPU_TEMP_RANGES` y las clases en `shell/style.css`.
+
+## Identidad en Hyprland
+
+Después de iniciar Jugoo:
+
+```sh
+hyprctl clients
+hyprctl clients -j
+```
+
+Las superficies de Jugoo deben usar `class: com.jugoo.Shell`. Si aparece `__main__.py`, el proceso no pasó por `init_window_identity()` o la ventana no está asociada al `Gtk.Application`.

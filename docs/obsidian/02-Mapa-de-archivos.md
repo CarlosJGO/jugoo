@@ -15,6 +15,9 @@
 | [`shell/style.css`](../../shell/style.css) | Necesitas colores, clases, radios, padding o estados visuales. |
 | [`shell/layout.py`](../../shell/layout.py) | Necesitas cambiar las zonas de la barra. |
 | [`shell/window_identity.py`](../../shell/window_identity.py) | Necesitas títulos, clases, identidad o reglas de ventanas GTK. |
+| [`shell/identity.py`](../../shell/identity.py) | Necesitas el application ID, nombres de superficies o el logo. |
+| [`shell/desktop_install.py`](../../shell/desktop_install.py) | Necesitas instalar el `.desktop`, el comando `jugoo` o el icono XDG. |
+| [`shell/assets/`](../../shell/assets/) | Necesitas colocar el logo oficial cuando exista. |
 | [`shell/popup_handle.py`](../../shell/popup_handle.py) | Necesitas fade, referencias lazy o cierre por puntero fuera. |
 | [`shell/ui/`](../../shell/ui/) | Necesitas primitivas visuales y tokens compartidos. |
 | [`shell/widgets/barra/`](../../shell/widgets/barra/) | Necesitas modificar un módulo visible de la barra. |

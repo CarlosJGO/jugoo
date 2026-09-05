@@ -285,6 +285,15 @@ class ShellGtkApplication(Gtk.Application):
 
 
 def main() -> None:
+    if "--install" in sys.argv[1:]:
+        from .desktop_install import install_identity
+
+        raise SystemExit(install_identity())
+    if "--uninstall" in sys.argv[1:]:
+        from .desktop_install import uninstall_identity
+
+        raise SystemExit(uninstall_identity())
+
     init_window_identity()
     app = ShellGtkApplication()
     print("APP CREADA")

@@ -15,30 +15,30 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import Gdk, GLib, Gtk
 
 from .config import POPUP_EDGE_MARGIN
+from .identity import (
+    APPLICATION_ID,
+    APPLICATION_NAME,
+    TITLE_APP_LAUNCHER,
+    TITLE_BAR,
+    TITLE_CLOCK_CALENDAR,
+    TITLE_CONTROL_CENTER,
+    TITLE_MEDIA_POPUP,
+    TITLE_MEMORY_POPUP,
+    TITLE_NETWORK_PANEL,
+    TITLE_NOTIFICATION_GROUP,
+    TITLE_NOTIFICATION_TOAST,
+    TITLE_NOTIFICATIONS,
+    TITLE_PINNED_OVERFLOW,
+    TITLE_POWER_CONFIRM,
+    TITLE_POWER_MENU,
+    TITLE_VOLUME_OSD,
+    TITLE_WORKSPACE_AUDIO,
+    TITLE_WORKSPACE_PANEL,
+    WAYLAND_APP_ID,
+)
 
-PROGRAM_CLASS = "Shell"
-APPLICATION_ID = "local.waybar.shell"
-# Hyprland `class` on native Wayland clients maps to the Wayland app_id, not
-# Gdk.set_program_class(). When running via `python3 -m shell`, windows that
-# miss set_application() before realize may still appear as class `main.py`.
-HYPR_WINDOW_CLASS = APPLICATION_ID
-
-TITLE_BAR = "Shell"
-TITLE_POWER_MENU = "Shell Power Menu"
-TITLE_POWER_CONFIRM = "Shell Power Confirm"
-TITLE_WORKSPACE_PANEL = "Shell Workspace Panel"
-TITLE_WORKSPACE_AUDIO = "Shell Workspace Audio"
-TITLE_NOTIFICATIONS = "Shell Notifications"
-TITLE_NOTIFICATION_GROUP = "Shell Notification Group"
-TITLE_NOTIFICATION_TOAST = "Shell Notification Toast"
-TITLE_CONTROL_CENTER = "Shell Control Center"
-TITLE_NETWORK_PANEL = "Shell Network Panel"
-TITLE_MEDIA_POPUP = "Shell Media Popup"
-TITLE_VOLUME_OSD = "Shell Volume OSD"
-TITLE_CLOCK_CALENDAR = "Shell Clock Calendar"
-TITLE_MEMORY_POPUP = "Shell Memory Popup"
-TITLE_APP_LAUNCHER = "Shell App Launcher"
-TITLE_PINNED_OVERFLOW = "Shell Pinned Overflow"
+PROGRAM_CLASS = WAYLAND_APP_ID
+HYPR_WINDOW_CLASS = WAYLAND_APP_ID
 
 # Interactive popups that keep keyboard focus on purpose:
 # - Control Center / Network: WiFi password entry
@@ -68,8 +68,15 @@ class AnchorButtonGeometry:
 
 
 def init_window_identity() -> None:
-    """Call once before creating any GTK windows."""
-    Gdk.set_program_class(HYPR_WINDOW_CLASS)
+    """Call once before creating any GTK windows.
+
+    Wayland app_id comes from Gtk.Application's id when the window is attached,
+    and from ``g_get_prgname()`` otherwise. ``python3 -m shell`` would otherwise
+    expose class ``__main__.py``.
+    """
+    GLib.set_prgname(WAYLAND_APP_ID)
+    GLib.set_application_name(APPLICATION_NAME)
+    Gdk.set_program_class(WAYLAND_APP_ID)
 
 
 def is_wayland_session() -> bool:
@@ -84,8 +91,9 @@ def configure_toplevel(
 ) -> None:
     """Set Hyprland-visible metadata for a shell toplevel."""
     window.set_title(title)
-    if application is not None:
-        window.set_application(application)
+    app = application if application is not None else Gtk.Application.get_default()
+    if app is not None:
+        window.set_application(app)
 
 
 def register_shell_popup(window: Gtk.Window, parent: Gtk.Window) -> None:
