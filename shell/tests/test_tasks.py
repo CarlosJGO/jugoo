@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+import os
 
 from shell.eventbus import EventBus
 from shell.models import (
@@ -16,6 +17,7 @@ from shell.models import (
 )
 from shell.servicios.tareas.logic import (
     applies_on,
+    complete_task,
     marked_days,
     pending_today_count,
     period_key,
@@ -163,6 +165,14 @@ def test_store_roundtrip(tmp_path: Path) -> None:
     assert loaded == original
 
 
+def test_complete_task_does_not_uncomplete() -> None:
+    today = date(2026, 9, 5)
+    task = _daily(today)
+    done = complete_task(task, today)
+    assert "2026-09-05" in done.completed_periods
+    assert complete_task(done, today) == done
+
+
 def test_service_add_toggle_delete_emits(tmp_path: Path) -> None:
     events: list[object] = []
     bus = EventBus()
@@ -178,6 +188,21 @@ def test_service_add_toggle_delete_emits(tmp_path: Path) -> None:
     assert len(events) == 3
 
 
+def test_service_reloads_external_tasks_json_changes(tmp_path: Path) -> None:
+    path = tmp_path / "tasks.json"
+    bus = EventBus()
+    service = TasksService(bus, path=path)
+    created = service.add_task("Informe", due_date=date.today().isoformat())
+    assert created is not None
+    disk = load_tasks(path)
+    completed = complete_task(disk[0], date.today())
+    save_tasks(path, (completed,))
+    later = path.stat().st_mtime_ns + 1
+    os.utime(path, ns=(later, later))
+    assert service._on_rollover_tick() is True
+    assert snapshot_for(service.records()[0], date.today(), date.today()).status == TASK_STATUS_COMPLETED
+
+
 if __name__ == "__main__":
     from pathlib import Path as _Path
     import tempfile
@@ -191,7 +216,9 @@ if __name__ == "__main__":
     test_monthly_rollover_misses_previous_month()
     test_one_shot_becomes_overdue_after_due_date()
     test_calendar_marks_dated_and_monthly_but_not_every_daily()
+    test_complete_task_does_not_uncomplete()
     with tempfile.TemporaryDirectory() as folder:
         test_store_roundtrip(_Path(folder))
         test_service_add_toggle_delete_emits(_Path(folder))
+        test_service_reloads_external_tasks_json_changes(_Path(folder))
     print("tasks tests OK")

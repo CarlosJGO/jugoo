@@ -21,6 +21,7 @@ from .identity import (
 
 _WRAPPER_HEADER = "# Managed by Jugoo identity installer. Do not edit.\n"
 _HICOLOR_SIZES = (16, 22, 24, 32, 48, 64, 128, 256, 512)
+_TASK_WATCHER_SERVICE = "jugoo-task-watcher.service"
 
 
 def xdg_data_home() -> Path:
@@ -31,6 +32,10 @@ def xdg_bin_home() -> Path:
     return Path(os.environ.get("XDG_BIN_HOME", Path.home() / ".local" / "bin"))
 
 
+def xdg_config_home() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+
+
 def desktop_file_path() -> Path:
     return xdg_data_home() / "applications" / f"{APPLICATION_ID}.desktop"
 
@@ -39,12 +44,17 @@ def wrapper_path() -> Path:
     return xdg_bin_home() / COMMAND_NAME
 
 
+def task_watcher_service_path() -> Path:
+    return xdg_config_home() / "systemd" / "user" / _TASK_WATCHER_SERVICE
+
+
 def install_identity(*, assets: Path | None = None) -> int:
     """Write wrapper, .desktop, and icon. Safe to run repeatedly."""
     binary = _write_wrapper()
     logo = discover_logo(assets)
     icon_installed = _install_icon(logo) if logo is not None else False
     _write_desktop_file(binary, icon_installed)
+    _write_task_watcher_service(binary)
     _refresh_caches()
     _print_summary(binary, logo, icon_installed)
     return 0
@@ -52,10 +62,11 @@ def install_identity(*, assets: Path | None = None) -> int:
 
 def uninstall_identity() -> int:
     """Remove files this installer created. Leaves user data (pins, history) alone."""
-    for path in (desktop_file_path(), wrapper_path()):
+    for path in (desktop_file_path(), wrapper_path(), task_watcher_service_path()):
         _remove_file(path)
     _remove_installed_icons()
     _refresh_caches()
+    _run_optional(["systemctl", "--user", "daemon-reload"])
     print("Jugoo: desktop identity removed.")
     return 0
 
@@ -97,6 +108,34 @@ def _write_desktop_file(binary: Path, icon_installed: bool) -> Path:
         lines.append(f"Icon={ICON_NAME}")
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def _write_task_watcher_service(binary: Path) -> Path:
+    path = task_watcher_service_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    root = project_root()
+    payload = (
+        "[Unit]\n"
+        "Description=Jugoo task watcher\n"
+        "After=graphical-session.target\n"
+        "PartOf=graphical-session.target\n"
+        "\n"
+        "[Service]\n"
+        "Type=simple\n"
+        f"WorkingDirectory={_unit_path(str(root))}\n"
+        f"ExecStart={_unit_path(str(binary))} --task-watcher\n"
+        "Restart=on-failure\n"
+        "RestartSec=3\n"
+        "TimeoutStopSec=15\n"
+        "KillMode=mixed\n"
+        "KillSignal=SIGTERM\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=graphical-session.target\n"
+    )
+    path.write_text(payload, encoding="utf-8")
+    _run_optional(["systemctl", "--user", "daemon-reload"])
     return path
 
 
@@ -170,6 +209,12 @@ def _desktop_exec(binary: Path) -> str:
     if any(ch.isspace() for ch in text):
         return f'"{text}"'
     return text
+
+
+def _unit_path(value: str) -> str:
+    if any(ch.isspace() for ch in value):
+        return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return value
 
 
 def _shell_quote(value: str) -> str:

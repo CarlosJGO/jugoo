@@ -139,6 +139,27 @@ class GpuStats:
 
 
 @dataclass(frozen=True)
+class ComputeResources:
+    """On-demand GPU/RAM snapshot for opportunistic local inference."""
+
+    vram_used_bytes: int | None = None
+    vram_total_bytes: int | None = None
+    gpu_usage_percent: float | None = None
+    ram_available_bytes: int | None = None
+    ram_total_bytes: int | None = None
+
+    @property
+    def vram_available_bytes(self) -> int | None:
+        if self.vram_used_bytes is None or self.vram_total_bytes is None:
+            return None
+        return max(0, self.vram_total_bytes - self.vram_used_bytes)
+
+    @property
+    def gpu_memory_reliable(self) -> bool:
+        return self.vram_available_bytes is not None
+
+
+@dataclass(frozen=True)
 class SystemStats:
     cpu: CpuStats = field(default_factory=CpuStats)
     memory: MemoryStats = field(default_factory=MemoryStats)
@@ -407,12 +428,58 @@ def _read_zram_stats() -> tuple[int | None, int | None, int | None]:
     return (data, compressed, physical) if found else (None, None, None)
 
 
-def _find_amdgpu_vram_paths() -> tuple[Path | None, Path | None]:
-    """Find VRAM usage files exposed by the amdgpu DRM device."""
+def read_compute_resources() -> ComputeResources:
+    """Read VRAM, GPU busy, and available RAM without process PSS scans.
+
+    Intended for rare, on-demand decisions (for example before launching Llama).
+    Missing sensors yield ``None`` fields; callers should treat that as unsafe.
+    """
+    ram_total, ram_available = _read_meminfo_totals()
+    device = _find_amdgpu_device()
+    vram_used = vram_total = gpu_usage = None
+    if device is not None:
+        vram_used = _read_integer(device / "mem_info_vram_used")
+        vram_total = _read_integer(device / "mem_info_vram_total")
+        busy = _read_integer(device / "gpu_busy_percent")
+        if busy is not None:
+            gpu_usage = max(0.0, min(100.0, float(busy)))
+    return ComputeResources(
+        vram_used_bytes=vram_used,
+        vram_total_bytes=vram_total,
+        gpu_usage_percent=gpu_usage,
+        ram_available_bytes=ram_available,
+        ram_total_bytes=ram_total,
+    )
+
+
+def _read_meminfo_totals() -> tuple[int | None, int | None]:
+    content = _read_text(PROC_MEMINFO)
+    if content is None:
+        return None, None
+    total = available = None
+    for line in content.splitlines():
+        fields = line.split()
+        if len(fields) < 2:
+            continue
+        try:
+            value = int(fields[1]) * 1024
+        except ValueError:
+            continue
+        if fields[0] == "MemTotal:":
+            total = value
+        elif fields[0] == "MemAvailable:":
+            available = value
+        if total is not None and available is not None:
+            break
+    return total, available
+
+
+def _find_amdgpu_device() -> Path | None:
+    """Return the amdgpu DRM device directory that exposes VRAM counters."""
     try:
         cards = sorted(DRM_ROOT.glob("card[0-9]*"))
     except OSError:
-        return None, None
+        return None
 
     for card in cards:
         device = card / "device"
@@ -422,15 +489,24 @@ def _find_amdgpu_vram_paths() -> tuple[Path | None, Path | None]:
             continue
         if driver_name != "amdgpu":
             continue
-
         used = device / "mem_info_vram_used"
         total = device / "mem_info_vram_total"
         if used.exists() or total.exists():
-            return (
-                used if used.exists() else None,
-                total if total.exists() else None,
-            )
-    return None, None
+            return device
+    return None
+
+
+def _find_amdgpu_vram_paths() -> tuple[Path | None, Path | None]:
+    """Find VRAM usage files exposed by the amdgpu DRM device."""
+    device = _find_amdgpu_device()
+    if device is None:
+        return None, None
+    used = device / "mem_info_vram_used"
+    total = device / "mem_info_vram_total"
+    return (
+        used if used.exists() else None,
+        total if total.exists() else None,
+    )
 
 
 def _temperature_inputs(hwmon: Path) -> dict[str, Path]:

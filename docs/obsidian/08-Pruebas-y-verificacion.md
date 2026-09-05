@@ -49,3 +49,6 @@ hyprctl clients -j
 ```
 
 Las superficies de Jugoo deben usar `class: com.jugoo.Shell`. Si aparece `__main__.py`, el proceso no pasó por `init_window_identity()` o la ventana no está asociada al `Gtk.Application`.
+
+## Aqui se guardan las tareas que pongo
+~/.local/share/waybar-shell/tasks.json.

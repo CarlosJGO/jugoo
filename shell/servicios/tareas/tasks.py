@@ -50,6 +50,7 @@ class TasksService:
         self._path = path if path is not None else tasks_path()
         self._tasks: tuple[TaskRecord, ...] = ()
         self._today = date.today()
+        self._mtime_ns: int = 0
         self._rollover_source_id: int = 0
 
     def start(self) -> None:
@@ -154,12 +155,23 @@ class TasksService:
         self._event_bus.emit(TASKS_PANEL_REQUESTED, None)
 
     def _on_rollover_tick(self) -> bool:
+        reloaded = self._reload_if_external_change()
         today = date.today()
         rolled = rollover_tasks(self._tasks, today)
         if rolled != self._tasks or today != self._today:
             self._tasks = rolled
             self._today = today
             self._persist_and_emit()
+        elif reloaded:
+            self._emit()
+        return True
+
+    def _reload_if_external_change(self) -> bool:
+        mtime_ns = _path_mtime_ns(self._path)
+        if mtime_ns == 0 or mtime_ns <= self._mtime_ns:
+            return False
+        self._tasks = load_tasks(self._path)
+        self._mtime_ns = mtime_ns
         return True
 
     def _persist_and_emit(self) -> None:
@@ -168,6 +180,14 @@ class TasksService:
 
     def _persist(self) -> None:
         save_tasks(self._path, self._tasks)
+        self._mtime_ns = _path_mtime_ns(self._path)
 
     def _emit(self) -> None:
         self._event_bus.emit(TASKS_CHANGED, self.snapshot)
+
+
+def _path_mtime_ns(path: Path) -> int:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0

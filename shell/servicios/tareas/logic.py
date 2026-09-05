@@ -142,6 +142,15 @@ def toggle_task(task: TaskRecord, today: date) -> TaskRecord:
     return replace(task, completed_periods=tuple(sorted(completed)))
 
 
+def complete_task(task: TaskRecord, today: date) -> TaskRecord:
+    """Mark the current period done without toggling a completed task back."""
+    key = period_key(task.repeat, today, due_date=task.due_date)
+    if key in task.completed_periods:
+        return task
+    completed = tuple(sorted(set(task.completed_periods) | {key}))
+    return replace(task, completed_periods=completed)
+
+
 def applies_on(task: TaskRecord, on_date: date) -> bool:
     born = created_date(task)
     if born is not None and on_date < born:

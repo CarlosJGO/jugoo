@@ -34,6 +34,7 @@ from .servicios.notificaciones.notifications import NotificationService
 from .servicios.energia.power import PowerService
 from .servicios.sistema.system import SystemStatsService
 from .servicios.bandeja.tray import SystemTrayService
+from .servicios.tareas.presencia import TaskWatcherBridge
 from .servicios.tareas.tasks import TasksService
 from .widgets.barra.active_window import ActiveWindowWidget
 from .widgets.barra.clock import ClockWidget
@@ -76,6 +77,7 @@ class ShellApplication(Gtk.Window):
         self.tray_service = SystemTrayService()
         self.notification_service = NotificationService(self.event_bus)
         self.tasks_service = TasksService(self.event_bus)
+        self.task_watcher_bridge = TaskWatcherBridge(self.event_bus)
         self.network_service = NetworkService(self.event_bus)
         self.media_service = MediaService(self.event_bus)
         self.audio_visualizer = AudioVisualizerService(
@@ -204,6 +206,7 @@ class ShellApplication(Gtk.Window):
         self.audio_visualizer.start()
         self.notification_service.start()
         self.tasks_service.start()
+        self.task_watcher_bridge.start()
         self.show_all()
 
     # Public API for keybindings or external triggers
@@ -218,6 +221,9 @@ class ShellApplication(Gtk.Window):
 
     def toggle_launcher(self) -> None:
         self.applications_controller.toggle_launcher()
+
+    def open_tasks_panel(self) -> None:
+        self.tasks_service.request_panel()
 
     def _configure_layer_shell(self) -> None:
         GtkLayerShell.init_for_window(self)
@@ -250,6 +256,7 @@ class ShellApplication(Gtk.Window):
         self.media_service.close()
         self.audio_visualizer.close()
         self.notification_service.close()
+        self.task_watcher_bridge.close()
         self.tasks_service.close()
         self.applications_controller.close_launcher()
         self.applications.close()
@@ -271,6 +278,9 @@ class ShellGtkApplication(Gtk.Application):
         action = Gio.SimpleAction.new("toggle-launcher", None)
         action.connect("activate", self._on_toggle_launcher_action)
         self.add_action(action)
+        open_tasks = Gio.SimpleAction.new("open-tasks", None)
+        open_tasks.connect("activate", self._on_open_tasks_action)
+        self.add_action(open_tasks)
 
     def do_activate(self) -> None:
         if self._shell_window is None:
@@ -281,15 +291,25 @@ class ShellGtkApplication(Gtk.Application):
         self.activate()
         if "--toggle-launcher" in arguments[1:]:
             self._toggle_launcher()
+        if "--open-tasks" in arguments[1:]:
+            self._open_tasks_panel()
         return 0
 
     def _on_toggle_launcher_action(self, *_args) -> None:
         self.activate()
         self._toggle_launcher()
 
+    def _on_open_tasks_action(self, *_args) -> None:
+        self.activate()
+        self._open_tasks_panel()
+
     def _toggle_launcher(self) -> None:
         if self._shell_window is not None:
             self._shell_window.toggle_launcher()
+
+    def _open_tasks_panel(self) -> None:
+        if self._shell_window is not None:
+            self._shell_window.open_tasks_panel()
 
 
 def main() -> None:
@@ -301,6 +321,10 @@ def main() -> None:
         from .desktop_install import uninstall_identity
 
         raise SystemExit(uninstall_identity())
+    if "--task-watcher" in sys.argv[1:]:
+        from .servicios.tareas.vigilancia import run_task_watcher
+
+        raise SystemExit(run_task_watcher())
 
     init_window_identity()
     app = ShellGtkApplication()

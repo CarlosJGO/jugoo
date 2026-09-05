@@ -831,7 +831,17 @@ button.tasks-button:hover {
     background-color: @shell_hover_bg;
 }
 
-button.tasks-button image {
+button.tasks-button image,
+button.tasks-button .tasks-icon {
+    color: @shell_text_primary;
+}
+
+button.tasks-button.tasks-watcher-unknown .tasks-icon,
+button.tasks-button.tasks-watcher-inactive .tasks-icon {
+    color: @shell_text_secondary;
+}
+
+button.tasks-button.tasks-watcher-quiet .tasks-icon {
     color: @shell_text_primary;
 }
 
