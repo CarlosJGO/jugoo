@@ -33,6 +33,7 @@ WORKSPACE_REORDER_REQUESTED = "workspace_reorder_requested"
 ACTIVE_WINDOW_CHANGED = "active_window_changed"
 WINDOW_OPENED = "window_opened"
 WINDOW_CLOSED = "window_closed"
+WINDOW_FOCUS_REQUESTED = "window_focus_requested"
 FULLSCREEN_CHANGED = "fullscreen_changed"
 MONITOR_CHANGED = "monitor_changed"
 
@@ -65,6 +66,11 @@ class HyprlandService:
             self._on_workspace_reorder_requested,
             on_main=False,
         )
+        self._event_bus.subscribe(
+            WINDOW_FOCUS_REQUESTED,
+            self._on_window_focus_requested,
+            on_main=False,
+        )
 
     @property
     def snapshot(self) -> HyprlandSnapshot | None:
@@ -88,6 +94,7 @@ class HyprlandService:
             WORKSPACE_REORDER_REQUESTED,
             self._on_workspace_reorder_requested,
         )
+        self._event_bus.unsubscribe(WINDOW_FOCUS_REQUESTED, self._on_window_focus_requested)
         with self._socket_lock:
             if self._socket is not None:
                 try:
@@ -126,6 +133,33 @@ class HyprlandService:
         with self._command_threads_lock:
             self._command_threads.add(command_thread)
         command_thread.start()
+
+    def _on_window_focus_requested(self, address: Any) -> None:
+        """Focus a mapped client off GTK's main thread."""
+        if self._stop_event.is_set() or not isinstance(address, str) or not address.strip():
+            return
+
+        def worker() -> None:
+            try:
+                self._focus_window(address.strip())
+            except HyprlandError as error:
+                print(f"shell: {error}")
+            finally:
+                with self._command_threads_lock:
+                    self._command_threads.discard(threading.current_thread())
+
+        command_thread = threading.Thread(
+            target=worker,
+            name="hyprland-window-focus",
+            daemon=True,
+        )
+        with self._command_threads_lock:
+            self._command_threads.add(command_thread)
+        command_thread.start()
+
+    def _focus_window(self, address: str) -> None:
+        escaped_address = address.replace("\\", "\\\\").replace('"', '\\"')
+        self._dispatch_lua(f'hl.dsp.focus({{ window = "address:{escaped_address}" }})')
 
     def _on_workspace_reorder_requested(self, payload: Any) -> None:
         """Move or swap windows between two normal workspaces off GTK's thread."""
@@ -237,6 +271,12 @@ class HyprlandService:
                     event_socket.connect(str(self._event_socket_path()))
                     with self._socket_lock:
                         self._socket = event_socket
+                    try:
+                        snapshot = self._refresh_full()
+                        self._emit(WORKSPACE_CHANGED, snapshot)
+                        self._emit_active_window(snapshot)
+                    except HyprlandError as error:
+                        print(f"shell: {error}")
                     self._read_events(event_socket)
             except (HyprlandError, FileNotFoundError, ConnectionRefusedError, OSError):
                 self._stop_event.wait(1)

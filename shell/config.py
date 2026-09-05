@@ -137,6 +137,20 @@ MEDIA_POPUP_WIDTH = 440
 MEDIA_POPUP_MAX_HEIGHT = 300
 MEDIA_ARTWORK_SIZE = 128
 
+# Pinned application dock (in-bar; expansion uses Gtk.Revealer, not a popup).
+PINNED_APPS_VISIBLE_LIMIT = 9
+PINNED_APP_ICON_SIZE = 20
+PINNED_APP_COMPACT_ICON_SIZE = 16
+PINNED_APP_SPACING = 2
+PINNED_DOCK_REVEAL_MS = 180
+PINNED_APPS_PATH = "pinned-apps.json"
+
+# Application launcher overlay (Super+Space).
+LAUNCHER_WIDTH = 440
+LAUNCHER_MAX_HEIGHT = 520
+LAUNCHER_ROW_ICON_SIZE = 28
+LAUNCHER_LIST_SPACING = 2
+
 # Audio visualizer (PipeWire monitor sampling for the active-window block).
 AUDIO_VISUALIZER_BAR_COUNT = 14
 AUDIO_VISUALIZER_FPS = 14

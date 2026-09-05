@@ -426,6 +426,166 @@ drawingarea.active-window-spectrum {
 }
 
 /* ==========================================================================
+   5c. Widgets — Pinned application dock
+   ========================================================================== */
+
+box.pinned-apps-widget {
+    padding: 2px 6px;
+}
+
+button.pinned-app-button {
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    padding: 2px 4px;
+    min-width: 24px;
+    min-height: 24px;
+}
+
+button.pinned-app-button:hover {
+    background-color: @shell_hover_bg_soft;
+}
+
+button.pinned-app-button.running {
+    background-image: linear-gradient(
+        to top,
+        rgba(165, 139, 255, 0.55) 0,
+        rgba(165, 139, 255, 0.55) 2px,
+        transparent 2px
+    );
+}
+
+button.pinned-app-button.focused {
+    background-color: @shell_accent_soft;
+    background-image: linear-gradient(
+        to top,
+        @shell_accent 0,
+        @shell_accent 2px,
+        transparent 2px
+    );
+}
+
+button.pinned-apps-expand {
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    color: @shell_text_secondary;
+    min-width: 20px;
+    min-height: 24px;
+    padding: 2px;
+}
+
+button.pinned-apps-expand:hover,
+button.pinned-apps-expand.expanded {
+    background-color: @shell_hover_bg_soft;
+    color: @shell_text_primary;
+}
+
+window#shell.compact box.pinned-apps-widget {
+    padding: 1px 4px;
+    min-height: 0;
+}
+
+window#shell.compact button.pinned-app-button,
+window#shell.compact button.pinned-apps-expand {
+    min-width: 18px;
+    min-height: 18px;
+    padding: 1px 2px;
+}
+
+/* ==========================================================================
+   5d. Widgets — Application launcher
+   ========================================================================== */
+
+window#shell-app-launcher {
+    background-color: transparent;
+}
+
+eventbox.launcher-backdrop {
+    background-color: rgba(8, 8, 12, 0.42);
+}
+
+box.launcher-card {
+    background-color: @shell_surface_bg_panel;
+    border: 1px solid @shell_border_strong;
+    border-radius: 16px;
+    padding: 12px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42);
+}
+
+box.launcher-search-row {
+    background-color: @shell_hover_bg_faint;
+    border: 1px solid @shell_border_subtle;
+    border-radius: 12px;
+    padding: 6px 10px;
+}
+
+entry.launcher-search,
+entry.launcher-search:focus {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    color: @shell_text_primary;
+    padding: 2px 0;
+}
+
+label.launcher-empty {
+    color: @shell_text_muted;
+    font-size: 13px;
+    padding: 18px 8px;
+}
+
+listbox.launcher-list {
+    background: transparent;
+}
+
+row.launcher-row {
+    border-radius: 10px;
+    margin: 2px 0;
+    padding: 0;
+}
+
+row.launcher-row:hover,
+row.launcher-row:selected {
+    background-color: @shell_hover_bg_faint;
+}
+
+row.launcher-row-pinned {
+    box-shadow: inset 3px 0 0 @shell_accent;
+}
+
+box.launcher-row-content {
+    padding: 8px 10px;
+}
+
+label.launcher-row-name {
+    color: @shell_text_primary;
+    font-weight: 600;
+}
+
+label.launcher-row-comment {
+    color: @shell_text_secondary;
+    font-size: 12px;
+}
+
+button.launcher-pin-button {
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    padding: 4px;
+    color: @shell_text_muted;
+}
+
+button.launcher-pin-button:hover {
+    background-color: @shell_hover_bg_soft;
+    color: @shell_text_primary;
+}
+
+button.launcher-pin-button.pinned {
+    color: @shell_accent;
+}
+
+/* ==========================================================================
    5b. Widgets — Media popup
    ========================================================================== */
 

@@ -37,12 +37,14 @@ TITLE_MEDIA_POPUP = "Shell Media Popup"
 TITLE_VOLUME_OSD = "Shell Volume OSD"
 TITLE_CLOCK_CALENDAR = "Shell Clock Calendar"
 TITLE_MEMORY_POPUP = "Shell Memory Popup"
+TITLE_APP_LAUNCHER = "Shell App Launcher"
 
 # Interactive popups that keep keyboard focus on purpose:
 # - Control Center / Network: WiFi password entry
 # - Media popup: player combo + seek
 # - Workspace audio / panel: volume sliders and device selectors
 # - Notifications / Power: buttons and confirmation dialogs
+# - App launcher: search entry and keyboard navigation
 # OSD windows must never take focus or keyboard (see configure_osd_window).
 
 

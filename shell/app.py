@@ -16,6 +16,7 @@ gi.require_version("GtkLayerShell", "0.1")
 from gi.repository import Gdk, Gio, Gtk, GtkLayerShell
 
 from .config import PERSISTENT_WORKSPACES, TOP_MARGIN
+from .controllers.applications import ApplicationsController
 from .controllers.control_center import ControlCenterController
 from .controllers.media import MediaController
 from .controllers.shell_compact import ShellCompactController
@@ -23,6 +24,7 @@ from .controllers.volume_osd import VolumeOsdController
 from .controllers.workspace_interaction import WorkspaceInteractionController
 from .eventbus import EventBus
 from .layout import ShellLayout
+from .servicios.aplicaciones.applications import ApplicationsService
 from .servicios.audio.audio import AudioService
 from .servicios.audio.audio_visualizer import AudioVisualizerService
 from .servicios.escritorio.hyprland import HyprlandService
@@ -36,6 +38,7 @@ from .widgets.barra.active_window import ActiveWindowWidget
 from .widgets.barra.clock import ClockWidget
 from .widgets.barra.ethernet import EthernetWidget
 from .widgets.barra.notifications import NotificationsWidget
+from .widgets.barra.pinned_apps import PinnedAppsWidget
 from .widgets.barra.power import PowerWidget
 from .widgets.barra.stats import StatsWidget
 from .widgets.barra.tray import SystemTrayWidget
@@ -64,6 +67,7 @@ class ShellApplication(Gtk.Window):
         self.set_application(application)
         self.event_bus = EventBus(dispatch_on_main=True)
         self.hyprland = HyprlandService(self.event_bus, PERSISTENT_WORKSPACES)
+        self.applications = ApplicationsService(self.event_bus)
         self.audio_service = AudioService(self.event_bus)
         self.system_stats = SystemStatsService()
         self.power_service = PowerService()
@@ -115,6 +119,9 @@ class ShellApplication(Gtk.Window):
         self.stats_widget.set_valign(Gtk.Align.FILL)
         self.layout.left.add(self.stats_widget)
 
+        self.pinned_apps_widget = PinnedAppsWidget(self.event_bus)
+        self.layout.left.add(self.pinned_apps_widget)
+
         self.active_window_widget = ActiveWindowWidget(self.event_bus, self.media_service)
         self.layout.left.set_spacing(0)
         self.layout.left.set_halign(Gtk.Align.START)
@@ -162,6 +169,13 @@ class ShellApplication(Gtk.Window):
             self,
         )
 
+        self.applications_controller = ApplicationsController(
+            self.event_bus,
+            self.applications,
+            self.hyprland,
+            self,
+        )
+
         self.compact_controller = ShellCompactController(
             self.event_bus,
             self.hyprland,
@@ -173,11 +187,13 @@ class ShellApplication(Gtk.Window):
                 self.tray_widget,
                 self.notifications_widget,
                 self.power_widget,
+                self.pinned_apps_widget,
             ),
         )
 
         self.connect("destroy", self._on_destroy)
 
+        self.applications.start()
         self.hyprland.start()
         self.audio_service.start()
         self.volume_osd_controller.start()
@@ -196,6 +212,9 @@ class ShellApplication(Gtk.Window):
 
     def close_control_center(self) -> None:
         self.control_center_controller.close_popup()
+
+    def toggle_launcher(self) -> None:
+        self.applications_controller.toggle_launcher()
 
     def _configure_layer_shell(self) -> None:
         GtkLayerShell.init_for_window(self)
@@ -228,6 +247,8 @@ class ShellApplication(Gtk.Window):
         self.media_service.close()
         self.audio_visualizer.close()
         self.notification_service.close()
+        self.applications_controller.close_launcher()
+        self.applications.close()
         self.hyprland.close()
 
 
@@ -237,13 +258,34 @@ class ShellGtkApplication(Gtk.Application):
     def __init__(self) -> None:
         super().__init__(
             application_id=APPLICATION_ID,
-            flags=Gio.ApplicationFlags.FLAGS_NONE,
+            flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
         )
         self._shell_window: ShellApplication | None = None
+
+    def do_startup(self) -> None:
+        Gtk.Application.do_startup(self)
+        action = Gio.SimpleAction.new("toggle-launcher", None)
+        action.connect("activate", self._on_toggle_launcher_action)
+        self.add_action(action)
 
     def do_activate(self) -> None:
         if self._shell_window is None:
             self._shell_window = ShellApplication(self)
+
+    def do_command_line(self, command_line: Gio.ApplicationCommandLine) -> int:
+        arguments = command_line.get_arguments()
+        self.activate()
+        if "--toggle-launcher" in arguments[1:]:
+            self._toggle_launcher()
+        return 0
+
+    def _on_toggle_launcher_action(self, *_args) -> None:
+        self.activate()
+        self._toggle_launcher()
+
+    def _toggle_launcher(self) -> None:
+        if self._shell_window is not None:
+            self._shell_window.toggle_launcher()
 
 
 def main() -> None:

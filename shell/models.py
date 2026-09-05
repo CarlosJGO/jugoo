@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
 
@@ -613,3 +614,183 @@ def _with_workspace_focus(workspace: Workspace, focused_window_address: str | No
 
 def _focus_first(windows: tuple[Window, ...], focused_window_address: str | None) -> tuple[Window, ...]:
     return tuple(sorted(windows, key=lambda window: window.address != focused_window_address))
+
+
+@dataclass(frozen=True)
+class DesktopApplication:
+    """One installed application discovered from a ``.desktop`` file."""
+
+    id: str
+    name: str
+    icon: str
+    exec_cmd: str = ""
+    wm_class: str = ""
+    categories: tuple[str, ...] = ()
+    keywords: tuple[str, ...] = ()
+    comment: str = ""
+    generic_name: str = ""
+    terminal: bool = False
+    desktop_path: str = ""
+
+
+@dataclass(frozen=True)
+class ApplicationsSnapshot:
+    """Service-owned application catalog and pinned order."""
+
+    applications: tuple[DesktopApplication, ...] = ()
+    pinned_ids: tuple[str, ...] = ()
+
+    def app_by_id(self, app_id: str) -> DesktopApplication | None:
+        wanted = normalize_desktop_id(app_id)
+        if not wanted:
+            return None
+        for application in self.applications:
+            if application.id == wanted:
+                return application
+        return None
+
+    def pinned_apps(self) -> tuple[DesktopApplication, ...]:
+        apps: list[DesktopApplication] = []
+        for app_id in self.pinned_ids:
+            application = self.app_by_id(app_id)
+            if application is not None:
+                apps.append(application)
+        return tuple(apps)
+
+
+def normalize_desktop_id(value: str) -> str:
+    """Strip ``.desktop`` and normalize an application identifier."""
+    ident = value.strip()
+    if ident.casefold().endswith(".desktop"):
+        ident = ident[: -len(".desktop")]
+    return ident
+
+
+def pin_application(pinned_ids: Sequence[str], app_id: str) -> tuple[str, ...]:
+    """Append ``app_id`` if missing; keep existing order otherwise."""
+    ident = normalize_desktop_id(app_id)
+    if not ident:
+        return tuple(pinned_ids)
+    ordered = tuple(normalize_desktop_id(item) for item in pinned_ids if normalize_desktop_id(item))
+    if ident in ordered:
+        return ordered
+    return ordered + (ident,)
+
+
+def unpin_application(pinned_ids: Sequence[str], app_id: str) -> tuple[str, ...]:
+    """Remove ``app_id`` and close the gap; other entries keep their relative order."""
+    ident = normalize_desktop_id(app_id)
+    return tuple(
+        item
+        for item in (normalize_desktop_id(entry) for entry in pinned_ids)
+        if item and item != ident
+    )
+
+
+def split_pinned_dock(
+    pinned_ids: Sequence[str],
+    visible_limit: int,
+) -> tuple[tuple[str, ...], tuple[str, ...], bool]:
+    """Split pinned ids into the stable dock strip and the in-bar overflow."""
+    ordered = tuple(normalize_desktop_id(item) for item in pinned_ids if normalize_desktop_id(item))
+    if visible_limit < 1:
+        return (), ordered, bool(ordered)
+    if len(ordered) <= visible_limit:
+        return ordered, (), False
+    return ordered[:visible_limit], ordered[visible_limit:], True
+
+
+def snapshot_windows(snapshot: HyprlandSnapshot | None) -> tuple[Window, ...]:
+    if snapshot is None:
+        return ()
+    return tuple(window for workspace in snapshot.workspaces for window in workspace.windows)
+
+
+def application_identity_keys(application: DesktopApplication) -> frozenset[str]:
+    keys = {application.id.casefold()}
+    if application.wm_class.strip():
+        keys.add(application.wm_class.casefold().strip())
+    if "." in application.id:
+        keys.add(application.id.rsplit(".", 1)[-1].casefold())
+    stem = Path(application.desktop_path).stem if application.desktop_path else ""
+    if stem:
+        keys.add(stem.casefold())
+    return frozenset(key for key in keys if key)
+
+
+def window_matches_application(window: Window, application: DesktopApplication) -> bool:
+    class_key = window.app_class.casefold().strip()
+    if not class_key:
+        return False
+    identities = application_identity_keys(application)
+    if class_key in identities:
+        return True
+    for identity in identities:
+        if len(identity) < 4:
+            continue
+        if identity in class_key or class_key in identity:
+            return True
+    return False
+
+
+def windows_for_application(
+    application: DesktopApplication,
+    windows: Sequence[Window],
+) -> tuple[Window, ...]:
+    return tuple(window for window in windows if window_matches_application(window, application))
+
+
+def next_window_to_focus(
+    windows: Sequence[Window],
+    active_address: str,
+) -> Window | None:
+    """Focus the first match, or cycle to the next when several windows are open."""
+    if not windows:
+        return None
+    addresses = [window.address for window in windows if window.address]
+    if not addresses:
+        return windows[0]
+    if active_address not in addresses:
+        return windows[0]
+    index = addresses.index(active_address)
+    return windows[(index + 1) % len(windows)]
+
+
+def filter_applications(
+    applications: Sequence[DesktopApplication],
+    query: str,
+    pinned_ids: Sequence[str] = (),
+) -> tuple[DesktopApplication, ...]:
+    """Filter the in-memory catalog. Pinned apps sort first, then prefix hits."""
+    needle = " ".join(query.casefold().split())
+    pinned = {normalize_desktop_id(item) for item in pinned_ids}
+
+    def score(application: DesktopApplication) -> tuple[int, int, str]:
+        name = application.name.casefold()
+        ident = application.id.casefold()
+        haystack = " ".join(
+            part
+            for part in (
+                name,
+                application.generic_name.casefold(),
+                ident,
+                " ".join(application.keywords).casefold(),
+                " ".join(application.categories).casefold(),
+                application.comment.casefold(),
+            )
+            if part
+        )
+        if needle:
+            if not (
+                needle in haystack
+                or all(token in haystack for token in needle.split())
+            ):
+                return (3, 0, name)
+        prefix = 0 if name.startswith(needle) or ident.startswith(needle) else 1
+        pinned_rank = 0 if application.id in pinned else 1
+        return (pinned_rank, prefix, name)
+
+    if not needle:
+        return tuple(sorted(applications, key=score))
+    matched = [application for application in applications if score(application)[0] < 3]
+    return tuple(sorted(matched, key=score))
