@@ -442,6 +442,50 @@ def swap_workspace_blocks(
     return tuple(ordered)
 
 
+def pick_temporary_workspace_id(
+    existing_ids: Iterable[int | None],
+    *,
+    start: int = 9999,
+) -> int:
+    """Choose a numeric workspace that no mapped client currently occupies."""
+    occupied = {
+        workspace_id
+        for workspace_id in existing_ids
+        if isinstance(workspace_id, int)
+    }
+    temporary_id = start
+    while temporary_id in occupied:
+        temporary_id -= 1
+    return temporary_id
+
+
+def plan_workspace_content_moves(
+    current_id: int,
+    target_id: int,
+    current_addresses: Sequence[str],
+    target_addresses: Sequence[str],
+    temporary_id: int,
+) -> tuple[tuple[str, int], ...]:
+    """Window address → workspace moves matching ``move_workspace_contents.py``.
+
+    Occupied destination uses a three-step swap through ``temporary_id`` so the
+    two groups never mix. Empty destination is a direct move. Empty source
+    produces no moves; the caller just focuses the target, matching
+    ``move_workspace_contents.py``.
+    """
+    if current_id == target_id or current_id < 1 or target_id < 1:
+        return ()
+    if not current_addresses:
+        return ()
+    if not target_addresses:
+        return tuple((address, target_id) for address in current_addresses)
+    return (
+        tuple((address, temporary_id) for address in current_addresses)
+        + tuple((address, current_id) for address in target_addresses)
+        + tuple((address, target_id) for address in current_addresses)
+    )
+
+
 def compose_workspaces(
     records: Iterable[WorkspaceRecord],
     windows: Iterable[Window],

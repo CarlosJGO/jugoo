@@ -2,6 +2,8 @@ from shell.models import (
     Window,
     Workspace,
     compose_workspace_blocks,
+    pick_temporary_workspace_id,
+    plan_workspace_content_moves,
     reorder_workspace_order,
     swap_workspace_blocks,
 )
@@ -41,3 +43,38 @@ def test_swap_workspace_blocks_preserves_workspace_contents() -> None:
     assert swapped[1].workspaces[0] is first
     assert swapped[0].workspaces[0].windows == (second_window,)
     assert swapped[1].workspaces[0].windows == (first_window,)
+
+
+def test_pick_temporary_workspace_id_skips_occupied_ids() -> None:
+    assert pick_temporary_workspace_id(()) == 9999
+    assert pick_temporary_workspace_id((1, 9999, 9998)) == 9997
+
+
+def test_plan_workspace_content_moves_direct_when_target_empty() -> None:
+    moves = plan_workspace_content_moves(1, 4, ("0x1",), (), 9999)
+
+    assert moves == (("0x1", 4),)
+
+
+def test_plan_workspace_content_moves_swaps_through_temporary_workspace() -> None:
+    moves = plan_workspace_content_moves(1, 4, ("0x1", "0x2"), ("0x3",), 9999)
+
+    assert moves == (
+        ("0x1", 9999),
+        ("0x2", 9999),
+        ("0x3", 1),
+        ("0x1", 4),
+        ("0x2", 4),
+    )
+
+
+def test_plan_workspace_content_moves_empty_source_does_not_steal_windows() -> None:
+    moves = plan_workspace_content_moves(1, 4, (), ("0x3",), 9999)
+
+    assert moves == ()
+
+
+def test_plan_workspace_content_moves_skips_empty_or_invalid_pairs() -> None:
+    assert plan_workspace_content_moves(1, 4, (), (), 9999) == ()
+    assert plan_workspace_content_moves(1, 1, ("0x1",), ("0x2",), 9999) == ()
+    assert plan_workspace_content_moves(-98, 4, ("0x1",), (), 9999) == ()

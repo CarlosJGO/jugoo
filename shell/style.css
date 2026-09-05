@@ -245,6 +245,15 @@ eventbox.workspace-block:hover {
     background-color: @shell_hover_bg;
 }
 
+eventbox.workspace-block.dragging {
+    opacity: 0.45;
+}
+
+eventbox.workspace-block.drop-target {
+    background-color: @shell_accent_soft;
+    box-shadow: inset 0 -3px 0 @shell_accent;
+}
+
 button.workspace-button {
     background: transparent;
     border: 0;

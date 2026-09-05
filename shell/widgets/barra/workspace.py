@@ -41,6 +41,7 @@ WORKSPACE_HOVER_STARTED = "workspace_hover_started"
 WORKSPACE_HOVER_ENDED = "workspace_hover_ended"
 WORKSPACE_AUDIO_REQUESTED = "workspace_audio_requested"
 AUDIO_CHANGED = "audio_changed"
+_WORKSPACE_DRAG_THRESHOLD_PX = 8
 
 
 class WorkspaceButton(Gtk.Button):
@@ -264,21 +265,12 @@ class WorkspaceWidget(Gtk.Box):
         self._all_workspaces: tuple[Workspace, ...] = ()
         self._current_workspaces: tuple[Workspace, ...] = ()
         self.block_order: tuple[int, ...] = ()
-        self._dragged_block_index: int | None = None
-        self._drag_target_block_index: int | None = None
-        self._drag_ghost: Gtk.Button | None = None
-        self._drag_origin_order: tuple[int, ...] = ()
-        self._drag_preview_order: tuple[int, ...] = ()
-        self._drag_targets = [Gtk.TargetEntry.new("text/plain", Gtk.TargetFlags.SAME_APP, 0)]
+        self._dragged_workspace_id: int | None = None
+        self._drag_target_workspace_id: int | None = None
+        self._drag_press_root: tuple[float, float] | None = None
+        self._workspace_dragging = False
+        self._suppress_workspace_click = False
         self.get_style_context().add_class("workspace-strip")
-        self.drag_dest_set(
-            Gtk.DestDefaults.MOTION | Gtk.DestDefaults.HIGHLIGHT | Gtk.DestDefaults.DROP,
-            self._drag_targets,
-            Gdk.DragAction.MOVE,
-        )
-        self.connect("drag-motion", self._on_drag_motion)
-        self.connect("drag-leave", self._on_drag_leave)
-        self.connect("drag-data-received", self._on_drag_data_received)
 
         self._event_bus.subscribe(WORKSPACE_CHANGED, self._on_workspace_changed)
         self._event_bus.subscribe(WINDOW_OPENED, self._on_workspace_changed)
@@ -291,13 +283,7 @@ class WorkspaceWidget(Gtk.Box):
         self._all_workspaces = workspaces
         blocks = compose_workspace_blocks(workspaces, WORKSPACES_PER_BLOCK)
         block_map = {block.block_index: block for block in blocks}
-        block_ids = tuple(block.block_index for block in blocks)
-        if not self.block_order:
-            self.block_order = block_ids
-        else:
-            self.block_order = tuple(index for index in self.block_order if index in block_map) + tuple(
-                index for index in block_ids if index not in self.block_order
-            )
+        self.block_order = tuple(block.block_index for block in blocks)
         self._current_workspaces = tuple(
             workspace
             for block_index in self.block_order
@@ -305,7 +291,7 @@ class WorkspaceWidget(Gtk.Box):
         )
         for workspace in self._current_workspaces:
             button = self._button_for(workspace.id)
-            self._configure_workspace_drag(button, block_map[(workspace.id - 1) // WORKSPACES_PER_BLOCK].block_index)
+            self._configure_workspace_drag(button, workspace.id)
         for position, block_index in enumerate(self.block_order):
             block_widget = self._block_for(block_index)
             block_widget.render(block_map[block_index], self.buttons)
@@ -338,143 +324,146 @@ class WorkspaceWidget(Gtk.Box):
         block_widget = self.block_widgets.get(block_index)
         if block_widget is None:
             block_widget = WorkspaceBlockWidget(block_index)
-            block_widget.drag_source_set(Gdk.ModifierType.BUTTON1_MASK, self._drag_targets, Gdk.DragAction.MOVE)
-            block_widget.connect("drag-begin", self._on_drag_begin, block_index)
-            block_widget.connect("drag-data-get", self._on_drag_data_get, block_index)
-            block_widget.connect("drag-end", self._on_drag_end, block_index)
-            block_widget.drag_dest_set(
-                Gtk.DestDefaults.MOTION | Gtk.DestDefaults.HIGHLIGHT | Gtk.DestDefaults.DROP,
-                self._drag_targets,
-                Gdk.DragAction.MOVE,
-            )
-            block_widget.connect("drag-motion", self._on_block_drag_motion, block_index)
-            block_widget.connect("drag-leave", self._on_drag_leave)
-            block_widget.connect("drag-data-received", self._on_workspace_drag_data_received, block_index)
-            block_widget.content.drag_source_set(Gdk.ModifierType.BUTTON1_MASK, self._drag_targets, Gdk.DragAction.MOVE)
-            block_widget.content.connect("drag-begin", self._on_drag_begin, block_index)
-            block_widget.content.connect("drag-data-get", self._on_drag_data_get, block_index)
-            block_widget.content.connect("drag-end", self._on_drag_end, block_index)
             self.block_widgets[block_index] = block_widget
             self.pack_start(block_widget, False, False, 0)
         return block_widget
 
-    def _configure_workspace_drag(self, button: WorkspaceButton, block_index: int) -> None:
+    def _configure_workspace_drag(self, button: WorkspaceButton, workspace_id: int) -> None:
         if getattr(button, "_block_drag_configured", False):
             return
         button._block_drag_configured = True
+        drag_mask = (
+            Gdk.EventMask.BUTTON_PRESS_MASK
+            | Gdk.EventMask.BUTTON_RELEASE_MASK
+            | Gdk.EventMask.BUTTON_MOTION_MASK
+            | Gdk.EventMask.POINTER_MOTION_MASK
+        )
         for widget in (button, button._hover_surface):
-            widget.drag_source_set(
-                Gdk.ModifierType.BUTTON1_MASK,
-                self._drag_targets,
-                Gdk.DragAction.MOVE,
-            )
-            widget.connect("drag-begin", self._on_drag_begin, block_index)
-            widget.connect("drag-data-get", self._on_drag_data_get, block_index)
-            widget.connect("drag-end", self._on_drag_end, block_index)
-            widget.drag_dest_set(
-                Gtk.DestDefaults.MOTION | Gtk.DestDefaults.HIGHLIGHT | Gtk.DestDefaults.DROP,
-                self._drag_targets,
-                Gdk.DragAction.MOVE,
-            )
-            widget.connect("drag-motion", self._on_block_drag_motion, block_index)
-            widget.connect("drag-leave", self._on_drag_leave)
-            widget.connect("drag-data-received", self._on_workspace_drag_data_received, block_index)
+            widget.add_events(drag_mask)
+            widget.connect("button-press-event", self._on_workspace_drag_press, workspace_id)
+            widget.connect("motion-notify-event", self._on_workspace_drag_motion, workspace_id)
+            widget.connect("button-release-event", self._on_workspace_drag_release, workspace_id)
 
-    def _on_block_drag_motion(self, widget: Gtk.Widget, context: Gdk.DragContext, x: int, y: int, time: int, block_index: int) -> bool:
-        allocation = widget.get_allocation()
-        return self._on_drag_motion(widget, context, allocation.x + x, y, time, block_index)
+    def _on_workspace_drag_press(
+        self,
+        _widget: Gtk.Widget,
+        event: Gdk.EventButton,
+        workspace_id: int,
+    ) -> bool:
+        if event.button != 1 or workspace_id < 1:
+            return False
+        self._dragged_workspace_id = workspace_id
+        self._drag_target_workspace_id = None
+        self._drag_press_root = (float(event.x_root), float(event.y_root))
+        self._workspace_dragging = False
+        return False
 
-    def _on_drag_begin(self, block_widget: WorkspaceBlockWidget, context: Gdk.DragContext, block_index: int) -> None:
-        self._dragged_block_index = block_index
-        self._drag_target_block_index = None
-        self._drag_origin_order = self.block_order
-        self._drag_preview_order = self.block_order
-        block = self.block_widgets.get(block_index)
-        if block is None:
-            return
-        block.get_style_context().add_class("dragging")
-        label = f"WS {block_index * WORKSPACES_PER_BLOCK + 1}-{(block_index + 1) * WORKSPACES_PER_BLOCK}"
-        self._drag_ghost = Gtk.Button(label=label)
-        self._drag_ghost.get_style_context().add_class("workspace-button")
-        self._drag_ghost.get_style_context().add_class("drag-ghost")
-        allocation = block.get_allocation()
-        self._drag_ghost.set_size_request(allocation.width, allocation.height)
-        self._drag_ghost.show()
-        Gtk.drag_set_icon_widget(context, self._drag_ghost, 0, 0)
+    def _on_workspace_drag_motion(
+        self,
+        _widget: Gtk.Widget,
+        event: Gdk.EventMotion,
+        _workspace_id: int,
+    ) -> bool:
+        if self._dragged_workspace_id is None or self._drag_press_root is None:
+            return False
+        if not (event.state & Gdk.ModifierType.BUTTON1_MASK):
+            return False
+        if not self._workspace_dragging:
+            delta_x = float(event.x_root) - self._drag_press_root[0]
+            delta_y = float(event.y_root) - self._drag_press_root[1]
+            if (delta_x * delta_x) + (delta_y * delta_y) < _WORKSPACE_DRAG_THRESHOLD_PX ** 2:
+                return False
+            self._workspace_dragging = True
+            self._suppress_workspace_click = True
+            source_button = self.buttons.get(self._dragged_workspace_id)
+            if source_button is not None:
+                source_button.get_style_context().add_class("dragging")
+        target_id = self._workspace_id_at_widget_point(_widget, event.x, event.y)
+        self._drag_target_workspace_id = target_id
+        self._update_drop_target_style(target_id)
+        return True
 
-    def _on_drag_data_get(self, _block_widget: WorkspaceBlockWidget, _context: Gdk.DragContext, selection_data: Gtk.SelectionData, _info: int, _time: int, block_index: int) -> None:
-        selection_data.set_text(str(block_index), -1)
-
-    def _on_drag_end(self, _block_widget: WorkspaceBlockWidget, _context: Gdk.DragContext, _block_index: int) -> None:
-        for block_widget in self.block_widgets.values():
-            block_widget.get_style_context().remove_class("dragging")
-            block_widget.get_style_context().remove_class("drop-target")
-        if self._drag_ghost is not None:
-            self._drag_ghost.destroy()
-            self._drag_ghost = None
-        source_index = self._dragged_block_index
-        target_index = self._drag_target_block_index
-        if source_index is not None and target_index is not None and source_index != target_index:
-            source_position = self.block_order.index(source_index)
-            target_position = self.block_order.index(target_index)
-            block_order = list(self.block_order)
-            block_order[source_position], block_order[target_position] = (
-                block_order[target_position],
-                block_order[source_position],
-            )
-            self.block_order = tuple(block_order)
-            self.render(self._all_workspaces)
+    def _on_workspace_drag_release(
+        self,
+        _widget: Gtk.Widget,
+        event: Gdk.EventButton,
+        _workspace_id: int,
+    ) -> bool:
+        if event.button != 1:
+            return False
+        source_id = self._dragged_workspace_id
+        was_dragging = self._workspace_dragging
+        target_id = self._workspace_id_at_widget_point(_widget, event.x, event.y)
+        if target_id is None:
+            target_id = self._drag_target_workspace_id
+        self._reset_workspace_drag()
+        if (
+            was_dragging
+            and source_id is not None
+            and target_id is not None
+            and source_id != target_id
+            and source_id > 0
+            and target_id > 0
+        ):
             self._event_bus.emit(
                 WORKSPACE_REORDER_REQUESTED,
                 {
-                    "block_order": self.block_order,
-                    "source_block": source_index,
-                    "target_block": target_index,
+                    "source_workspace": source_id,
+                    "target_workspace": target_id,
                 },
             )
-        self._dragged_block_index = None
-        self._drag_target_block_index = None
-        self._drag_origin_order = ()
-        self._drag_preview_order = ()
+            GLib.timeout_add(100, self._clear_suppress_workspace_click)
+            return True
+        if was_dragging:
+            GLib.timeout_add(100, self._clear_suppress_workspace_click)
+            return True
+        self._suppress_workspace_click = False
+        return False
 
-    def _on_drag_motion(self, _widget: Gtk.Widget, context: Gdk.DragContext, x: int, _y: int, time: int, target_block_index: int | None = None) -> bool:
-        source_index = self._dragged_block_index
-        if source_index is None:
-            return False
-        visible_indices = [index for index in self._drag_origin_order if index != source_index]
-        insertion_index = len(visible_indices)
-        target_index = target_block_index if target_block_index is not None else source_index
-        for index, block_index in enumerate(visible_indices):
-            if target_block_index is None:
-                block_widget = self.block_widgets[block_index]
-                allocation = block_widget.get_allocation()
-                if x < allocation.x + allocation.width / 2:
-                    insertion_index = index
-                    target_index = block_index
-                    break
-            elif block_index == target_block_index:
-                insertion_index = index
-                break
-        if target_block_index is not None and target_block_index in visible_indices:
-            insertion_index = visible_indices.index(target_block_index)
-        self._drag_target_block_index = target_index
-        for block_widget in self.block_widgets.values():
-            block_widget.get_style_context().remove_class("drop-target")
-        if target_index != source_index:
-            self.block_widgets[target_index].get_style_context().add_class("drop-target")
-        Gdk.drag_status(context, Gdk.DragAction.MOVE, time)
-        return True
+    def _update_drop_target_style(self, target_id: int | None) -> None:
+        source_id = self._dragged_workspace_id
+        for workspace_id, button in self.buttons.items():
+            style = button.get_style_context()
+            if workspace_id == target_id and workspace_id != source_id:
+                style.add_class("drop-target")
+            else:
+                style.remove_class("drop-target")
 
-    def _on_drag_leave(self, _widget: Gtk.Widget, _context: Gdk.DragContext, _time: int) -> None:
-        for block_widget in self.block_widgets.values():
-            block_widget.get_style_context().remove_class("drop-target")
+    def _workspace_id_at_widget_point(self, widget: Gtk.Widget, x: float, y: float) -> int | None:
+        translated = widget.translate_coordinates(self, int(x), int(y))
+        if translated is None:
+            return None
+        pointer_x, pointer_y = translated
+        for workspace_id, button in self.buttons.items():
+            if workspace_id < 1 or not button.get_mapped():
+                continue
+            origin = button.translate_coordinates(self, 0, 0)
+            if origin is None:
+                continue
+            button_x, button_y = origin
+            allocation = button.get_allocation()
+            if (
+                button_x <= pointer_x < button_x + allocation.width
+                and button_y <= pointer_y < button_y + allocation.height
+            ):
+                return workspace_id
+        return None
 
-    def _on_workspace_drag_data_received(self, _widget: Gtk.Widget, context: Gdk.DragContext, _x: int, _y: int, _selection_data: Gtk.SelectionData, _info: int, time: int, block_index: int) -> None:
-        self._drag_target_block_index = block_index
-        Gtk.drag_finish(context, True, False, time)
+    def _reset_workspace_drag(self) -> None:
+        self._clear_drag_styles()
+        self._dragged_workspace_id = None
+        self._drag_target_workspace_id = None
+        self._drag_press_root = None
+        self._workspace_dragging = False
 
-    def _on_drag_data_received(self, _widget: Gtk.Widget, context: Gdk.DragContext, _x: int, _y: int, _selection_data: Gtk.SelectionData, _info: int, time: int) -> None:
-        Gtk.drag_finish(context, True, False, time)
+    def _clear_suppress_workspace_click(self) -> bool:
+        self._suppress_workspace_click = False
+        return False
+
+    def _clear_drag_styles(self) -> None:
+        for button in self.buttons.values():
+            button.get_style_context().remove_class("dragging")
+            button.get_style_context().remove_class("drop-target")
 
     def get_button(self, workspace_id: int) -> WorkspaceButton | None:
         return self.buttons.get(workspace_id)
@@ -493,6 +482,8 @@ class WorkspaceWidget(Gtk.Box):
         return button
 
     def _on_button_clicked(self, workspace_id: int) -> None:
+        if self._suppress_workspace_click:
+            return
         self._event_bus.emit(WORKSPACE_REQUESTED, workspace_id)
 
     def _on_audio_requested(self, workspace_id: int, widget: Gtk.Widget) -> None:
@@ -502,6 +493,8 @@ class WorkspaceWidget(Gtk.Box):
         )
 
     def _on_workspace_entered(self, button: WorkspaceButton, workspace_id: int) -> None:
+        if self._workspace_dragging:
+            return
         self._event_bus.emit(
             WORKSPACE_HOVER_STARTED,
             {"workspace_id": workspace_id, "widget": button},
@@ -527,6 +520,7 @@ class WorkspaceWidget(Gtk.Box):
         return False
 
     def _on_destroy(self, *_args) -> None:
+        self._reset_workspace_drag()
         self._event_bus.unsubscribe(WORKSPACE_CHANGED, self._on_workspace_changed)
         self._event_bus.unsubscribe(WINDOW_OPENED, self._on_workspace_changed)
         self._event_bus.unsubscribe(WINDOW_CLOSED, self._on_workspace_changed)
