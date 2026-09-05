@@ -1,8 +1,8 @@
-"""Clock module showing current time and a compact date."""
+"""Clock module showing current time, a compact date, and calendar tasks."""
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 import gi
 
@@ -12,7 +12,10 @@ gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GLib, Gtk
 
 from ...config import CLOCK_DATE_FORMAT, CLOCK_TIME_FORMAT
-from ...popup_handle import hide_popup, present_popup
+from ...eventbus import EventBus
+from ...popup_handle import PopupOutsideDismiss, hide_popup, present_popup
+from ...servicios.tareas.logic import format_day_label
+from ...servicios.tareas.tasks import TASKS_CHANGED, TasksService
 from ...ui import SHELL_MODULE_STACK_SPACING, ShellModule, shell_label
 from ...window_identity import (
     TITLE_CLOCK_CALENDAR,
@@ -22,16 +25,26 @@ from ...window_identity import (
     register_shell_popup,
     schedule_popup_position,
 )
+from ..tareas.task_row import TaskRow
 
 
 class ClockCalendarPopup(Gtk.Window):
-    """Interactive calendar popup anchored to the clock block."""
+    """Calendar popup with the tasks that fall on the selected day."""
 
-    def __init__(self, anchor: Gtk.Widget, clock_widget: object | None = None) -> None:
+    def __init__(
+        self,
+        anchor: Gtk.Widget,
+        *,
+        event_bus: EventBus | None = None,
+        tasks_service: TasksService | None = None,
+    ) -> None:
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
         self._anchor: Gtk.Widget | None = anchor
         self._fixed_top: int | None = None
-        self._clock_widget = clock_widget
+        self._event_bus = event_bus
+        self._tasks_service = tasks_service
+        self._selected: date = date.today()
+        self._refreshing_calendar = False
 
         self.set_name("shell-clock-calendar")
         parent = anchor.get_toplevel()
@@ -39,38 +52,142 @@ class ClockCalendarPopup(Gtk.Window):
             register_shell_popup(self, parent)
         configure_toplevel(self, title=TITLE_CLOCK_CALENDAR)
         configure_interactive_popup(self)
-        self.add_events(
-            Gdk.EventMask.ENTER_NOTIFY_MASK
-            | Gdk.EventMask.LEAVE_NOTIFY_MASK
-        )
-        self.connect("enter-notify-event", self._on_pointer_enter)
-        self.connect("leave-notify-event", self._on_pointer_leave)
 
-        calendar = Gtk.Calendar()
-        calendar.set_display_options(
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        outer.get_style_context().add_class("clock-calendar-content")
+        self.add(outer)
+
+        self._calendar = Gtk.Calendar()
+        self._calendar.set_display_options(
             Gtk.CalendarDisplayOptions.SHOW_HEADING
             | Gtk.CalendarDisplayOptions.SHOW_DAY_NAMES
         )
-        self.add(calendar)
+        self._calendar.get_style_context().add_class("clock-calendar")
+        self._calendar.connect("day-selected", self._on_day_selected)
+        self._calendar.connect("month-changed", self._on_month_changed)
+        outer.pack_start(self._calendar, False, False, 0)
+
+        tasks_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        tasks_header.get_style_context().add_class("clock-calendar-tasks-header")
+        self._tasks_heading = Gtk.Label(label="Tareas", xalign=0)
+        self._tasks_heading.get_style_context().add_class("clock-calendar-tasks-title")
+        self._tasks_heading.set_hexpand(True)
+        tasks_header.pack_start(self._tasks_heading, True, True, 0)
+        if tasks_service is not None:
+            open_all = Gtk.Button(label="Ver todas", relief=Gtk.ReliefStyle.NONE)
+            open_all.get_style_context().add_class("clock-calendar-open-tasks")
+            open_all.connect("clicked", self._on_open_all)
+            tasks_header.pack_start(open_all, False, False, 0)
+        outer.pack_start(tasks_header, False, False, 0)
+
+        self._tasks_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._tasks_list.get_style_context().add_class("clock-calendar-tasks")
+        outer.pack_start(self._tasks_list, False, False, 0)
+
+        self._empty = Gtk.Label(label="Sin tareas este día", xalign=0)
+        self._empty.get_style_context().add_class("clock-calendar-empty")
+
+        if event_bus is not None and tasks_service is not None:
+            event_bus.subscribe(TASKS_CHANGED, self._on_tasks_changed)
+        self.connect("destroy", self._on_destroy)
 
     def open_for(self, anchor: Gtk.Widget) -> None:
         self._anchor = anchor
         self._fixed_top = None
+        self._select_today()
+        self._refresh_marks()
+        self._refresh_day_tasks()
         present_popup(self)
         schedule_popup_position(self._position_after_show)
 
     def close(self) -> None:
         hide_popup(self)
 
-    def _on_pointer_enter(self, _widget: Gtk.Widget, _event: Gdk.EventCrossing) -> bool:
-        if self._clock_widget is not None and hasattr(self._clock_widget, "_on_popup_pointer_enter"):
-            self._clock_widget._on_popup_pointer_enter()
+    def _on_destroy(self, *_args) -> None:
+        if self._event_bus is not None:
+            self._event_bus.unsubscribe(TASKS_CHANGED, self._on_tasks_changed)
+
+    def _on_open_all(self, *_args) -> None:
+        if self._tasks_service is not None:
+            self._tasks_service.request_panel()
+
+    def _on_tasks_changed(self, _snapshot: object) -> None:
+        if self.get_visible():
+            GLib.idle_add(self._refresh_from_service)
+
+    def _refresh_from_service(self) -> bool:
+        self._refresh_marks()
+        self._refresh_day_tasks()
         return False
 
-    def _on_pointer_leave(self, _widget: Gtk.Widget, _event: Gdk.EventCrossing) -> bool:
-        if self._clock_widget is not None and hasattr(self._clock_widget, "_on_popup_pointer_leave"):
-            self._clock_widget._on_popup_pointer_leave()
-        return False
+    def _select_today(self) -> None:
+        today = date.today()
+        self._refreshing_calendar = True
+        self._calendar.select_month(today.month - 1, today.year)
+        self._calendar.select_day(today.day)
+        self._selected = today
+        self._refreshing_calendar = False
+
+    def _on_day_selected(self, calendar: Gtk.Calendar) -> None:
+        if self._refreshing_calendar:
+            return
+        year, month, day = calendar.get_date()
+        self._selected = date(int(year), int(month) + 1, int(day))
+        self._refresh_day_tasks()
+
+    def _on_month_changed(self, _calendar: Gtk.Calendar) -> None:
+        if self._refreshing_calendar:
+            return
+        self._refresh_marks()
+        self._on_day_selected(self._calendar)
+
+    def _refresh_marks(self) -> None:
+        self._calendar.clear_marks()
+        if self._tasks_service is None:
+            return
+        year, month, _day = self._calendar.get_date()
+        for day in self._tasks_service.marked_days(int(year), int(month) + 1):
+            self._calendar.mark_day(day)
+
+    def _refresh_day_tasks(self) -> None:
+        for child in self._tasks_list.get_children():
+            self._tasks_list.remove(child)
+        self._tasks_heading.set_text(f"Tareas · {format_day_label(self._selected)}")
+        if self._tasks_service is None:
+            self._tasks_list.pack_start(self._empty, False, False, 0)
+            self._empty.set_text("Sin módulo de tareas")
+            self._tasks_list.show_all()
+            return
+
+        today = date.today()
+        items = list(self._tasks_service.tasks_for_date(self._selected))
+        if self._selected == today:
+            seen = {item.id for item in items}
+            for item in self._tasks_service.snapshot.tasks:
+                if item.status == "overdue" and item.id not in seen:
+                    items.append(item)
+                    seen.add(item.id)
+        if not items:
+            hint = (
+                "Sin tareas este día"
+                if self._selected == today
+                else "Sin vencimientos este día"
+            )
+            self._empty.set_text(hint)
+            self._tasks_list.pack_start(self._empty, False, False, 0)
+            self._tasks_list.show_all()
+            return
+
+        can_toggle = self._selected == today
+        for snapshot in items:
+            row = TaskRow(
+                snapshot,
+                on_toggle=self._tasks_service.toggle,
+                compact=True,
+                can_toggle=can_toggle,
+            )
+            self._tasks_list.pack_start(row, False, False, 0)
+        self._tasks_list.show_all()
 
     def _position_after_show(self) -> bool:
         if self._anchor is not None:
@@ -89,16 +206,21 @@ class ClockCalendarPopup(Gtk.Window):
 class ClockWidget(ShellModule):
     """Self-contained clock that ticks on GTK's main loop."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        event_bus: EventBus | None = None,
+        tasks_service: TasksService | None = None,
+    ) -> None:
         super().__init__(
             "clock-widget",
             orientation=Gtk.Orientation.VERTICAL,
             spacing=SHELL_MODULE_STACK_SPACING,
         )
+        self._event_bus = event_bus
+        self._tasks_service = tasks_service
         self._tick_source_id: int | None = None
         self._calendar_popup: ClockCalendarPopup | None = None
-        self._clock_hovered = False
-        self._popup_hovered = False
+        self._outside_dismiss = PopupOutsideDismiss()
 
         self._content_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
@@ -110,7 +232,6 @@ class ClockWidget(ShellModule):
             | Gdk.EventMask.LEAVE_NOTIFY_MASK
         )
         self._hover_surface.connect("enter-notify-event", self._on_pointer_enter)
-        self._hover_surface.connect("leave-notify-event", self._on_pointer_leave)
 
         self._time_label = shell_label(
             "",
@@ -168,35 +289,42 @@ class ClockWidget(ShellModule):
 
     def _ensure_calendar_popup(self) -> ClockCalendarPopup:
         if self._calendar_popup is None:
-            self._calendar_popup = ClockCalendarPopup(self, self)
+            self._calendar_popup = ClockCalendarPopup(
+                self,
+                event_bus=self._event_bus,
+                tasks_service=self._tasks_service,
+            )
         return self._calendar_popup
 
-    def _close_calendar_if_unhovered(self) -> None:
-        if self._clock_hovered or self._popup_hovered:
-            return
+    def _close_calendar(self) -> None:
         if self._calendar_popup is not None:
             self._calendar_popup.close()
 
-    def _on_popup_pointer_enter(self) -> None:
-        self._popup_hovered = True
-
-    def _on_popup_pointer_leave(self) -> None:
-        self._popup_hovered = False
-        self._close_calendar_if_unhovered()
-
-    def _on_pointer_enter(self, _widget: Gtk.Widget, _event: Gdk.EventCrossing) -> bool:
-        self._clock_hovered = True
+    def _open_calendar(self) -> None:
         popup = self._ensure_calendar_popup()
-        if not popup.get_visible():
-            popup.open_for(self)
-        return False
+        if popup.get_visible():
+            return
+        popup.open_for(self)
+        shell = self.get_toplevel()
+        if not isinstance(shell, Gtk.Window):
+            return
+        self._outside_dismiss.install(
+            popup,
+            shell,
+            (self._hover_surface,),
+            self._close_calendar,
+            self._event_bus,
+        )
 
-    def _on_pointer_leave(self, _widget: Gtk.Widget, _event: Gdk.EventCrossing) -> bool:
-        self._clock_hovered = False
-        self._close_calendar_if_unhovered()
+    def _on_pointer_enter(self, _widget: Gtk.Widget, event: Gdk.EventCrossing) -> bool:
+        mode = getattr(event, "mode", None)
+        if mode in (Gdk.CrossingMode.GRAB, Gdk.CrossingMode.UNGRAB):
+            return False
+        self._open_calendar()
         return False
 
     def _on_destroy(self, *_args) -> None:
+        self._outside_dismiss.uninstall()
         if self._tick_source_id is not None:
             GLib.source_remove(self._tick_source_id)
             self._tick_source_id = None

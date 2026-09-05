@@ -34,6 +34,7 @@ from .servicios.notificaciones.notifications import NotificationService
 from .servicios.energia.power import PowerService
 from .servicios.sistema.system import SystemStatsService
 from .servicios.bandeja.tray import SystemTrayService
+from .servicios.tareas.tasks import TasksService
 from .widgets.barra.active_window import ActiveWindowWidget
 from .widgets.barra.clock import ClockWidget
 from .widgets.barra.ethernet import EthernetWidget
@@ -41,6 +42,7 @@ from .widgets.barra.notifications import NotificationsWidget
 from .widgets.barra.pinned_apps import PinnedAppsWidget
 from .widgets.barra.power import PowerWidget
 from .widgets.barra.stats import StatsWidget
+from .widgets.barra.tasks import TasksWidget
 from .widgets.barra.tray import SystemTrayWidget
 from .widgets.barra.workspace import WorkspaceWidget
 from .window_identity import APPLICATION_ID, TITLE_BAR, configure_toplevel, init_window_identity
@@ -73,6 +75,7 @@ class ShellApplication(Gtk.Window):
         self.power_service = PowerService()
         self.tray_service = SystemTrayService()
         self.notification_service = NotificationService(self.event_bus)
+        self.tasks_service = TasksService(self.event_bus)
         self.network_service = NetworkService(self.event_bus)
         self.media_service = MediaService(self.event_bus)
         self.audio_visualizer = AudioVisualizerService(
@@ -133,7 +136,9 @@ class ShellApplication(Gtk.Window):
         self.layout.right.add(self.ethernet_widget)
         self.stats_widget = StatsWidget(self.system_stats, self, self.event_bus)
         self.layout.right.add(self.stats_widget)
-        self.clock_widget = ClockWidget()
+        self.tasks_widget = TasksWidget(self.event_bus, self.tasks_service, self)
+        self.layout.right.add(self.tasks_widget)
+        self.clock_widget = ClockWidget(self.event_bus, self.tasks_service)
         self.layout.right.add(self.clock_widget)
         self.power_widget = PowerWidget(self.power_service, self, self.event_bus)
         self.layout.right.add(self.power_widget)
@@ -182,6 +187,7 @@ class ShellApplication(Gtk.Window):
                 self.ethernet_widget,
                 self.tray_widget,
                 self.notifications_widget,
+                self.tasks_widget,
                 self.power_widget,
                 self.pinned_apps_widget,
             ),
@@ -197,6 +203,7 @@ class ShellApplication(Gtk.Window):
         self.media_service.start()
         self.audio_visualizer.start()
         self.notification_service.start()
+        self.tasks_service.start()
         self.show_all()
 
     # Public API for keybindings or external triggers
@@ -243,6 +250,7 @@ class ShellApplication(Gtk.Window):
         self.media_service.close()
         self.audio_visualizer.close()
         self.notification_service.close()
+        self.tasks_service.close()
         self.applications_controller.close_launcher()
         self.applications.close()
         self.hyprland.close()

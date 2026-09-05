@@ -20,7 +20,12 @@ from ...config import (
 )
 from ...eventbus import EventBus
 from ...models import NotificationSnapshot
-from ...popup_handle import PopupHandle, PopupOutsideDismiss, pointer_inside_widget
+from ...popup_handle import (
+    PopupHandle,
+    PopupOutsideDismiss,
+    pointer_inside_widget,
+    pointer_inside_window,
+)
 from ...servicios.notificaciones.notification_sound import play_notification_sound
 from ...servicios.notificaciones.notifications import (
     NOTIFICATIONS_CHANGED,

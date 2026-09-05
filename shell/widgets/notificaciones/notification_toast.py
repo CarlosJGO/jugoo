@@ -17,6 +17,7 @@ from ...config import (
     NOTIFICATIONS_TOAST_WIDTH,
 )
 from ...models import NotificationSnapshot
+from ...popup_handle import is_pointer_leaving_surface, pointer_inside_widget
 from ...servicios.notificaciones.notifications import NotificationService
 from ...ui.notification_icon import apply_notification_icon
 
@@ -214,6 +215,8 @@ class NotificationToast(Gtk.EventBox):
 
     def _auto_hide(self) -> bool:
         self._hide_source_id = 0
+        if pointer_inside_widget(self):
+            return False
         self.dismiss("timeout")
         return False
 
@@ -222,11 +225,18 @@ class NotificationToast(Gtk.EventBox):
             GLib.source_remove(self._hide_source_id)
             self._hide_source_id = 0
 
-    def _on_enter_notify(self, _widget: Gtk.Widget, _event: Gdk.EventCrossing) -> bool:
+    def _on_enter_notify(self, _widget: Gtk.Widget, event: Gdk.EventCrossing) -> bool:
+        mode = getattr(event, "mode", None)
+        if mode in (Gdk.CrossingMode.GRAB, Gdk.CrossingMode.UNGRAB):
+            return False
         self._cancel_hide_timer()
         return False
 
-    def _on_leave_notify(self, _widget: Gtk.Widget, _event: Gdk.EventCrossing) -> bool:
+    def _on_leave_notify(self, _widget: Gtk.Widget, event: Gdk.EventCrossing) -> bool:
+        if not is_pointer_leaving_surface(event):
+            return False
+        if pointer_inside_widget(self):
+            return False
         if self._snapshot is not None:
             timeout_ms = self._service.resolve_display_timeout_ms(self._snapshot)
             if timeout_ms > 0:

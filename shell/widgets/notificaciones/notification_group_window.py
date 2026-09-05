@@ -16,6 +16,7 @@ from ...config import (
     NOTIFICATION_POPUP_ICON_SIZE,
     NOTIFICATION_POPUP_LIST_SPACING,
     NOTIFICATION_POPUP_MAX_HEIGHT,
+    NOTIFICATION_POPUP_OFFSET,
     NOTIFICATION_POPUP_WIDTH,
 )
 from ...models import NotificationSnapshot
@@ -23,13 +24,16 @@ from ...popup_handle import hide_popup, present_popup
 from ...servicios.notificaciones.notifications import NotificationService
 from ...ui.notification_icon import apply_notification_icon
 from ...window_identity import (
+    TITLE_NOTIFICATION_GROUP,
+    anchor_button_geometry,
+    compute_popup_top_left,
     configure_interactive_popup,
     configure_toplevel,
     monitor_containing_point,
+    popup_window_size,
     reposition_popup,
     register_shell_popup,
     schedule_popup_position,
-    TITLE_NOTIFICATION_GROUP,
 )
 from .notification_mini_row import NotificationMiniRow
 
@@ -65,7 +69,7 @@ class NotificationGroupWindow(Gtk.Window):
 
         self.set_name("shell-notification-group-window")
         register_shell_popup(self, shell_window)
-        configure_toplevel(self, title="Shell Notification Group")
+        configure_toplevel(self, title=TITLE_NOTIFICATION_GROUP)
         configure_interactive_popup(self)
         window_height = NOTIFICATION_POPUP_MAX_HEIGHT + 16
         self.set_default_size(NOTIFICATION_POPUP_WIDTH, window_height)
@@ -107,11 +111,10 @@ class NotificationGroupWindow(Gtk.Window):
         group_height = NOTIFICATION_POPUP_MAX_HEIGHT + 16
         gap = 6
 
-        if self._notifications_position is None:
+        parent_rect = self._resolve_parent_popup_rect(anchor, popup_window)
+        if parent_rect is None:
             return
-        notifications_left, notifications_top, notifications_width = (
-            self._notifications_position
-        )
+        notifications_left, notifications_top, notifications_width = parent_rect
         monitor = monitor_containing_point(notifications_left, notifications_top)
         if monitor is None:
             return
@@ -126,6 +129,30 @@ class NotificationGroupWindow(Gtk.Window):
         top = max(monitor.y, min(top, monitor.y + monitor.height - group_height))
 
         reposition_popup(self, title=TITLE_NOTIFICATION_GROUP, x=left, y=top)
+
+    def _resolve_parent_popup_rect(
+        self,
+        anchor: Gtk.Widget,
+        popup_window: Gtk.Window,
+    ) -> tuple[int, int, int] | None:
+        if self._notifications_position is not None:
+            return self._notifications_position
+
+        geometry = anchor_button_geometry(anchor)
+        if geometry is None:
+            return None
+        width, _height = popup_window_size(popup_window)
+        monitor = monitor_containing_point(geometry.center_x, geometry.bottom)
+        left, top = compute_popup_top_left(
+            button_center_x=geometry.center_x,
+            button_bottom=geometry.bottom,
+            popup_width=width,
+            popup_height=NOTIFICATION_POPUP_MAX_HEIGHT,
+            offset=NOTIFICATION_POPUP_OFFSET,
+            monitor=monitor,
+        )
+        self._notifications_position = (left, top, width)
+        return self._notifications_position
 
     def present_group(self) -> None:
         self.set_opacity(0.0)

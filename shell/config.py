@@ -43,6 +43,15 @@ AUDIO_POLL_INTERVAL_SEC = 0.5
 CLOCK_TIME_FORMAT = "%I:%M %p"
 CLOCK_DATE_FORMAT = "%a · %d %b"
 
+# Tasks module.
+TASKS_PATH = "tasks.json"
+TASKS_ICON_SIZE = 16
+TASKS_COMPACT_ICON_SIZE = 12
+TASKS_POPUP_OFFSET = 8
+TASKS_POPUP_WIDTH = 380
+TASKS_POPUP_MAX_HEIGHT = 520
+TASKS_ROLLOVER_INTERVAL_SEC = 30
+
 # System statistics module. Thermal thresholds live in shell/servicios/sistema/system.py.
 SYSTEM_STATS_UPDATE_INTERVAL = 1
 STATS_SECTION_SPACING = 12

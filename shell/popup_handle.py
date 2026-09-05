@@ -77,30 +77,98 @@ def hide_popup(window: Gtk.Window) -> None:
     setattr(window, "_shell_fade_source_id", source_id)
 
 
+def _gdk_window_is_within(inner: Gdk.Window | None, outer: Gdk.Window | None) -> bool:
+    if inner is None or outer is None:
+        return False
+    current: Gdk.Window | None = inner
+    while current is not None:
+        if current == outer:
+            return True
+        current = current.get_parent()
+    return False
+
+
+def _pointer_window_at(pointer) -> Gdk.Window | None:
+    try:
+        result = pointer.get_window_at_position()
+    except Exception:
+        return None
+    if result is None:
+        return None
+    if isinstance(result, tuple):
+        return result[0]
+    return result
+
+
+def _unpack_device_position(result) -> tuple[object | None, int, int]:
+    if result is None:
+        return None, 0, 0
+    if not isinstance(result, tuple):
+        return result, 0, 0
+    if len(result) == 4:
+        window, x, y, _mask = result
+        return window, int(x), int(y)
+    if len(result) == 3:
+        first, second, third = result
+        if first is None or hasattr(first, "get_origin"):
+            return first, int(second), int(third)
+        return None, int(first), int(second)
+    return None, 0, 0
+
+
+def _coords_in_widget_allocation(widget: Gtk.Widget, x: int, y: int) -> bool:
+    allocation = widget.get_allocation()
+    if widget.get_has_window():
+        left, top = 0, 0
+    else:
+        left, top = int(allocation.x), int(allocation.y)
+    width = int(allocation.width)
+    height = int(allocation.height)
+    return left <= x < left + width and top <= y < top + height
+
+
 def pointer_inside_widget(widget: Gtk.Widget) -> bool:
-    if not widget.get_mapped():
+    """True if the pointer is over ``widget``, using the Gdk window under it.
+
+    Screen ``get_origin()`` + ``pointer.get_position()`` is wrong on Wayland
+    after Hyprland moves a toplevel: GTK origin stays at (0, 0) while the
+    compositor pointer is in global coordinates. That both keeps popups open
+    after the pointer has left and closes them while the pointer is still on
+    them. Hit-test the GdkWindow under the device instead.
+    """
+    if not widget.get_mapped() or not widget.get_visible():
         return False
 
-    window = widget.get_window()
-    if window is None:
+    widget_window = widget.get_window()
+    if widget_window is None:
         return False
 
-    pointer = widget.get_display().get_default_seat().get_pointer()
+    display = widget.get_display()
+    seat = display.get_default_seat() if display is not None else None
+    pointer = seat.get_pointer() if seat is not None else None
     if pointer is None:
         return False
 
-    _, root_x, root_y = pointer.get_position()
-    origin = window.get_origin()
-    if len(origin) == 3:
-        _, widget_x, widget_y = origin
-    else:
-        widget_x, widget_y = origin
+    window_at = _pointer_window_at(pointer)
+    if window_at is not None and not _gdk_window_is_within(window_at, widget_window):
+        return False
 
-    allocation = widget.get_allocation()
-    return (
-        widget_x <= root_x <= widget_x + allocation.width
-        and widget_y <= root_y <= widget_y + allocation.height
-    )
+    if (
+        window_at is not None
+        and widget.get_has_window()
+        and _gdk_window_is_within(window_at, widget_window)
+    ):
+        return True
+
+    try:
+        position = widget_window.get_device_position(pointer)
+    except Exception:
+        return window_at is not None
+
+    child, x, y = _unpack_device_position(position)
+    if window_at is None and child is None:
+        return False
+    return _coords_in_widget_allocation(widget, x, y)
 
 
 def pointer_inside_window(window: Gtk.Window) -> bool:
@@ -138,13 +206,19 @@ class PopupHandle(Generic[T]):
         return self._window.get_visible()
 
 
-def _is_pointer_crossing_leave_surface(event: object | None) -> bool:
-    """Ignore child-widget and grab crossings; they are not a real leave."""
+def _is_grab_crossing(event: object | None) -> bool:
+    if event is None:
+        return False
+    mode = getattr(event, "mode", None)
+    return mode in (Gdk.CrossingMode.GRAB, Gdk.CrossingMode.UNGRAB)
+
+
+def is_pointer_leaving_surface(event: object | None) -> bool:
+    """True for a real leave of this widget's surface, not child or grab crossings."""
+    if _is_grab_crossing(event):
+        return False
     if event is None:
         return True
-    mode = getattr(event, "mode", None)
-    if mode in (Gdk.CrossingMode.GRAB, Gdk.CrossingMode.UNGRAB):
-        return False
     detail = getattr(event, "detail", None)
     if detail == Gdk.NotifyType.INFERIOR:
         return False
@@ -197,7 +271,7 @@ class PopupOutsideDismiss:
         shell_window: Gtk.Window,
         anchor_widgets: tuple[Gtk.Widget, ...],
         on_dismiss: Callable[[], None],
-        event_bus,
+        event_bus=None,
         extra_windows: tuple[Gtk.Window, ...] = (),
     ) -> None:
         self.uninstall()
@@ -231,8 +305,10 @@ class PopupOutsideDismiss:
             self._extra_leave_ids.append(
                 extra.connect("leave-notify-event", self._on_pointer_leave)
             )
-        self._active_window_handler = self._on_active_window_changed
-        event_bus.subscribe(ACTIVE_WINDOW_CHANGED, self._active_window_handler)
+        self._active_window_handler = None
+        if event_bus is not None:
+            self._active_window_handler = self._on_active_window_changed
+            event_bus.subscribe(ACTIVE_WINDOW_CHANGED, self._active_window_handler)
 
     def uninstall(self) -> None:
         self._cancel_deferred_dismiss()
@@ -366,6 +442,9 @@ class PopupOutsideDismiss:
             return False
         if pointer_inside_widget(popup):
             return False
+        for extra in self._extra_windows:
+            if extra.get_visible() and pointer_inside_window(extra):
+                return False
         for anchor in self._anchors:
             if pointer_inside_widget(anchor):
                 return False
@@ -374,15 +453,17 @@ class PopupOutsideDismiss:
         return False
 
     def _on_pointer_enter(self, _widget: Gtk.Widget, event: Gdk.EventCrossing | None) -> bool:
-        if not _is_pointer_crossing_leave_surface(event):
+        if _is_grab_crossing(event):
             return False
         self._cancel_deferred_dismiss()
         return False
 
     def _on_pointer_leave(self, _widget: Gtk.Widget, event: Gdk.EventCrossing | None) -> bool:
-        if not _is_pointer_crossing_leave_surface(event):
+        if not is_pointer_leaving_surface(event):
             return False
         if GLib.get_monotonic_time() < self._install_grace_until:
+            return False
+        if self._pointer_over_popup_or_anchor():
             return False
         self._schedule_deferred_dismiss(restart=False)
         return False

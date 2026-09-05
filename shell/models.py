@@ -666,6 +666,60 @@ class ApplicationsSnapshot:
         return normalize_desktop_id(app_id) in self.favorite_ids
 
 
+TASK_REPEAT_NONE = "none"
+TASK_REPEAT_DAILY = "daily"
+TASK_REPEAT_MONTHLY = "monthly"
+TASK_REPEATS = frozenset({TASK_REPEAT_NONE, TASK_REPEAT_DAILY, TASK_REPEAT_MONTHLY})
+
+TASK_STATUS_PENDING = "pending"
+TASK_STATUS_COMPLETED = "completed"
+TASK_STATUS_OVERDUE = "overdue"
+TASK_STATUS_MISSED = "missed"
+
+
+@dataclass(frozen=True)
+class TaskRecord:
+    """Persisted task definition plus occurrence history for recurring work."""
+
+    id: str
+    title: str
+    notes: str = ""
+    repeat: str = TASK_REPEAT_NONE
+    due_date: str | None = None
+    month_day: int = 1
+    created_at: str = ""
+    period_cursor: str = ""
+    completed_periods: tuple[str, ...] = ()
+    missed_periods: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class TaskSnapshot:
+    """Renderable task state for a given calendar day."""
+
+    id: str
+    title: str
+    notes: str
+    repeat: str
+    due_date: str | None
+    month_day: int
+    status: str
+    period_key: str
+    missed_count: int
+    created_at: str
+    occurrence_date: str
+
+
+@dataclass(frozen=True)
+class TasksSnapshot:
+    """Service-owned tasks as of today, used by the bar badge and the panel."""
+
+    today: str
+    tasks: tuple[TaskSnapshot, ...] = ()
+    overdue_count: int = 0
+    pending_today_count: int = 0
+
+
 def normalize_desktop_id(value: str) -> str:
     """Strip ``.desktop`` and normalize an application identifier."""
     ident = value.strip()
@@ -817,7 +871,7 @@ def filter_applications(
     favorite_ids: Sequence[str] = (),
 ) -> tuple[DesktopApplication, ...]:
     """Filter the in-memory catalog. Launcher favorites sort first, then prefix hits."""
-    needle = " ".join(query.casefold().split())
+    needle = " ".join(query.casefold().replace("-", " ").split())
     favorites = {normalize_desktop_id(item) for item in favorite_ids}
 
     def score(application: DesktopApplication) -> tuple[int, int, str]:
@@ -834,7 +888,7 @@ def filter_applications(
                 application.comment.casefold(),
             )
             if part
-        )
+        ).replace("-", " ").replace(".", " ")
         if needle:
             if not (
                 needle in haystack

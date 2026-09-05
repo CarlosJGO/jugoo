@@ -167,6 +167,12 @@ window#shell.compact button.notifications-button {
     min-width: 18px;
 }
 
+window#shell.compact button.tasks-button {
+    padding: 2px 4px;
+    min-height: 18px;
+    min-width: 18px;
+}
+
 window#shell.compact box.ethernet-widget {
     padding: 1px 2px;
     min-height: 0;
@@ -799,6 +805,208 @@ label.clock-date {
     font-size: 10px;
     font-weight: 500;
     margin-top: 1px;
+}
+
+
+/* ==========================================================================
+   6b. Widgets — Tasks
+   ========================================================================== */
+
+box.tasks-widget {
+    padding: 2px 6px;
+    min-height: 24px;
+}
+
+button.tasks-button {
+    background: transparent;
+    border: 0;
+    border-radius: 10px;
+    box-shadow: none;
+    min-width: 24px;
+    min-height: 24px;
+    padding: 2px 4px;
+}
+
+button.tasks-button:hover {
+    background-color: @shell_hover_bg;
+}
+
+button.tasks-button image {
+    color: @shell_text_primary;
+}
+
+label.tasks-badge {
+    background-color: @shell_accent;
+    color: #ffffff;
+    border-radius: 999px;
+    font-size: 9px;
+    font-weight: 700;
+    min-width: 14px;
+    min-height: 14px;
+    padding: 0 3px;
+}
+
+window#shell-tasks,
+window#shell-clock-calendar {
+    background-color: transparent;
+}
+
+box.tasks-popup-content,
+box.clock-calendar-content {
+    background-color: @shell_surface_bg_panel;
+    border: 1px solid @shell_border_strong;
+    border-radius: 16px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+box.tasks-popup-content {
+    min-width: 380px;
+}
+
+box.clock-calendar-content {
+    padding: 10px;
+    min-width: 280px;
+}
+
+box.tasks-popup-header {
+    padding: 10px 12px 8px 12px;
+    border-bottom: 1px solid @shell_border_strong;
+}
+
+label.tasks-popup-title,
+label.clock-calendar-tasks-title {
+    color: @shell_text_primary;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+button.tasks-popup-add,
+button.clock-calendar-open-tasks,
+button.task-composer-chip,
+button.task-composer-cancel {
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    color: @shell_text_secondary;
+    font-size: 11px;
+    padding: 4px 8px;
+}
+
+button.tasks-popup-add:hover,
+button.clock-calendar-open-tasks:hover,
+button.task-composer-chip:hover,
+button.task-composer-cancel:hover {
+    background-color: @shell_hover_bg_soft;
+    color: @shell_text_primary;
+}
+
+button.task-composer-save {
+    background-color: @shell_accent_soft;
+    border: 1px solid @shell_accent;
+    border-radius: 8px;
+    color: @shell_text_primary;
+    padding: 4px 10px;
+}
+
+button.task-composer-save:hover {
+    background-color: @shell_hover_bg;
+}
+
+box.tasks-popup-list {
+    padding: 8px 10px 12px 10px;
+}
+
+label.tasks-popup-section {
+    color: @shell_text_secondary;
+    font-size: 11px;
+    font-weight: 600;
+    padding-top: 4px;
+}
+
+label.tasks-popup-empty,
+label.tasks-popup-section-empty,
+label.clock-calendar-empty {
+    color: @shell_text_secondary;
+    font-size: 12px;
+}
+
+box.task-composer {
+    padding: 8px 12px;
+    border-bottom: 1px solid @shell_border_subtle;
+}
+
+label.task-composer-label {
+    color: @shell_text_secondary;
+    font-size: 11px;
+    min-width: 72px;
+}
+
+radiobutton.task-composer-repeat {
+    color: @shell_text_primary;
+    font-size: 11px;
+    padding: 0 4px;
+}
+
+box.task-row {
+    padding: 6px 8px;
+    border-radius: 10px;
+    background-color: @shell_hover_bg_faint;
+}
+
+box.task-row-overdue {
+    border: 1px solid alpha(@shell_danger, 0.45);
+}
+
+box.task-row-missed {
+    opacity: 0.72;
+}
+
+box.task-row-completed label.task-row-title {
+    color: @shell_text_muted;
+    text-decoration: line-through;
+}
+
+label.task-row-title {
+    color: @shell_text_primary;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+label.task-row-meta {
+    color: @shell_text_secondary;
+    font-size: 10px;
+}
+
+button.task-row-delete {
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    min-width: 20px;
+    min-height: 20px;
+    padding: 2px;
+}
+
+button.task-row-delete:hover {
+    background-color: @shell_hover_bg;
+}
+
+calendar.clock-calendar {
+    background-color: transparent;
+    color: @shell_text_primary;
+}
+
+calendar.clock-calendar:selected {
+    background-color: @shell_accent_soft;
+    color: @shell_text_primary;
+    border-radius: 6px;
+}
+
+box.clock-calendar-tasks-header {
+    padding-top: 2px;
+}
+
+box.clock-calendar-tasks {
+    min-width: 260px;
 }
 
 

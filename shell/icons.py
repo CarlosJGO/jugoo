@@ -7,6 +7,7 @@ the active Breeze/hicolor/XDG icon theme with ``Gtk.Image.new_from_icon_name``.
 from __future__ import annotations
 
 import configparser
+import os
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict, Iterable, Optional
@@ -22,11 +23,39 @@ KNOWN_APPLICATION_NAMES = {
     "kitty": "Kitty",
     "steam": "Steam",
 }
-APPLICATION_DIRS = (
-    Path.home() / ".local/share/applications",
-    Path("/usr/local/share/applications"),
-    Path("/usr/share/applications"),
+_DEFAULT_XDG_DATA_DIRS = "/usr/local/share:/usr/share"
+_FLATPAK_AND_SNAP_APPLICATION_DIRS = (
+    Path.home() / ".local/share/flatpak/exports/share/applications",
+    Path("/var/lib/flatpak/exports/share/applications"),
+    Path("/var/lib/snapd/desktop/applications"),
 )
+
+
+def application_directories() -> tuple[Path, ...]:
+    """User, XDG, Flatpak, and Snap ``applications`` dirs. First path wins."""
+    seen: set[Path] = set()
+    ordered: list[Path] = []
+
+    def add(path: Path) -> None:
+        resolved = path.expanduser()
+        if resolved in seen:
+            return
+        seen.add(resolved)
+        ordered.append(resolved)
+
+    data_home = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local/share"))
+    add(data_home / "applications")
+    data_dirs = os.environ.get("XDG_DATA_DIRS") or _DEFAULT_XDG_DATA_DIRS
+    for raw in data_dirs.split(":"):
+        location = raw.strip()
+        if location:
+            add(Path(location) / "applications")
+    for fallback in _FLATPAK_AND_SNAP_APPLICATION_DIRS:
+        add(fallback)
+    return tuple(ordered)
+
+
+APPLICATION_DIRS = application_directories()
 
 
 @dataclass(frozen=True)
@@ -38,8 +67,8 @@ class ApplicationInfo:
 class DesktopIconResolver:
     """Build a small WM_CLASS index once, then cache all resolution results."""
 
-    def __init__(self, directories: Iterable[Path] = APPLICATION_DIRS) -> None:
-        self._directories = tuple(directories)
+    def __init__(self, directories: Iterable[Path] | None = None) -> None:
+        self._directories = tuple(directories) if directories is not None else application_directories()
         self._index: Dict[str, ApplicationInfo] | None = None
         self._cache: Dict[str, ApplicationInfo] = {}
 

@@ -6,7 +6,7 @@ import os
 import shutil
 from pathlib import Path
 
-from .config import PINNED_APPS_PATH
+from .config import PINNED_APPS_PATH, TASKS_PATH
 
 _APP_DIRECTORY = "waybar-shell"
 
@@ -25,6 +25,10 @@ def notifications_history_path() -> Path:
 
 def pinned_apps_path() -> Path:
     return xdg_data_dir() / PINNED_APPS_PATH
+
+
+def tasks_path() -> Path:
+    return xdg_data_dir() / TASKS_PATH
 
 
 def notification_icons_dir() -> Path:

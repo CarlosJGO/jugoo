@@ -6,7 +6,7 @@ import configparser
 import os
 from pathlib import Path
 
-from ...icons import APPLICATION_DIRS, FALLBACK_ICON
+from ...icons import FALLBACK_ICON, application_directories
 from ...models import DesktopApplication, normalize_desktop_id
 
 _TRUE = {"1", "true", "yes", "on"}
@@ -27,7 +27,7 @@ def scan_desktop_applications(
 ) -> tuple[DesktopApplication, ...]:
     """Return unique visible applications, first path wins (user overrides system)."""
     apps: dict[str, DesktopApplication] = {}
-    for directory in directories if directories is not None else APPLICATION_DIRS:
+    for directory in directories if directories is not None else application_directories():
         if not directory.is_dir():
             continue
         try:
@@ -45,7 +45,7 @@ def scan_desktop_applications(
 def desktop_directories_stamp(directories: tuple[Path, ...] | None = None) -> tuple[tuple[str, int], ...]:
     """Cheap mtime fingerprint so the launcher can refresh only when files change."""
     stamp: list[tuple[str, int]] = []
-    for directory in directories if directories is not None else APPLICATION_DIRS:
+    for directory in directories if directories is not None else application_directories():
         try:
             mtime_ns = directory.stat().st_mtime_ns if directory.is_dir() else 0
         except OSError:
@@ -138,6 +138,8 @@ def _strip_exec_field_codes(command: str) -> str:
     tokens: list[str] = []
     for token in command.split():
         if token.startswith("%") and len(token) == 2:
+            continue
+        if token.startswith("@@"):
             continue
         tokens.append(token)
     return " ".join(tokens)

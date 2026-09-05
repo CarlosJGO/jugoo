@@ -59,6 +59,9 @@ class _Connectable:
     def get_visible(self) -> bool:
         return self._visible
 
+    def has_focus(self) -> bool:
+        return False
+
     def get_title(self) -> str:
         return self._title
 
@@ -123,6 +126,22 @@ def _other_window() -> ActiveWindow:
         title="Other App",
         icon="",
     )
+
+
+def test_leave_does_not_start_timer_while_pointer_inside() -> None:
+    closed, _bus, dismiss = _install_dismiss(PopupOutsideDismiss())
+    popup = dismiss._popup
+    assert popup is not None
+    timers = _FakeTimers()
+
+    with mock.patch("shell.popup_handle.pointer_inside_widget", return_value=True):
+        with mock.patch("shell.popup_handle.GLib.timeout_add", side_effect=timers.timeout_add):
+            with mock.patch("shell.popup_handle.GLib.source_remove", side_effect=timers.source_remove):
+                popup.emit("leave-notify-event", object())
+
+    assert closed == []
+    assert dismiss._deferred_dismiss_source_id == 0
+    assert timers.active == {}
 
 
 def test_enter_leave_dismisses_after_grace() -> None:
@@ -337,6 +356,7 @@ def test_config_grace_period_is_half_second() -> None:
 
 
 if __name__ == "__main__":
+    test_leave_does_not_start_timer_while_pointer_inside()
     test_enter_leave_dismisses_after_grace()
     test_enter_leave_enter_before_grace_does_not_dismiss()
     test_leave_then_focus_out_still_dismisses()

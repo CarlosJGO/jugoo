@@ -31,6 +31,7 @@ from .identity import (
     TITLE_PINNED_OVERFLOW,
     TITLE_POWER_CONFIRM,
     TITLE_POWER_MENU,
+    TITLE_TASKS,
     TITLE_VOLUME_OSD,
     TITLE_WORKSPACE_AUDIO,
     TITLE_WORKSPACE_PANEL,
@@ -46,6 +47,7 @@ HYPR_WINDOW_CLASS = WAYLAND_APP_ID
 # - Workspace audio / panel: volume sliders and device selectors
 # - Notifications / Power: buttons and confirmation dialogs
 # - App launcher: search entry and keyboard navigation
+# - Tasks: title/notes entry when adding a task
 # OSD windows must never take focus or keyboard (see configure_osd_window).
 
 
@@ -113,6 +115,9 @@ def configure_interactive_popup(window: Gtk.Window) -> None:
     window.set_focus_on_map(True)
     window.set_keep_above(True)
     window.set_type_hint(Gdk.WindowTypeHint.UTILITY)
+    window.add_events(
+        Gdk.EventMask.ENTER_NOTIFY_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK
+    )
 
 
 def configure_osd_window(window: Gtk.Window) -> None:

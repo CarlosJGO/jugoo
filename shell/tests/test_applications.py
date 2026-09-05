@@ -24,7 +24,12 @@ from shell.servicios.aplicaciones.applications import (
     APPLICATIONS_CHANGED,
     ApplicationsService,
 )
-from shell.servicios.aplicaciones.desktop import read_desktop_application, strip_exec_field_codes
+from shell.servicios.aplicaciones.desktop import (
+    read_desktop_application,
+    scan_desktop_applications,
+    strip_exec_field_codes,
+)
+from shell.icons import application_directories
 from shell.servicios.aplicaciones.store import (
     load_application_prefs,
     load_pinned_ids,
@@ -175,6 +180,9 @@ def test_filter_applications_prefers_favorites_and_prefix() -> None:
     assert unfiltered[0].id == "code"
     assert [item.id for item in unfiltered] == ["code", "org.kde.dolphin", "firefox"]
 
+    zapzap = _app("com.rtosta.zapzap", "ZapZap")
+    assert [item.id for item in filter_applications((zapzap, firefox), "zap-zap")] == ["com.rtosta.zapzap"]
+
 
 def test_filter_applications_empty_query_returns_empty_state_friendly_list() -> None:
     assert filter_applications((), "firefox") == ()
@@ -183,6 +191,40 @@ def test_filter_applications_empty_query_returns_empty_state_friendly_list() -> 
 def test_strip_exec_field_codes_removes_placeholders() -> None:
     assert strip_exec_field_codes("firefox %u") == "firefox"
     assert strip_exec_field_codes("code %F --new-window") == "code --new-window"
+    assert strip_exec_field_codes(
+        "/usr/bin/flatpak run --file-forwarding com.rtosta.zapzap @@u %u @@"
+    ) == "/usr/bin/flatpak run --file-forwarding com.rtosta.zapzap"
+
+
+def test_application_directories_include_flatpak_exports() -> None:
+    dirs = application_directories()
+    assert Path("/var/lib/flatpak/exports/share/applications") in dirs
+    assert Path.home() / ".local/share/flatpak/exports/share/applications" in dirs
+    assert dirs[0] == Path.home() / ".local/share/applications" or str(dirs[0]).endswith(
+        "/.local/share/applications"
+    )
+
+
+def test_scan_reads_flatpak_desktop_entry(tmp_path: Path) -> None:
+    export = tmp_path / "flatpak" / "exports" / "share" / "applications"
+    export.mkdir(parents=True)
+    (export / "com.rtosta.zapzap.desktop").write_text(
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Name=ZapZap\n"
+        "Exec=/usr/bin/flatpak run --command=zapzap --file-forwarding com.rtosta.zapzap @@u %u @@\n"
+        "Icon=com.rtosta.zapzap\n"
+        "Keywords=WhatsApp;Chat;ZapZap;\n",
+        encoding="utf-8",
+    )
+
+    apps = scan_desktop_applications((export,))
+    assert len(apps) == 1
+    assert apps[0].id == "com.rtosta.zapzap"
+    assert apps[0].name == "ZapZap"
+    assert apps[0].exec_cmd == (
+        "/usr/bin/flatpak run --command=zapzap --file-forwarding com.rtosta.zapzap"
+    )
 
 
 def test_read_desktop_application_skips_hidden(tmp_path: Path) -> None:
