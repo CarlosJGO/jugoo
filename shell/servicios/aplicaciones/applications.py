@@ -8,13 +8,16 @@ import subprocess
 import threading
 from typing import Callable, Sequence
 
+from ...config import PINNED_APPS_VISIBLE_LIMIT
 from ...eventbus import EventBus
 from ...models import (
     ApplicationsSnapshot,
     DesktopApplication,
+    move_pinned_application,
     new_instance_command,
     normalize_desktop_id,
     pin_application,
+    send_pinned_to_overflow,
     unpin_application,
 )
 from ...runtime_paths import pinned_apps_path
@@ -25,6 +28,8 @@ APPLICATIONS_CHANGED = "applications_changed"
 APP_ACTIVATE_REQUESTED = "app_activate_requested"
 APP_NEW_INSTANCE_REQUESTED = "app_new_instance_requested"
 APP_PIN_TOGGLE_REQUESTED = "app_pin_toggle_requested"
+APP_PIN_REORDER_REQUESTED = "app_pin_reorder_requested"
+APP_PIN_SEND_TO_OVERFLOW_REQUESTED = "app_pin_send_to_overflow_requested"
 APP_FAVORITE_TOGGLE_REQUESTED = "app_favorite_toggle_requested"
 LAUNCHER_TOGGLE_REQUESTED = "launcher_toggle_requested"
 
@@ -52,6 +57,8 @@ class ApplicationsService:
         self._favorite_ids: tuple[str, ...] = ()
         self._dir_stamp: tuple[tuple[str, int], ...] = ()
         self._event_bus.subscribe(APP_PIN_TOGGLE_REQUESTED, self._on_pin_toggle)
+        self._event_bus.subscribe(APP_PIN_REORDER_REQUESTED, self._on_pin_reorder)
+        self._event_bus.subscribe(APP_PIN_SEND_TO_OVERFLOW_REQUESTED, self._on_send_to_overflow)
         self._event_bus.subscribe(APP_FAVORITE_TOGGLE_REQUESTED, self._on_favorite_toggle)
         self._event_bus.subscribe(APP_NEW_INSTANCE_REQUESTED, self._on_new_instance)
 
@@ -68,6 +75,8 @@ class ApplicationsService:
 
     def close(self) -> None:
         self._event_bus.unsubscribe(APP_PIN_TOGGLE_REQUESTED, self._on_pin_toggle)
+        self._event_bus.unsubscribe(APP_PIN_REORDER_REQUESTED, self._on_pin_reorder)
+        self._event_bus.unsubscribe(APP_PIN_SEND_TO_OVERFLOW_REQUESTED, self._on_send_to_overflow)
         self._event_bus.unsubscribe(APP_FAVORITE_TOGGLE_REQUESTED, self._on_favorite_toggle)
         self._event_bus.unsubscribe(APP_NEW_INSTANCE_REQUESTED, self._on_new_instance)
 
@@ -93,6 +102,21 @@ class ApplicationsService:
             self.unpin(ident)
         else:
             self.pin(ident)
+
+    def reorder(self, source_id: str, target_id: str = "", *, at_index: int | None = None) -> None:
+        self._set_pinned(
+            move_pinned_application(
+                self.snapshot.pinned_ids,
+                source_id,
+                target_id,
+                at_index=at_index,
+            )
+        )
+
+    def send_to_overflow(self, app_id: str) -> None:
+        self._set_pinned(
+            send_pinned_to_overflow(self.snapshot.pinned_ids, app_id, PINNED_APPS_VISIBLE_LIMIT)
+        )
 
     def favorite(self, app_id: str) -> None:
         self._set_favorites(pin_application(self.snapshot.favorite_ids, app_id))
@@ -131,6 +155,24 @@ class ApplicationsService:
     def _on_pin_toggle(self, app_id: object) -> None:
         if isinstance(app_id, str):
             self.toggle_pin(app_id)
+
+    def _on_pin_reorder(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        source_id = payload.get("source_id")
+        if not isinstance(source_id, str) or not source_id:
+            return
+        at_index = payload.get("at_index")
+        if isinstance(at_index, int):
+            self.reorder(source_id, at_index=at_index)
+            return
+        target_id = payload.get("target_id")
+        if isinstance(target_id, str) and target_id:
+            self.reorder(source_id, target_id)
+
+    def _on_send_to_overflow(self, app_id: object) -> None:
+        if isinstance(app_id, str):
+            self.send_to_overflow(app_id)
 
     def _on_favorite_toggle(self, app_id: object) -> None:
         if isinstance(app_id, str):

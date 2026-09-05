@@ -473,6 +473,16 @@ button.pinned-app-button.focused {
     );
 }
 
+button.pinned-app-button.dragging {
+    opacity: 0.45;
+}
+
+button.pinned-app-button.drop-target,
+button.pinned-apps-expand.drop-target {
+    background-color: @shell_accent_soft;
+    box-shadow: inset 0 -3px 0 @shell_accent;
+}
+
 button.pinned-apps-expand {
     background: transparent;
     border: 0;

@@ -695,6 +695,53 @@ def unpin_application(pinned_ids: Sequence[str], app_id: str) -> tuple[str, ...]
     )
 
 
+def move_pinned_application(
+    pinned_ids: Sequence[str],
+    source_id: str,
+    target_id: str = "",
+    *,
+    at_index: int | None = None,
+) -> tuple[str, ...]:
+    """Move ``source_id`` onto ``target_id``'s slot; unique ids stay intact.
+
+    After removal the source is inserted at the target's original index, so
+    adjacent swaps work in both directions. ``at_index`` places the source at
+    that final index (used to send an icon into overflow).
+    """
+    ident_source = normalize_desktop_id(source_id)
+    ordered = [normalize_desktop_id(item) for item in pinned_ids if normalize_desktop_id(item)]
+    if not ident_source or ident_source not in ordered:
+        return tuple(ordered)
+    source_index = ordered.index(ident_source)
+    if at_index is not None:
+        item = ordered.pop(source_index)
+        dest = max(0, min(int(at_index), len(ordered)))
+        ordered.insert(dest, item)
+        return tuple(ordered)
+    ident_target = normalize_desktop_id(target_id)
+    if not ident_target or ident_target not in ordered or ident_target == ident_source:
+        return tuple(ordered)
+    target_index = ordered.index(ident_target)
+    item = ordered.pop(source_index)
+    ordered.insert(target_index, item)
+    return tuple(ordered)
+
+
+def send_pinned_to_overflow(
+    pinned_ids: Sequence[str],
+    app_id: str,
+    visible_limit: int,
+) -> tuple[str, ...]:
+    """Move a visible pin into overflow so the first extra takes a dock slot."""
+    ident = normalize_desktop_id(app_id)
+    ordered = tuple(normalize_desktop_id(item) for item in pinned_ids if normalize_desktop_id(item))
+    if not ident or ident not in ordered or visible_limit < 1:
+        return ordered
+    if len(ordered) <= visible_limit or ordered.index(ident) >= visible_limit:
+        return ordered
+    return move_pinned_application(ordered, ident, at_index=visible_limit)
+
+
 def split_pinned_dock(
     pinned_ids: Sequence[str],
     visible_limit: int,

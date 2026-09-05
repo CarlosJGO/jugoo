@@ -7,10 +7,12 @@ from shell.models import (
     DesktopApplication,
     Window,
     filter_applications,
+    move_pinned_application,
     new_instance_command,
     next_window_to_focus,
     normalize_desktop_id,
     pin_application,
+    send_pinned_to_overflow,
     split_pinned_dock,
     unpin_application,
     window_matches_application,
@@ -18,6 +20,7 @@ from shell.models import (
 )
 from shell.eventbus import EventBus
 from shell.servicios.aplicaciones.applications import (
+    APP_PIN_REORDER_REQUESTED,
     APPLICATIONS_CHANGED,
     ApplicationsService,
 )
@@ -63,6 +66,80 @@ def test_split_pinned_dock_keeps_nine_plus_overflow() -> None:
     assert overflow == ids[9:]
     assert has_expand is True
     assert split_pinned_dock(ids[:9], 9) == (ids[:9], (), False)
+
+
+def test_move_pinned_application_takes_target_slot() -> None:
+    pinned = ("firefox", "kitty", "code", "dolphin")
+
+    assert move_pinned_application(pinned, "code", "kitty") == (
+        "firefox",
+        "code",
+        "kitty",
+        "dolphin",
+    )
+    assert move_pinned_application(pinned, "firefox", "code") == (
+        "kitty",
+        "code",
+        "firefox",
+        "dolphin",
+    )
+    assert move_pinned_application(pinned, "dolphin", "firefox") == (
+        "dolphin",
+        "firefox",
+        "kitty",
+        "code",
+    )
+    assert move_pinned_application(pinned, "firefox", "kitty") == (
+        "kitty",
+        "firefox",
+        "code",
+        "dolphin",
+    )
+    assert move_pinned_application(pinned, "kitty", "firefox") == (
+        "kitty",
+        "firefox",
+        "code",
+        "dolphin",
+    )
+    assert move_pinned_application(pinned, "kitty", "kitty") == pinned
+    assert move_pinned_application(pinned, "missing", "kitty") == pinned
+    assert move_pinned_application(pinned, "firefox.desktop", "code.desktop") == (
+        "kitty",
+        "code",
+        "firefox",
+        "dolphin",
+    )
+
+
+def test_move_pinned_application_promotes_overflow_and_sends_to_overflow() -> None:
+    ids = tuple(f"app-{index}" for index in range(1, 12))
+
+    promoted = move_pinned_application(ids, "app-11", "app-1")
+    assert promoted[0] == "app-11"
+    visible, overflow, has_expand = split_pinned_dock(promoted, 9)
+    assert visible[0] == "app-11"
+    assert "app-9" in overflow
+    assert has_expand is True
+
+    demoted = move_pinned_application(ids, "app-2", at_index=9)
+    visible, overflow, _has_expand = split_pinned_dock(demoted, 9)
+    assert "app-2" in overflow
+    assert overflow[0] == "app-2"
+    assert "app-10" in visible
+
+
+def test_send_pinned_to_overflow_swaps_first_extra_into_the_bar() -> None:
+    ids = tuple(f"app-{index}" for index in range(1, 12))
+
+    sent = send_pinned_to_overflow(ids, "app-3", 9)
+    visible, overflow, has_expand = split_pinned_dock(sent, 9)
+
+    assert "app-3" not in visible
+    assert overflow[0] == "app-3"
+    assert "app-10" in visible
+    assert has_expand is True
+    assert send_pinned_to_overflow(ids, "app-11", 9) == ids
+    assert send_pinned_to_overflow(ids[:9], "app-3", 9) == ids[:9]
 
 
 def test_window_matching_uses_id_and_wm_class() -> None:
@@ -240,6 +317,18 @@ def test_applications_service_pins_emits_and_launches(tmp_path: Path) -> None:
     assert service.snapshot.pinned_ids == ("kitty",)
     assert load_pinned_ids(tmp_path / "pinned-apps.json") == ("kitty",)
     assert events
+
+    service.pin("firefox")
+    service.reorder("firefox", "kitty")
+    assert service.snapshot.pinned_ids == ("firefox", "kitty")
+    bus.emit(APP_PIN_REORDER_REQUESTED, {"source_id": "kitty", "target_id": "firefox"})
+    assert service.snapshot.pinned_ids == ("kitty", "firefox")
+    bus.emit(APP_PIN_REORDER_REQUESTED, {"source_id": "firefox", "at_index": 0})
+    assert service.snapshot.pinned_ids == ("firefox", "kitty")
+    assert service.snapshot.favorite_ids == ()
+    assert load_pinned_ids(tmp_path / "pinned-apps.json") == ("firefox", "kitty")
+    service.unpin("firefox")
+    assert service.snapshot.pinned_ids == ("kitty",)
 
     service.launch("firefox")
     assert launched

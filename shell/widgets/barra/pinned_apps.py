@@ -33,6 +33,8 @@ from ...popup_handle import PopupHandle, PopupOutsideDismiss, hide_popup, presen
 from ...servicios.aplicaciones.applications import (
     APP_ACTIVATE_REQUESTED,
     APP_NEW_INSTANCE_REQUESTED,
+    APP_PIN_REORDER_REQUESTED,
+    APP_PIN_SEND_TO_OVERFLOW_REQUESTED,
     APP_PIN_TOGGLE_REQUESTED,
     APPLICATIONS_CHANGED,
 )
@@ -52,6 +54,24 @@ from ...window_identity import (
     register_shell_popup,
     schedule_popup_position,
 )
+
+_PIN_DRAG_THRESHOLD_PX = 8
+_PIN_DRAG_EVENT_MASK = (
+    Gdk.EventMask.BUTTON_PRESS_MASK
+    | Gdk.EventMask.BUTTON_RELEASE_MASK
+    | Gdk.EventMask.BUTTON_MOTION_MASK
+    | Gdk.EventMask.POINTER_MOTION_MASK
+)
+
+
+def _xy(value: object) -> tuple[int, int] | None:
+    if value is None:
+        return None
+    if isinstance(value, (tuple, list)) and len(value) == 3:
+        return int(value[1]), int(value[2])
+    if isinstance(value, (tuple, list)) and len(value) == 2:
+        return int(value[0]), int(value[1])
+    return None
 
 
 def _detach_widget(widget: Gtk.Widget) -> None:
@@ -76,12 +96,15 @@ class PinnedAppButton(Gtk.Button):
         on_activate: Callable[[str], None],
         on_unpin: Callable[[str], None],
         on_new_instance: Callable[[str], None],
+        on_send_to_extras: Callable[[str], None],
         icon_size: int,
     ) -> None:
         super().__init__()
         self.application_id = application.id
         self._on_unpin = on_unpin
         self._on_new_instance = on_new_instance
+        self._on_send_to_extras = on_send_to_extras
+        self._can_send_to_extras = False
         self._icon_size = icon_size
         self.get_style_context().add_class("pinned-app-button")
         self.set_relief(Gtk.ReliefStyle.NONE)
@@ -103,7 +126,7 @@ class PinnedAppButton(Gtk.Button):
         self._image.set_pixel_size(icon_size)
 
     def set_icon_size(self, icon_size: int) -> None:
-        if icon_size == self._icon_size:
+        if self._icon_size == icon_size:
             return
         self._icon_size = icon_size
         self._image.set_pixel_size(icon_size)
@@ -119,17 +142,26 @@ class PinnedAppButton(Gtk.Button):
         else:
             context.remove_class("focused")
 
+    def set_can_send_to_extras(self, enabled: bool) -> None:
+        self._can_send_to_extras = enabled
+
     def _on_button_press(self, _button: Gtk.Widget, event: Gdk.EventButton) -> bool:
         if event.button != 3:
             return False
-        popup_application_menu(
-            event,
+        entries: list[tuple[str, Callable[[], None]] | None] = [
+            ("Nueva instancia", lambda: self._on_new_instance(self.application_id)),
+        ]
+        if self._can_send_to_extras:
+            entries.append(
+                ("Enviar a extras", lambda: self._on_send_to_extras(self.application_id)),
+            )
+        entries.extend(
             (
-                ("Nueva instancia", lambda: self._on_new_instance(self.application_id)),
                 None,
                 ("Desfijar", lambda: self._on_unpin(self.application_id)),
-            ),
+            )
         )
+        popup_application_menu(event, tuple(entries))
         return True
 
 
@@ -209,6 +241,11 @@ class PinnedAppsWidget(ShellModule):
         self._active_address = ""
         self._buttons: dict[str, PinnedAppButton] = {}
         self._overflow_open = False
+        self._dragged_app_id: str | None = None
+        self._drag_target_id: str | None = None
+        self._drag_press_root: tuple[float, float] | None = None
+        self._pin_dragging = False
+        self._suppress_activate = False
 
         self._primary = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=PINNED_APP_SPACING)
         self._primary.get_style_context().add_class("pinned-apps-primary")
@@ -309,6 +346,7 @@ class PinnedAppsWidget(ShellModule):
         else:
             self._close_overflow()
             self.hide()
+        self._sync_send_to_extras(visible_ids, has_overflow)
         self._sync_expand_button()
 
     def _fill_row(self, row: Gtk.Box, app_ids: tuple[str, ...]) -> None:
@@ -338,9 +376,11 @@ class PinnedAppsWidget(ShellModule):
                 on_activate=self._on_activate,
                 on_unpin=self._on_unpin,
                 on_new_instance=self._on_new_instance,
+                on_send_to_extras=self._on_send_to_extras,
                 icon_size=self._icon_size(),
             )
             self._buttons[application.id] = button
+            self._configure_pin_drag(button)
         else:
             button.configure(application, self._icon_size())
         return button
@@ -358,6 +398,8 @@ class PinnedAppsWidget(ShellModule):
         return False
 
     def _on_activate(self, app_id: str) -> None:
+        if self._suppress_activate:
+            return
         self._event_bus.emit(APP_ACTIVATE_REQUESTED, app_id)
 
     def _on_unpin(self, app_id: str) -> None:
@@ -365,6 +407,14 @@ class PinnedAppsWidget(ShellModule):
 
     def _on_new_instance(self, app_id: str) -> None:
         self._event_bus.emit(APP_NEW_INSTANCE_REQUESTED, app_id)
+
+    def _on_send_to_extras(self, app_id: str) -> None:
+        self._event_bus.emit(APP_PIN_SEND_TO_OVERFLOW_REQUESTED, app_id)
+
+    def _sync_send_to_extras(self, visible_ids: tuple[str, ...], has_overflow: bool) -> None:
+        visible = set(visible_ids)
+        for app_id, button in self._buttons.items():
+            button.set_can_send_to_extras(has_overflow and app_id in visible)
 
     def _on_toggle_expand(self, *_args) -> None:
         _, overflow_ids, has_overflow = split_pinned_dock(
@@ -408,7 +458,119 @@ class PinnedAppsWidget(ShellModule):
         else:
             context.remove_class("expanded")
 
+    def _configure_pin_drag(self, button: PinnedAppButton) -> None:
+        if getattr(button, "_pin_drag_configured", False):
+            return
+        button._pin_drag_configured = True
+        button.add_events(_PIN_DRAG_EVENT_MASK)
+        button.connect("button-press-event", self._on_pin_drag_press)
+        button.connect("motion-notify-event", self._on_pin_drag_motion)
+        button.connect("button-release-event", self._on_pin_drag_release)
+
+    def _on_pin_drag_press(self, button: Gtk.Widget, event: Gdk.EventButton) -> bool:
+        if event.button != 1:
+            return False
+        app_id = getattr(button, "application_id", "")
+        if not isinstance(app_id, str) or not app_id:
+            return False
+        self._dragged_app_id = app_id
+        self._drag_target_id = None
+        self._drag_press_root = (float(event.x_root), float(event.y_root))
+        self._pin_dragging = False
+        return False
+
+    def _on_pin_drag_motion(self, widget: Gtk.Widget, event: Gdk.EventMotion) -> bool:
+        if self._dragged_app_id is None or self._drag_press_root is None:
+            return False
+        if not (event.state & Gdk.ModifierType.BUTTON1_MASK):
+            return False
+        if not self._pin_dragging:
+            delta_x = float(event.x_root) - self._drag_press_root[0]
+            delta_y = float(event.y_root) - self._drag_press_root[1]
+            if (delta_x * delta_x) + (delta_y * delta_y) < _PIN_DRAG_THRESHOLD_PX ** 2:
+                return False
+            self._pin_dragging = True
+            self._suppress_activate = True
+            source_button = self._buttons.get(self._dragged_app_id)
+            if source_button is not None:
+                source_button.get_style_context().add_class("dragging")
+        target_id = self._pin_id_at_widget_point(widget, event.x, event.y)
+        self._drag_target_id = target_id
+        self._update_drop_target_style(target_id)
+        return True
+
+    def _on_pin_drag_release(self, widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
+        if event.button != 1:
+            return False
+        source_id = self._dragged_app_id
+        was_dragging = self._pin_dragging
+        target_id = self._pin_id_at_widget_point(widget, event.x, event.y)
+        if target_id is None:
+            target_id = self._drag_target_id
+        self._reset_pin_drag()
+        if was_dragging and source_id and target_id and target_id != source_id:
+            self._event_bus.emit(
+                APP_PIN_REORDER_REQUESTED,
+                {"source_id": source_id, "target_id": target_id},
+            )
+            GLib.timeout_add(100, self._clear_suppress_activate)
+            return True
+        if was_dragging:
+            GLib.timeout_add(100, self._clear_suppress_activate)
+            return True
+        self._suppress_activate = False
+        return False
+
+    def _pin_id_at_widget_point(self, widget: Gtk.Widget, x: float, y: float) -> str | None:
+        pointer = _xy(widget.translate_coordinates(self, int(x), int(y)))
+        if pointer is None:
+            return None
+        pointer_x, pointer_y = pointer
+        source_id = self._dragged_app_id
+        for app_id, button in self._buttons.items():
+            if app_id == source_id or not button.get_mapped():
+                continue
+            if button.get_toplevel() is not self.get_toplevel():
+                continue
+            origin = _xy(button.translate_coordinates(self, 0, 0))
+            if origin is None:
+                continue
+            button_x, button_y = origin
+            allocation = button.get_allocation()
+            if (
+                button_x <= pointer_x < button_x + allocation.width
+                and button_y <= pointer_y < button_y + allocation.height
+            ):
+                return app_id
+        return None
+
+    def _update_drop_target_style(self, target_id: str | None) -> None:
+        source_id = self._dragged_app_id
+        for app_id, button in self._buttons.items():
+            style = button.get_style_context()
+            if target_id is not None and app_id == target_id and app_id != source_id:
+                style.add_class("drop-target")
+            else:
+                style.remove_class("drop-target")
+
+    def _reset_pin_drag(self) -> None:
+        self._clear_drag_styles()
+        self._dragged_app_id = None
+        self._drag_target_id = None
+        self._drag_press_root = None
+        self._pin_dragging = False
+
+    def _clear_suppress_activate(self) -> bool:
+        self._suppress_activate = False
+        return False
+
+    def _clear_drag_styles(self) -> None:
+        for button in self._buttons.values():
+            button.get_style_context().remove_class("dragging")
+            button.get_style_context().remove_class("drop-target")
+
     def _on_destroy(self, *_args) -> None:
+        self._reset_pin_drag()
         self._close_overflow()
         self._event_bus.unsubscribe(APPLICATIONS_CHANGED, self._on_applications_changed)
         self._event_bus.unsubscribe(WORKSPACE_CHANGED, self._on_hyprland_snapshot)

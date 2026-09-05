@@ -189,6 +189,7 @@ class PopupOutsideDismiss:
         self._extra_focus_out_ids: list[int] = []
         self._extra_enter_ids: list[int] = []
         self._extra_leave_ids: list[int] = []
+        self._suspended = False
 
     def install(
         self,
@@ -281,6 +282,21 @@ class PopupOutsideDismiss:
         self._install_grace_until = 0
         self._event_bus = None
         self._active_window_handler = None
+        self._suspended = False
+
+    def suspend(self) -> None:
+        """Keep the popup open while a drag crosses its surface."""
+        self._suspended = True
+        self._cancel_deferred_dismiss()
+
+    def resume(self) -> None:
+        if not self._suspended:
+            return
+        self._suspended = False
+        if self._popup is None:
+            return
+        if not self._pointer_over_popup_or_anchor():
+            self._schedule_deferred_dismiss(restart=True)
 
     def set_extra_windows(self, extra_windows: tuple[Gtk.Window, ...]) -> None:
         previous_windows = self._extra_windows
@@ -316,6 +332,8 @@ class PopupOutsideDismiss:
             self._deferred_dismiss_source_id = 0
 
     def _schedule_deferred_dismiss(self, *, restart: bool = False) -> None:
+        if self._suspended:
+            return
         if self._deferred_dismiss_source_id and not restart:
             return
         self._cancel_deferred_dismiss()
@@ -339,6 +357,8 @@ class PopupOutsideDismiss:
         return False
 
     def _on_shell_button_press(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
+        if self._suspended:
+            return False
         if event.button not in (1, 3):
             return False
         popup = self._popup
@@ -406,6 +426,8 @@ class PopupOutsideDismiss:
         return False
 
     def _dismiss(self) -> bool:
+        if self._suspended:
+            return False
         on_dismiss = self._on_dismiss
         self.uninstall()
         if on_dismiss is not None:
