@@ -66,10 +66,15 @@ box#shell-left {
 }
 
 /* Full margin shorthand required: .shell-module { margin: 0 3px } must not win. */
-window#shell box#shell-left > box.stats-widget {
+window#shell box#shell-left > eventbox.active-window-widget {
     margin: 0 3px 0 0;
-    padding: 7px 8px 7px 6px;
+    padding: 5px 10px 5px 6px;
     border-radius: 0 16px 16px 0;
+}
+
+window#shell box#shell-left > box.pinned-apps-widget {
+    margin-top: 4px;
+    margin-bottom: 4px;
 }
 
 /* Restore the old 4px bar inset for regions that should not touch the edges. */
@@ -104,8 +109,8 @@ window#shell.compact button.workspace-button {
 }
 
 window#shell.compact eventbox.active-window-widget {
-    padding: 2px 6px 2px 0;
-    border-radius: 10px;
+    padding: 3px 6px 3px 4px;
+    border-radius: 0 10px 10px 0;
 }
 
 window#shell.compact box.active-window-header {
@@ -123,10 +128,15 @@ window#shell.compact box#shell-right {
     margin-bottom: 2px;
 }
 
-window#shell.compact box#shell-left > box.stats-widget {
+window#shell.compact box#shell-left > eventbox.active-window-widget {
     margin: 0 3px 0 0;
-    padding: 3px 4px;
+    padding: 3px 6px 3px 4px;
     border-radius: 0 10px 10px 0;
+}
+
+window#shell.compact box#shell-left > box.pinned-apps-widget {
+    margin-top: 2px;
+    margin-bottom: 2px;
 }
 
 window#shell.compact label.clock-time {
@@ -382,8 +392,6 @@ eventbox.active-window-widget {
     background-color: @shell_surface_bg;
     border-radius: 0 16px 16px 0;
     padding: 5px 10px;
-    padding-left: 0;
-    margin-left: -1px;
     min-width: 0;
 }
 
@@ -491,6 +499,18 @@ window#shell.compact button.pinned-apps-expand {
     min-width: 18px;
     min-height: 18px;
     padding: 1px 2px;
+}
+
+window#shell-pinned-overflow {
+    background-color: transparent;
+}
+
+flowbox.pinned-apps-overflow-content {
+    background-color: @shell_bar_bg;
+    border: 1px solid @shell_bar_border;
+    border-radius: 0 0 14px 14px;
+    padding: 6px 8px;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.32);
 }
 
 /* ==========================================================================
@@ -732,6 +752,7 @@ label.clock-date {
 
 box.stats-widget {
     min-height: 24px;
+    padding: 2px 8px;
 }
 
 box.stats-cpu-bar {

@@ -38,6 +38,7 @@ TITLE_VOLUME_OSD = "Shell Volume OSD"
 TITLE_CLOCK_CALENDAR = "Shell Clock Calendar"
 TITLE_MEMORY_POPUP = "Shell Memory Popup"
 TITLE_APP_LAUNCHER = "Shell App Launcher"
+TITLE_PINNED_OVERFLOW = "Shell Pinned Overflow"
 
 # Interactive popups that keep keyboard focus on purpose:
 # - Control Center / Network: WiFi password entry

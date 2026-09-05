@@ -114,18 +114,12 @@ class ShellApplication(Gtk.Window):
         self.workspace_widget = WorkspaceWidget(self.event_bus)
         self.layout.center.add(self.workspace_widget)
 
-        self.stats_widget = StatsWidget(self.system_stats, self, self.event_bus)
-        self.stats_widget.set_halign(Gtk.Align.START)
-        self.stats_widget.set_valign(Gtk.Align.FILL)
-        self.layout.left.add(self.stats_widget)
-
-        self.pinned_apps_widget = PinnedAppsWidget(self.event_bus)
-        self.layout.left.add(self.pinned_apps_widget)
-
         self.active_window_widget = ActiveWindowWidget(self.event_bus, self.media_service)
-        self.layout.left.set_spacing(0)
         self.layout.left.set_halign(Gtk.Align.START)
         self.layout.left.add(self.active_window_widget)
+
+        self.pinned_apps_widget = PinnedAppsWidget(self.event_bus, self)
+        self.layout.left.add(self.pinned_apps_widget)
 
         self.ethernet_widget = EthernetWidget(self.event_bus, self.network_service)
         self.tray_widget = SystemTrayWidget(self.tray_service)
@@ -137,6 +131,8 @@ class ShellApplication(Gtk.Window):
         )
         self.layout.right.add(self.notifications_widget)
         self.layout.right.add(self.ethernet_widget)
+        self.stats_widget = StatsWidget(self.system_stats, self, self.event_bus)
+        self.layout.right.add(self.stats_widget)
         self.clock_widget = ClockWidget()
         self.layout.right.add(self.clock_widget)
         self.power_widget = PowerWidget(self.power_service, self, self.event_bus)

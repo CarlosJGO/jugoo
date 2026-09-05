@@ -16,7 +16,7 @@ from ...config import (
     PINNED_APP_ICON_SIZE,
     PINNED_APP_SPACING,
     PINNED_APPS_VISIBLE_LIMIT,
-    PINNED_DOCK_REVEAL_MS,
+    PINNED_OVERFLOW_OFFSET,
 )
 from ...eventbus import EventBus
 from ...icons import FALLBACK_ICON
@@ -29,6 +29,7 @@ from ...models import (
     split_pinned_dock,
     windows_for_application,
 )
+from ...popup_handle import PopupHandle, PopupOutsideDismiss, hide_popup, present_popup
 from ...servicios.aplicaciones.applications import (
     APP_ACTIVATE_REQUESTED,
     APP_PIN_TOGGLE_REQUESTED,
@@ -41,6 +42,26 @@ from ...servicios.escritorio.hyprland import (
     WORKSPACE_CHANGED,
 )
 from ...ui import ShellModule
+from ...window_identity import (
+    TITLE_PINNED_OVERFLOW,
+    configure_passive_popup,
+    configure_toplevel,
+    position_popup_below_anchor,
+    register_shell_popup,
+    schedule_popup_position,
+)
+
+
+def _detach_widget(widget: Gtk.Widget) -> None:
+    """Unparent a dock button, including the FlowBoxChild wrapper if present."""
+    parent = widget.get_parent()
+    if parent is None:
+        return
+    parent.remove(widget)
+    if isinstance(parent, Gtk.FlowBoxChild):
+        flowbox = parent.get_parent()
+        if flowbox is not None:
+            flowbox.remove(parent)
 
 
 class PinnedAppButton(Gtk.Button):
@@ -106,18 +127,82 @@ class PinnedAppButton(Gtk.Button):
         return True
 
 
-class PinnedAppsWidget(ShellModule):
-    """Stable 9-slot strip plus an in-bar Gtk.Revealer for overflow apps."""
+class PinnedAppsOverflowPopup(Gtk.Window):
+    """Mini extension below the dock strip for pinned apps beyond the visible limit."""
 
-    def __init__(self, event_bus: EventBus) -> None:
+    def __init__(self, shell_window: Gtk.Window) -> None:
+        super().__init__(type=Gtk.WindowType.TOPLEVEL)
+        self._anchor: Gtk.Widget | None = None
+        self._fixed_top: int | None = None
+
+        self.set_name("shell-pinned-overflow")
+        register_shell_popup(self, shell_window)
+        configure_toplevel(self, title=TITLE_PINNED_OVERFLOW)
+        configure_passive_popup(self)
+
+        self._content = Gtk.FlowBox()
+        self._content.get_style_context().add_class("pinned-apps-overflow-content")
+        self._content.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._content.set_min_children_per_line(1)
+        self._content.set_max_children_per_line(PINNED_APPS_VISIBLE_LIMIT)
+        self._content.set_column_spacing(PINNED_APP_SPACING)
+        self._content.set_row_spacing(PINNED_APP_SPACING)
+        self._content.set_homogeneous(True)
+        self.add(self._content)
+
+    def open_for(self, anchor: Gtk.Widget) -> None:
+        self._anchor = anchor
+        self._fixed_top = None
+        present_popup(self)
+        schedule_popup_position(self._position_after_show)
+
+    def close_popup(self) -> None:
+        self._anchor = None
+        self._fixed_top = None
+        hide_popup(self)
+
+    def host_buttons(self, buttons: tuple[Gtk.Widget, ...]) -> None:
+        for child in list(self._content.get_children()):
+            inner = child.get_child()
+            if inner is not None:
+                child.remove(inner)
+            self._content.remove(child)
+        for button in buttons:
+            _detach_widget(button)
+            self._content.insert(button, -1)
+            button.show()
+        self._content.show_all()
+        if self.get_visible():
+            schedule_popup_position(self._position_after_show)
+
+    def _position_after_show(self) -> bool:
+        if self._anchor is None:
+            return False
+        top = position_popup_below_anchor(
+            self,
+            self._anchor,
+            title=TITLE_PINNED_OVERFLOW,
+            offset=PINNED_OVERFLOW_OFFSET,
+            fixed_top=self._fixed_top,
+        )
+        if self._fixed_top is None and top is not None:
+            self._fixed_top = top
+        return False
+
+
+class PinnedAppsWidget(ShellModule):
+    """Stable 9-slot strip; overflow opens a drop-down extension of the bar."""
+
+    def __init__(self, event_bus: EventBus, shell_window: Gtk.Window) -> None:
         super().__init__("pinned-apps-widget", spacing=PINNED_APP_SPACING)
         self._event_bus = event_bus
+        self._shell_window = shell_window
         self._compact = False
         self._snapshot = ApplicationsSnapshot()
         self._hyprland: HyprlandSnapshot | None = None
         self._active_address = ""
         self._buttons: dict[str, PinnedAppButton] = {}
-        self._expanded = False
+        self._overflow_open = False
 
         self._primary = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=PINNED_APP_SPACING)
         self._primary.get_style_context().add_class("pinned-apps-primary")
@@ -127,20 +212,14 @@ class PinnedAppsWidget(ShellModule):
         self._expand_button.get_style_context().add_class("pinned-apps-expand")
         self._expand_button.set_relief(Gtk.ReliefStyle.NONE)
         self._expand_button.set_tooltip_text("Mostrar más aplicaciones")
-        self._expand_icon = Gtk.Image.new_from_icon_name("pan-end-symbolic", Gtk.IconSize.MENU)
+        self._expand_icon = Gtk.Image.new_from_icon_name("pan-down-symbolic", Gtk.IconSize.MENU)
         self._expand_icon.set_pixel_size(PINNED_APP_ICON_SIZE)
         self._expand_button.add(self._expand_icon)
         self._expand_button.connect("clicked", self._on_toggle_expand)
         self.pack_start(self._expand_button, False, False, 0)
 
-        self._overflow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=PINNED_APP_SPACING)
-        self._overflow.get_style_context().add_class("pinned-apps-overflow")
-        self._revealer = Gtk.Revealer()
-        self._revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_RIGHT)
-        self._revealer.set_transition_duration(PINNED_DOCK_REVEAL_MS)
-        self._revealer.set_reveal_child(False)
-        self._revealer.add(self._overflow)
-        self.pack_start(self._revealer, False, False, 0)
+        self._overflow = PopupHandle(lambda: PinnedAppsOverflowPopup(shell_window))
+        self._outside_click = PopupOutsideDismiss()
 
         self._expand_button.set_no_show_all(True)
         self._expand_button.hide()
@@ -201,26 +280,23 @@ class PinnedAppsWidget(ShellModule):
         for app_id in tuple(self._buttons):
             if app_id not in live_ids:
                 button = self._buttons.pop(app_id)
-                parent = button.get_parent()
-                if parent is not None:
-                    parent.remove(button)
+                _detach_widget(button)
 
         self._fill_row(self._primary, visible_ids)
-        self._fill_row(self._overflow, overflow_ids)
+        overflow_popup = self._overflow.maybe
+        if overflow_popup is not None:
+            overflow_popup.host_buttons(self._overflow_buttons(overflow_ids))
 
         if self._snapshot.pinned_ids:
             self.set_no_show_all(False)
             self.show_all()
-            self._revealer.set_reveal_child(self._expanded)
             if has_overflow:
                 self._expand_button.show()
             else:
-                self._expanded = False
-                self._revealer.set_reveal_child(False)
+                self._close_overflow()
                 self._expand_button.hide()
         else:
-            self._expanded = False
-            self._revealer.set_reveal_child(False)
+            self._close_overflow()
             self.hide()
         self._sync_expand_button()
 
@@ -228,12 +304,20 @@ class PinnedAppsWidget(ShellModule):
         for child in list(row.get_children()):
             row.remove(child)
         for app_id in app_ids:
-            application = self._snapshot.app_by_id(app_id)
-            if application is None:
-                application = DesktopApplication(id=app_id, name=app_id, icon=FALLBACK_ICON)
-            button = self._button_for(application)
+            button = self._button_for(self._application_for(app_id))
+            _detach_widget(button)
             row.pack_start(button, False, False, 0)
             button.show()
+
+    def _overflow_buttons(self, app_ids: tuple[str, ...]) -> tuple[Gtk.Widget, ...]:
+        return tuple(self._button_for(self._application_for(app_id)) for app_id in app_ids)
+
+    def _application_for(self, app_id: str) -> DesktopApplication:
+        return self._snapshot.app_by_id(app_id) or DesktopApplication(
+            id=app_id,
+            name=app_id,
+            icon=FALLBACK_ICON,
+        )
 
     def _button_for(self, application: DesktopApplication) -> PinnedAppButton:
         button = self._buttons.get(application.id)
@@ -255,11 +339,7 @@ class PinnedAppsWidget(ShellModule):
             button = self._buttons.get(app_id)
             if button is None:
                 continue
-            application = self._snapshot.app_by_id(app_id) or DesktopApplication(
-                id=app_id,
-                name=app_id,
-                icon=FALLBACK_ICON,
-            )
+            application = self._application_for(app_id)
             matches = windows_for_application(application, windows)
             focused = any(window.address == self._active_address for window in matches)
             button.update_runtime(running=bool(matches), focused=focused)
@@ -277,27 +357,48 @@ class PinnedAppsWidget(ShellModule):
             PINNED_APPS_VISIBLE_LIMIT,
         )
         if not has_overflow:
+            self._close_overflow()
             return
-        self._expanded = not self._expanded
-        if self._expanded and overflow_ids:
-            self._overflow.show_all()
-        self._revealer.set_reveal_child(self._expanded)
+        if self._overflow_open:
+            self._close_overflow()
+            return
+        popup = self._overflow.get()
+        popup.host_buttons(self._overflow_buttons(overflow_ids))
+        popup.open_for(self._expand_button)
+        self._overflow_open = True
+        self._outside_click.install(
+            popup,
+            self._shell_window,
+            (self._expand_button,),
+            self._close_overflow,
+            self._event_bus,
+        )
+        self._sync_expand_button()
+
+    def _close_overflow(self) -> None:
+        self._overflow_open = False
+        self._outside_click.uninstall()
+        popup = self._overflow.maybe
+        if popup is not None:
+            popup.close_popup()
         self._sync_expand_button()
 
     def _sync_expand_button(self) -> None:
-        icon_name = "pan-start-symbolic" if self._expanded else "pan-end-symbolic"
+        expanded = self._overflow_open
+        icon_name = "pan-up-symbolic" if expanded else "pan-down-symbolic"
         self._expand_icon.set_from_icon_name(icon_name, Gtk.IconSize.MENU)
         self._expand_icon.set_pixel_size(self._icon_size())
         self._expand_button.set_tooltip_text(
-            "Ocultar aplicaciones extra" if self._expanded else "Mostrar más aplicaciones"
+            "Ocultar aplicaciones extra" if expanded else "Mostrar más aplicaciones"
         )
         context = self._expand_button.get_style_context()
-        if self._expanded:
+        if expanded:
             context.add_class("expanded")
         else:
             context.remove_class("expanded")
 
     def _on_destroy(self, *_args) -> None:
+        self._close_overflow()
         self._event_bus.unsubscribe(APPLICATIONS_CHANGED, self._on_applications_changed)
         self._event_bus.unsubscribe(WORKSPACE_CHANGED, self._on_hyprland_snapshot)
         self._event_bus.unsubscribe(WINDOW_OPENED, self._on_hyprland_snapshot)
