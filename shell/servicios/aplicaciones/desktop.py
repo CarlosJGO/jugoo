@@ -10,6 +10,16 @@ from ...icons import APPLICATION_DIRS, FALLBACK_ICON
 from ...models import DesktopApplication, normalize_desktop_id
 
 _TRUE = {"1", "true", "yes", "on"}
+_NEW_WINDOW_ACTION_IDS = frozenset(
+    {
+        "new-window",
+        "new-instance",
+        "window-new",
+        "new_window",
+        "newwindow",
+        "newinstance",
+    }
+)
 
 
 def scan_desktop_applications(
@@ -45,8 +55,11 @@ def desktop_directories_stamp(directories: tuple[Path, ...] | None = None) -> tu
 
 
 def read_desktop_application(path: Path) -> DesktopApplication | None:
-    entry = _read_desktop_entry(path)
-    if entry is None:
+    parser = configparser.ConfigParser(interpolation=None)
+    try:
+        parser.read(path, encoding="utf-8")
+        entry = parser["Desktop Entry"]
+    except (OSError, KeyError, configparser.Error):
         return None
     if entry.get("Type", "Application").strip() not in {"", "Application"}:
         return None
@@ -68,6 +81,7 @@ def read_desktop_application(path: Path) -> DesktopApplication | None:
         generic_name=entry.get("GenericName", "").strip(),
         terminal=_is_true(entry.get("Terminal", "")),
         desktop_path=str(path),
+        new_instance_exec=_new_instance_exec(parser, entry),
     )
 
 
@@ -75,13 +89,18 @@ def strip_exec_field_codes(command: str) -> str:
     return _strip_exec_field_codes(command)
 
 
-def _read_desktop_entry(path: Path) -> configparser.SectionProxy | None:
-    parser = configparser.ConfigParser(interpolation=None)
-    try:
-        parser.read(path, encoding="utf-8")
-        return parser["Desktop Entry"]
-    except (OSError, KeyError, configparser.Error):
-        return None
+def _new_instance_exec(parser: configparser.ConfigParser, entry: configparser.SectionProxy) -> str:
+    for action_id in _desktop_list(entry.get("Actions", "")):
+        normalized = action_id.casefold().replace("_", "-")
+        if normalized not in _NEW_WINDOW_ACTION_IDS:
+            continue
+        section = f"Desktop Action {action_id}"
+        if not parser.has_section(section):
+            continue
+        exec_cmd = parser[section].get("Exec", "").strip()
+        if exec_cmd:
+            return _strip_exec_field_codes(exec_cmd)
+    return ""
 
 
 def _should_show(entry: configparser.SectionProxy) -> bool:

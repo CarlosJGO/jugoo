@@ -14,7 +14,6 @@ gi.require_version("Pango", "1.0")
 from gi.repository import Gdk, GLib, Gtk, GtkLayerShell, Pango
 
 from ...config import (
-    LAUNCHER_LIST_SPACING,
     LAUNCHER_MAX_HEIGHT,
     LAUNCHER_ROW_ICON_SIZE,
     LAUNCHER_WIDTH,
@@ -22,21 +21,36 @@ from ...config import (
 from ...models import ApplicationsSnapshot, DesktopApplication, filter_applications
 from ...popup_handle import hide_popup, present_popup
 from ...window_identity import TITLE_APP_LAUNCHER, configure_interactive_popup, configure_toplevel, register_shell_popup
+from .context_menu import fill_application_menu
 
 
 class LauncherAppRow(Gtk.ListBoxRow):
-    """One searchable application with an obvious pin control."""
+    """One searchable application with independent favorite and dock-pin state."""
 
     def __init__(
         self,
         application: DesktopApplication,
         *,
+        favorite: bool,
         pinned: bool,
+        on_open: Callable[[str], None],
+        on_new_instance: Callable[[str], None],
+        on_favorite_toggle: Callable[[str], None],
         on_pin_toggle: Callable[[str], None],
+        on_context_menu: Callable[["LauncherAppRow"], None],
     ) -> None:
         super().__init__()
         self.application = application
+        self._favorite = favorite
+        self._pinned = pinned
+        self._on_open = on_open
+        self._on_new_instance = on_new_instance
+        self._on_favorite_toggle = on_favorite_toggle
+        self._on_pin_toggle = on_pin_toggle
+        self._on_context_menu = on_context_menu
         self.get_style_context().add_class("launcher-row")
+        if favorite:
+            self.get_style_context().add_class("launcher-row-favorite")
         if pinned:
             self.get_style_context().add_class("launcher-row-pinned")
 
@@ -61,20 +75,58 @@ class LauncherAppRow(Gtk.ListBoxRow):
             labels.pack_start(comment, False, False, 0)
         content.pack_start(labels, True, True, 0)
 
-        pin_button = Gtk.Button()
-        pin_button.set_relief(Gtk.ReliefStyle.NONE)
-        pin_button.get_style_context().add_class("launcher-pin-button")
+        status = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        status.get_style_context().add_class("launcher-row-status")
+        content.pack_end(status, False, False, 0)
+
+        pin_icon = Gtk.Image.new_from_icon_name("view-pin-symbolic", Gtk.IconSize.MENU)
+        pin_icon.set_pixel_size(16)
+        pin_icon.get_style_context().add_class("launcher-pin-indicator")
+        pin_icon.set_tooltip_text("Fijada en el dock")
+        pin_icon.set_no_show_all(True)
         if pinned:
-            pin_button.get_style_context().add_class("pinned")
-        pin_button.set_tooltip_text("Desfijar" if pinned else "Fijar en la barra")
-        pin_icon = Gtk.Image.new_from_icon_name(
-            "starred-symbolic" if pinned else "non-starred-symbolic",
+            pin_icon.show()
+        else:
+            pin_icon.hide()
+        status.pack_start(pin_icon, False, False, 0)
+
+        favorite_button = Gtk.Button()
+        favorite_button.set_relief(Gtk.ReliefStyle.NONE)
+        favorite_button.get_style_context().add_class("launcher-favorite-button")
+        if favorite:
+            favorite_button.get_style_context().add_class("favorited")
+        favorite_button.set_tooltip_text(
+            "Quitar de favoritos" if favorite else "Marcar como favorito"
+        )
+        favorite_icon = Gtk.Image.new_from_icon_name(
+            "starred-symbolic" if favorite else "non-starred-symbolic",
             Gtk.IconSize.MENU,
         )
-        pin_icon.set_pixel_size(16)
-        pin_button.add(pin_icon)
-        pin_button.connect("clicked", lambda *_args: on_pin_toggle(application.id))
-        content.pack_end(pin_button, False, False, 0)
+        favorite_icon.set_pixel_size(16)
+        favorite_button.add(favorite_icon)
+        favorite_button.connect("clicked", lambda *_args: on_favorite_toggle(application.id))
+        favorite_button.connect("button-press-event", self._on_button_press)
+        status.pack_start(favorite_button, False, False, 0)
+
+        self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+        self.connect("button-press-event", self._on_button_press)
+
+    def _on_button_press(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
+        if event.button != 3:
+            return False
+        self._on_context_menu(self)
+        return True
+
+    def menu_entries(self):
+        favorite_label = "Quitar de favoritos" if self._favorite else "Marcar como favorito"
+        pin_label = "Desfijar del dock" if self._pinned else "Fijar en dock"
+        return (
+            ("Abrir", lambda: self._on_open(self.application.id)),
+            ("Nueva instancia", lambda: self._on_new_instance(self.application.id)),
+            None,
+            (favorite_label, lambda: self._on_favorite_toggle(self.application.id)),
+            (pin_label, lambda: self._on_pin_toggle(self.application.id)),
+        )
 
 
 class AppLauncherWindow(Gtk.Window):
@@ -85,12 +137,16 @@ class AppLauncherWindow(Gtk.Window):
         shell_window: Gtk.Window,
         *,
         on_launch: Callable[[str], None],
+        on_new_instance: Callable[[str], None],
         on_pin_toggle: Callable[[str], None],
+        on_favorite_toggle: Callable[[str], None],
         on_refresh: Callable[[], ApplicationsSnapshot],
     ) -> None:
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
         self._on_launch = on_launch
+        self._on_new_instance = on_new_instance
         self._on_pin_toggle = on_pin_toggle
+        self._on_favorite_toggle = on_favorite_toggle
         self._on_refresh = on_refresh
         self._snapshot = ApplicationsSnapshot()
         self._rows: tuple[LauncherAppRow, ...] = ()
@@ -115,7 +171,7 @@ class AppLauncherWindow(Gtk.Window):
 
         card = Gtk.EventBox()
         card.get_style_context().add_class("launcher-card-host")
-        card.connect("button-press-event", lambda *_args: True)
+        card.connect("button-press-event", self._on_card_press)
         aligner.pack_start(card, False, False, 0)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -135,6 +191,7 @@ class AppLauncherWindow(Gtk.Window):
         self._search.set_hexpand(True)
         self._search.connect("search-changed", self._on_query_changed)
         self._search.connect("activate", self._on_search_activate)
+        self._search.connect("focus-in-event", self._on_search_focus)
         search_row.pack_start(self._search, True, True, 0)
         outer.pack_start(search_row, False, False, 0)
 
@@ -148,7 +205,6 @@ class AppLauncherWindow(Gtk.Window):
         scrolled.set_propagate_natural_height(True)
         scrolled.set_max_content_height(LAUNCHER_MAX_HEIGHT)
         scrolled.get_style_context().add_class("launcher-scroll")
-        outer.pack_start(scrolled, True, True, 0)
         self._scrolled = scrolled
 
         self._list = Gtk.ListBox()
@@ -156,7 +212,33 @@ class AppLauncherWindow(Gtk.Window):
         self._list.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self._list.set_activate_on_single_click(True)
         self._list.connect("row-activated", self._on_row_activated)
+        self._list.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+        self._list.connect("button-press-event", self._on_list_button_press)
         scrolled.add(self._list)
+        scrolled.connect("button-press-event", self._on_list_button_press)
+
+        self._list_overlay = Gtk.Overlay()
+        self._list_overlay.add(scrolled)
+        outer.pack_start(self._list_overlay, True, True, 0)
+
+        self._menu_catcher = Gtk.EventBox()
+        self._menu_catcher.get_style_context().add_class("launcher-menu-catcher")
+        self._menu_catcher.set_halign(Gtk.Align.FILL)
+        self._menu_catcher.set_valign(Gtk.Align.FILL)
+        self._menu_catcher.set_hexpand(True)
+        self._menu_catcher.set_vexpand(True)
+        self._menu_catcher.set_no_show_all(True)
+        self._menu_catcher.connect("button-press-event", self._on_menu_catcher_press)
+        self._list_overlay.add_overlay(self._menu_catcher)
+        self._menu_catcher.hide()
+
+        self._action_menu = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self._action_menu.get_style_context().add_class("launcher-action-menu")
+        self._action_menu.set_halign(Gtk.Align.END)
+        self._action_menu.set_valign(Gtk.Align.START)
+        self._action_menu.set_no_show_all(True)
+        self._list_overlay.add_overlay(self._action_menu)
+        self._action_menu.hide()
 
         self.add_events(Gdk.EventMask.KEY_PRESS_MASK)
         self.connect("key-press-event", self._on_key_press)
@@ -190,6 +272,7 @@ class AppLauncherWindow(Gtk.Window):
         GLib.idle_add(self._focus_search)
 
     def close_launcher(self) -> None:
+        self._dismiss_action_menu()
         if self._closing or not self.get_visible():
             hide_popup(self)
             return
@@ -213,6 +296,7 @@ class AppLauncherWindow(Gtk.Window):
         self._rebuild_rows()
 
     def _rebuild_rows(self, *, keep_selection: bool = False) -> None:
+        self._dismiss_action_menu()
         selected_id = None
         if keep_selection:
             selected = self._selected_application()
@@ -221,18 +305,22 @@ class AppLauncherWindow(Gtk.Window):
         for child in list(self._list.get_children()):
             self._list.remove(child)
 
-        pinned = set(self._snapshot.pinned_ids)
         matches = filter_applications(
             self._snapshot.applications,
             self._search.get_text(),
-            self._snapshot.pinned_ids,
+            self._snapshot.favorite_ids,
         )
         rows: list[LauncherAppRow] = []
         for application in matches:
             row = LauncherAppRow(
                 application,
-                pinned=application.id in pinned,
+                favorite=self._snapshot.is_favorite(application.id),
+                pinned=self._snapshot.is_pinned(application.id),
+                on_open=self._open_application,
+                on_new_instance=self._new_instance_application,
+                on_favorite_toggle=self._on_favorite_toggle,
                 on_pin_toggle=self._on_pin_toggle,
+                on_context_menu=self._show_row_menu,
             )
             self._list.add(row)
             rows.append(row)
@@ -255,6 +343,7 @@ class AppLauncherWindow(Gtk.Window):
         return None
 
     def _move_selection(self, delta: int) -> None:
+        self._dismiss_action_menu()
         if not self._rows:
             return
         current = self._list.get_selected_row()
@@ -280,17 +369,108 @@ class AppLauncherWindow(Gtk.Window):
             adj.set_value(alloc.y + alloc.height - page)
         return False
 
+    def _dismiss_action_menu(self) -> None:
+        self._menu_catcher.hide()
+        self._menu_catcher.set_no_show_all(True)
+        self._action_menu.hide()
+        self._action_menu.set_no_show_all(True)
+        for child in list(self._action_menu.get_children()):
+            self._action_menu.remove(child)
+
+    def _show_row_menu(self, row: LauncherAppRow) -> None:
+        self._list.select_row(row)
+        self._menu_catcher.set_no_show_all(False)
+        self._menu_catcher.show()
+        self._action_menu.set_no_show_all(False)
+        fill_application_menu(self._action_menu, row.menu_entries(), self._on_action_picked)
+        translated = row.translate_coordinates(self._list_overlay, 0, 0)
+        y = 0
+        if translated:
+            if len(translated) == 3:
+                _ok, _x, y = translated
+            else:
+                _x, y = translated
+        _min_h, menu_h = self._action_menu.get_preferred_height()
+        overlay_h = self._list_overlay.get_allocated_height()
+        if overlay_h > 0 and menu_h > 0:
+            y = max(0, min(int(y), overlay_h - menu_h))
+        else:
+            y = max(0, int(y))
+        self._action_menu.set_margin_top(y)
+        self._action_menu.set_margin_end(8)
+        self._action_menu.show_all()
+
+    def _on_action_picked(self, callback: Callable[[], None]) -> None:
+        self._dismiss_action_menu()
+        callback()
+
+    def _on_menu_catcher_press(self, widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
+        if event.button == 3:
+            y = int(event.y)
+            translated = widget.translate_coordinates(self._list, int(event.x), int(event.y))
+            if translated:
+                if len(translated) == 3:
+                    _ok, _x, y = translated
+                else:
+                    _x, y = translated
+            row = self._list.get_row_at_y(int(y))
+            if isinstance(row, LauncherAppRow):
+                self._show_row_menu(row)
+                return True
+        self._dismiss_action_menu()
+        return True
+
+    def _on_search_focus(self, *_args) -> bool:
+        self._dismiss_action_menu()
+        return False
+
+    def _on_list_button_press(self, widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
+        if event.button != 3:
+            if self._action_menu.get_visible():
+                self._dismiss_action_menu()
+            return False
+        y = int(event.y)
+        if widget is not self._list:
+            translated = widget.translate_coordinates(self._list, int(event.x), int(event.y))
+            if not translated:
+                return False
+            if len(translated) == 3:
+                _ok, _x, y = translated
+            else:
+                _x, y = translated
+        row = self._list.get_row_at_y(int(y))
+        if isinstance(row, LauncherAppRow):
+            self._show_row_menu(row)
+            return True
+        self._dismiss_action_menu()
+        return True
+
+    def _on_card_press(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
+        if event.button == 1 and self._action_menu.get_visible():
+            self._dismiss_action_menu()
+            return True
+        return event.button == 1
+
+    def _open_application(self, app_id: str) -> None:
+        self.close_launcher()
+        self._on_launch(app_id)
+
+    def _new_instance_application(self, app_id: str) -> None:
+        self.close_launcher()
+        self._on_new_instance(app_id)
+
     def _launch_selected(self) -> None:
         application = self._selected_application()
         if application is None:
             return
-        self.close_launcher()
-        self._on_launch(application.id)
+        self._open_application(application.id)
 
     def _on_row_activated(self, _list: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
+        if self._action_menu.get_visible():
+            self._dismiss_action_menu()
+            return
         if isinstance(row, LauncherAppRow):
-            self.close_launcher()
-            self._on_launch(row.application.id)
+            self._open_application(row.application.id)
 
     def _on_search_activate(self, *_args) -> None:
         self._launch_selected()
@@ -309,6 +489,9 @@ class AppLauncherWindow(Gtk.Window):
             and state & Gdk.ModifierType.SUPER_MASK
         )
         if key == Gdk.KEY_Escape or super_space:
+            if self._action_menu.get_visible() and key == Gdk.KEY_Escape:
+                self._dismiss_action_menu()
+                return True
             self.close_launcher()
             return True
         if key in (Gdk.KEY_Down, Gdk.KEY_KP_Down):

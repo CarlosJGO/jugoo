@@ -46,7 +46,7 @@ CLOCK_DATE_FORMAT = "%a · %d %b"
 # System statistics module. Thermal thresholds live in shell/servicios/sistema/system.py.
 SYSTEM_STATS_UPDATE_INTERVAL = 1
 STATS_SECTION_SPACING = 12
-STATS_CPU_BAR_WIDTH = 84
+STATS_CPU_BAR_WIDTH = 52
 STATS_CPU_BAR_TEMP_MIN_C = 30.0
 STATS_CPU_BAR_TEMP_MAX_C = 95.0
 STATS_GPU_FAN_ICON_SIZE = 20

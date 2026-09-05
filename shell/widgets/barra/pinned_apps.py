@@ -32,6 +32,7 @@ from ...models import (
 from ...popup_handle import PopupHandle, PopupOutsideDismiss, hide_popup, present_popup
 from ...servicios.aplicaciones.applications import (
     APP_ACTIVATE_REQUESTED,
+    APP_NEW_INSTANCE_REQUESTED,
     APP_PIN_TOGGLE_REQUESTED,
     APPLICATIONS_CHANGED,
 )
@@ -42,6 +43,7 @@ from ...servicios.escritorio.hyprland import (
     WORKSPACE_CHANGED,
 )
 from ...ui import ShellModule
+from ...widgets.aplicaciones.context_menu import popup_application_menu
 from ...window_identity import (
     TITLE_PINNED_OVERFLOW,
     configure_passive_popup,
@@ -73,11 +75,13 @@ class PinnedAppButton(Gtk.Button):
         *,
         on_activate: Callable[[str], None],
         on_unpin: Callable[[str], None],
+        on_new_instance: Callable[[str], None],
         icon_size: int,
     ) -> None:
         super().__init__()
         self.application_id = application.id
         self._on_unpin = on_unpin
+        self._on_new_instance = on_new_instance
         self._icon_size = icon_size
         self.get_style_context().add_class("pinned-app-button")
         self.set_relief(Gtk.ReliefStyle.NONE)
@@ -118,12 +122,14 @@ class PinnedAppButton(Gtk.Button):
     def _on_button_press(self, _button: Gtk.Widget, event: Gdk.EventButton) -> bool:
         if event.button != 3:
             return False
-        menu = Gtk.Menu()
-        item = Gtk.MenuItem(label="Desfijar")
-        item.connect("activate", lambda *_args: self._on_unpin(self.application_id))
-        menu.append(item)
-        menu.show_all()
-        menu.popup_at_pointer(event)
+        popup_application_menu(
+            event,
+            (
+                ("Nueva instancia", lambda: self._on_new_instance(self.application_id)),
+                None,
+                ("Desfijar", lambda: self._on_unpin(self.application_id)),
+            ),
+        )
         return True
 
 
@@ -211,10 +217,14 @@ class PinnedAppsWidget(ShellModule):
         self._expand_button = Gtk.Button()
         self._expand_button.get_style_context().add_class("pinned-apps-expand")
         self._expand_button.set_relief(Gtk.ReliefStyle.NONE)
-        self._expand_button.set_tooltip_text("Mostrar más aplicaciones")
-        self._expand_icon = Gtk.Image.new_from_icon_name("pan-down-symbolic", Gtk.IconSize.MENU)
+        self._expand_icon = Gtk.Image.new_from_icon_name(
+            "view-app-grid-symbolic",
+            Gtk.IconSize.DIALOG,
+        )
         self._expand_icon.set_pixel_size(PINNED_APP_ICON_SIZE)
-        self._expand_button.add(self._expand_icon)
+        self._expand_button.set_image(self._expand_icon)
+        self._expand_button.set_always_show_image(True)
+        self._expand_icon.show()
         self._expand_button.connect("clicked", self._on_toggle_expand)
         self.pack_start(self._expand_button, False, False, 0)
 
@@ -292,6 +302,7 @@ class PinnedAppsWidget(ShellModule):
             self.show_all()
             if has_overflow:
                 self._expand_button.show()
+                self._expand_icon.show()
             else:
                 self._close_overflow()
                 self._expand_button.hide()
@@ -326,6 +337,7 @@ class PinnedAppsWidget(ShellModule):
                 application,
                 on_activate=self._on_activate,
                 on_unpin=self._on_unpin,
+                on_new_instance=self._on_new_instance,
                 icon_size=self._icon_size(),
             )
             self._buttons[application.id] = button
@@ -350,6 +362,9 @@ class PinnedAppsWidget(ShellModule):
 
     def _on_unpin(self, app_id: str) -> None:
         self._event_bus.emit(APP_PIN_TOGGLE_REQUESTED, app_id)
+
+    def _on_new_instance(self, app_id: str) -> None:
+        self._event_bus.emit(APP_NEW_INSTANCE_REQUESTED, app_id)
 
     def _on_toggle_expand(self, *_args) -> None:
         _, overflow_ids, has_overflow = split_pinned_dock(
@@ -385,12 +400,8 @@ class PinnedAppsWidget(ShellModule):
 
     def _sync_expand_button(self) -> None:
         expanded = self._overflow_open
-        icon_name = "pan-up-symbolic" if expanded else "pan-down-symbolic"
-        self._expand_icon.set_from_icon_name(icon_name, Gtk.IconSize.MENU)
         self._expand_icon.set_pixel_size(self._icon_size())
-        self._expand_button.set_tooltip_text(
-            "Ocultar aplicaciones extra" if expanded else "Mostrar más aplicaciones"
-        )
+        self._expand_icon.show()
         context = self._expand_button.get_style_context()
         if expanded:
             context.add_class("expanded")

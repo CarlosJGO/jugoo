@@ -7,6 +7,7 @@ from shell.models import (
     DesktopApplication,
     Window,
     filter_applications,
+    new_instance_command,
     next_window_to_focus,
     normalize_desktop_id,
     pin_application,
@@ -21,7 +22,12 @@ from shell.servicios.aplicaciones.applications import (
     ApplicationsService,
 )
 from shell.servicios.aplicaciones.desktop import read_desktop_application, strip_exec_field_codes
-from shell.servicios.aplicaciones.store import load_pinned_ids, save_pinned_ids
+from shell.servicios.aplicaciones.store import (
+    load_application_prefs,
+    load_pinned_ids,
+    save_application_prefs,
+    save_pinned_ids,
+)
 
 
 def _app(app_id: str, name: str, *, wm_class: str = "") -> DesktopApplication:
@@ -79,7 +85,7 @@ def test_next_window_to_focus_cycles() -> None:
     assert next_window_to_focus((), "0x1") is None
 
 
-def test_filter_applications_prefers_pinned_and_prefix() -> None:
+def test_filter_applications_prefers_favorites_and_prefix() -> None:
     firefox = _app("firefox", "Firefox")
     files = _app("org.kde.dolphin", "Dolphin")
     code = _app("code", "Code - OSS")
@@ -90,6 +96,7 @@ def test_filter_applications_prefers_pinned_and_prefix() -> None:
 
     unfiltered = filter_applications((firefox, files, code), "", ("code",))
     assert unfiltered[0].id == "code"
+    assert [item.id for item in unfiltered] == ["code", "org.kde.dolphin", "firefox"]
 
 
 def test_filter_applications_empty_query_returns_empty_state_friendly_list() -> None:
@@ -126,7 +133,81 @@ def test_pinned_store_roundtrip_preserves_order(tmp_path: Path) -> None:
 
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["pinned"] == ["zen-browser", "org.kde.dolphin", "kitty"]
+    assert payload["favorites"] == []
     assert load_pinned_ids(path) == ("zen-browser", "org.kde.dolphin", "kitty")
+
+
+def test_application_prefs_keep_pins_and_favorites_independent(tmp_path: Path) -> None:
+    path = tmp_path / "pinned-apps.json"
+    save_application_prefs(path, ("firefox", "kitty"), ("org.kde.dolphin", "firefox"))
+
+    pinned, favorites = load_application_prefs(path)
+    assert pinned == ("firefox", "kitty")
+    assert favorites == ("org.kde.dolphin", "firefox")
+
+    save_pinned_ids(path, ("kitty",))
+    pinned, favorites = load_application_prefs(path)
+    assert pinned == ("kitty",)
+    assert favorites == ("org.kde.dolphin", "firefox")
+
+
+def test_application_prefs_load_v1_without_favorites(tmp_path: Path) -> None:
+    path = tmp_path / "pinned-apps.json"
+    path.write_text(
+        json.dumps({"version": 1, "pinned": ["firefox", "kitty.desktop"]}) + "\n",
+        encoding="utf-8",
+    )
+    pinned, favorites = load_application_prefs(path)
+    assert pinned == ("firefox", "kitty")
+    assert favorites == ()
+
+    path.write_text(json.dumps(["zen-browser", "org.kde.dolphin"]) + "\n", encoding="utf-8")
+    pinned, favorites = load_application_prefs(path)
+    assert pinned == ("zen-browser", "org.kde.dolphin")
+    assert favorites == ()
+
+
+def test_new_instance_command_prefers_desktop_action() -> None:
+    firefox = DesktopApplication(
+        id="firefox",
+        name="Firefox",
+        icon="firefox",
+        exec_cmd="firefox",
+        new_instance_exec="firefox --new-window",
+    )
+    terminal = DesktopApplication(
+        id="kitty",
+        name="Kitty",
+        icon="kitty",
+        exec_cmd="kitty",
+        terminal=True,
+    )
+    generic = DesktopApplication(id="foo", name="Foo", icon="foo", exec_cmd="foo --profile x")
+
+    assert new_instance_command(firefox) == "firefox --new-window"
+    assert new_instance_command(terminal) == "kitty"
+    assert new_instance_command(generic) == "foo --profile x --new-window"
+
+
+def test_read_desktop_application_new_window_action(tmp_path: Path) -> None:
+    desktop = tmp_path / "firefox.desktop"
+    desktop.write_text(
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Name=Firefox\n"
+        "Exec=firefox %u\n"
+        "Icon=firefox\n"
+        "Actions=new-window;\n"
+        "\n"
+        "[Desktop Action new-window]\n"
+        "Name=New Window\n"
+        "Exec=firefox --new-window\n",
+        encoding="utf-8",
+    )
+    parsed = read_desktop_application(desktop)
+    assert parsed is not None
+    assert parsed.exec_cmd == "firefox"
+    assert parsed.new_instance_exec == "firefox --new-window"
 
 
 def test_applications_service_pins_emits_and_launches(tmp_path: Path) -> None:
@@ -164,4 +245,45 @@ def test_applications_service_pins_emits_and_launches(tmp_path: Path) -> None:
     assert launched
     assert launched[0][-1] == "firefox" or launched[0][-1] == "firefox.desktop" or "firefox" in launched[0]
 
+    launched.clear()
+    service.favorite("firefox")
+    service.pin("firefox")
+    assert service.snapshot.pinned_ids == ("kitty", "firefox")
+    assert service.snapshot.favorite_ids == ("firefox",)
+    service.unfavorite("firefox")
+    assert service.snapshot.pinned_ids == ("kitty", "firefox")
+    assert service.snapshot.favorite_ids == ()
+    service.unpin("firefox")
+    service.favorite("firefox")
+    assert service.snapshot.pinned_ids == ("kitty",)
+    assert service.snapshot.favorite_ids == ("firefox",)
+    pinned, favorites = load_application_prefs(tmp_path / "pinned-apps.json")
+    assert pinned == ("kitty",)
+    assert favorites == ("firefox",)
+
+    launched.clear()
+    service.launch_new_instance("firefox")
+    assert launched
+    assert any("--new-window" in part for part in launched[0])
+
     service.close()
+
+
+def _run() -> None:
+    import inspect
+    import tempfile
+
+    namespace = {name: value for name, value in globals().items() if name.startswith("test_")}
+    for name, test in sorted(namespace.items()):
+        parameters = inspect.signature(test).parameters
+        if "tmp_path" in parameters:
+            with tempfile.TemporaryDirectory() as folder:
+                test(Path(folder))
+        else:
+            test()
+        print(f"ok {name}")
+
+
+if __name__ == "__main__":
+    _run()
+

@@ -631,14 +631,16 @@ class DesktopApplication:
     generic_name: str = ""
     terminal: bool = False
     desktop_path: str = ""
+    new_instance_exec: str = ""
 
 
 @dataclass(frozen=True)
 class ApplicationsSnapshot:
-    """Service-owned application catalog and pinned order."""
+    """Service-owned application catalog, dock pins, and launcher favorites."""
 
     applications: tuple[DesktopApplication, ...] = ()
     pinned_ids: tuple[str, ...] = ()
+    favorite_ids: tuple[str, ...] = ()
 
     def app_by_id(self, app_id: str) -> DesktopApplication | None:
         wanted = normalize_desktop_id(app_id)
@@ -656,6 +658,12 @@ class ApplicationsSnapshot:
             if application is not None:
                 apps.append(application)
         return tuple(apps)
+
+    def is_pinned(self, app_id: str) -> bool:
+        return normalize_desktop_id(app_id) in self.pinned_ids
+
+    def is_favorite(self, app_id: str) -> bool:
+        return normalize_desktop_id(app_id) in self.favorite_ids
 
 
 def normalize_desktop_id(value: str) -> str:
@@ -759,11 +767,11 @@ def next_window_to_focus(
 def filter_applications(
     applications: Sequence[DesktopApplication],
     query: str,
-    pinned_ids: Sequence[str] = (),
+    favorite_ids: Sequence[str] = (),
 ) -> tuple[DesktopApplication, ...]:
-    """Filter the in-memory catalog. Pinned apps sort first, then prefix hits."""
+    """Filter the in-memory catalog. Launcher favorites sort first, then prefix hits."""
     needle = " ".join(query.casefold().split())
-    pinned = {normalize_desktop_id(item) for item in pinned_ids}
+    favorites = {normalize_desktop_id(item) for item in favorite_ids}
 
     def score(application: DesktopApplication) -> tuple[int, int, str]:
         name = application.name.casefold()
@@ -787,10 +795,25 @@ def filter_applications(
             ):
                 return (3, 0, name)
         prefix = 0 if name.startswith(needle) or ident.startswith(needle) else 1
-        pinned_rank = 0 if application.id in pinned else 1
-        return (pinned_rank, prefix, name)
+        favorite_rank = 0 if application.id in favorites else 1
+        return (favorite_rank, prefix, name)
 
     if not needle:
         return tuple(sorted(applications, key=score))
     matched = [application for application in applications if score(application)[0] < 3]
     return tuple(sorted(matched, key=score))
+
+
+_NEW_WINDOW_FLAGS = ("--new-window", "--new-instance", "-new-window")
+
+
+def new_instance_command(application: DesktopApplication) -> str:
+    """Best-effort command that asks the app for a fresh window/instance."""
+    if application.new_instance_exec.strip():
+        return application.new_instance_exec.strip()
+    command = application.exec_cmd.strip()
+    if not command:
+        return ""
+    if any(flag in command for flag in _NEW_WINDOW_FLAGS) or application.terminal:
+        return command
+    return f"{command} --new-window"

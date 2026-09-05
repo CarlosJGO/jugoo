@@ -18,6 +18,8 @@ from ..models import (
 from ..popup_handle import PopupHandle
 from ..servicios.aplicaciones.applications import (
     APP_ACTIVATE_REQUESTED,
+    APP_FAVORITE_TOGGLE_REQUESTED,
+    APP_NEW_INSTANCE_REQUESTED,
     APP_PIN_TOGGLE_REQUESTED,
     APPLICATIONS_CHANGED,
     LAUNCHER_TOGGLE_REQUESTED,
@@ -45,7 +47,9 @@ class ApplicationsController:
             lambda: AppLauncherWindow(
                 shell_window,
                 on_launch=self._activate_application,
+                on_new_instance=self._new_instance,
                 on_pin_toggle=self._toggle_pin,
+                on_favorite_toggle=self._toggle_favorite,
                 on_refresh=self._applications.refresh_catalog,
             )
         )
@@ -77,6 +81,12 @@ class ApplicationsController:
 
     def _toggle_pin(self, app_id: str) -> None:
         self._event_bus.emit(APP_PIN_TOGGLE_REQUESTED, app_id)
+
+    def _toggle_favorite(self, app_id: str) -> None:
+        self._event_bus.emit(APP_FAVORITE_TOGGLE_REQUESTED, app_id)
+
+    def _new_instance(self, app_id: str) -> None:
+        self._event_bus.emit(APP_NEW_INSTANCE_REQUESTED, app_id)
 
     def _activate_application(self, app_id: str) -> None:
         snapshot = self._applications.snapshot

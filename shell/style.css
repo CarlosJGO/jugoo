@@ -477,16 +477,20 @@ button.pinned-apps-expand {
     background: transparent;
     border: 0;
     border-radius: 8px;
-    color: @shell_text_secondary;
-    min-width: 20px;
+    color: @shell_text_primary;
+    min-width: 24px;
     min-height: 24px;
-    padding: 2px;
+    padding: 2px 4px;
 }
 
-button.pinned-apps-expand:hover,
-button.pinned-apps-expand.expanded {
+button.pinned-apps-expand:hover {
     background-color: @shell_hover_bg_soft;
     color: @shell_text_primary;
+}
+
+button.pinned-apps-expand.expanded {
+    background-color: @shell_hover_bg_soft;
+    color: @shell_accent;
 }
 
 window#shell.compact box.pinned-apps-widget {
@@ -570,7 +574,7 @@ row.launcher-row:selected {
     background-color: @shell_hover_bg_faint;
 }
 
-row.launcher-row-pinned {
+row.launcher-row-favorite {
     box-shadow: inset 3px 0 0 @shell_accent;
 }
 
@@ -588,7 +592,16 @@ label.launcher-row-comment {
     font-size: 12px;
 }
 
-button.launcher-pin-button {
+box.launcher-row-status {
+    min-width: 40px;
+}
+
+image.launcher-pin-indicator {
+    color: @shell_accent;
+    opacity: 0.92;
+}
+
+button.launcher-favorite-button {
     background: transparent;
     border: 0;
     border-radius: 8px;
@@ -596,13 +609,46 @@ button.launcher-pin-button {
     color: @shell_text_muted;
 }
 
-button.launcher-pin-button:hover {
+button.launcher-favorite-button:hover {
     background-color: @shell_hover_bg_soft;
     color: @shell_text_primary;
 }
 
-button.launcher-pin-button.pinned {
+button.launcher-favorite-button.favorited {
     color: @shell_accent;
+}
+
+menu.shell-app-menu,
+popover.shell-app-menu {
+    background-color: @shell_surface_bg_panel;
+    border: 1px solid @shell_border_strong;
+    border-radius: 10px;
+    padding: 6px;
+}
+
+eventbox.launcher-menu-catcher {
+    background-color: transparent;
+}
+
+box.launcher-action-menu {
+    background-color: @shell_surface_bg_panel;
+    border: 1px solid @shell_border_strong;
+    border-radius: 10px;
+    padding: 6px;
+    min-width: 196px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.42);
+}
+
+button.shell-app-menu-item {
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    padding: 6px 10px;
+    color: @shell_text_primary;
+}
+
+button.shell-app-menu-item:hover {
+    background-color: @shell_hover_bg_soft;
 }
 
 /* ==========================================================================
