@@ -396,7 +396,7 @@ def test_estimate_does_not_use_raw_file_size_alone(tmp_path: Path) -> None:
     model.write_bytes(b"x" * 1000)
     estimated = estimate_model_vram_bytes(
         model,
-        context_size=512,
+        context_size=1024,
         ngl=99,
         layer_count=32,
         overhead_bytes=200,
