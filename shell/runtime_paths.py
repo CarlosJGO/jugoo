@@ -6,7 +6,7 @@ import os
 import shutil
 from pathlib import Path
 
-from .config import PINNED_APPS_PATH, TASKS_PATH
+from .config import CLIPBOARD_HISTORY_PATH, PINNED_APPS_PATH, TASKS_PATH
 
 _APP_DIRECTORY = "waybar-shell"
 
@@ -19,6 +19,13 @@ def xdg_cache_dir() -> Path:
     return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / _APP_DIRECTORY
 
 
+def xdg_runtime_dir() -> Path:
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime:
+        return Path(runtime) / "jugoo"
+    return Path(f"/tmp/jugoo-{os.getuid()}")
+
+
 def notifications_history_path() -> Path:
     return xdg_data_dir() / "notifications.json"
 
@@ -29,6 +36,10 @@ def pinned_apps_path() -> Path:
 
 def tasks_path() -> Path:
     return xdg_data_dir() / TASKS_PATH
+
+
+def clipboard_history_path() -> Path:
+    return xdg_data_dir() / CLIPBOARD_HISTORY_PATH
 
 
 def notification_icons_dir() -> Path:

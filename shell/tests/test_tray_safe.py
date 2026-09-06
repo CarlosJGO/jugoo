@@ -16,6 +16,7 @@ from shell.servicios.bandeja.tray import (
     _parse_service_address,
     _parse_sni_methods_from_introspection,
     _property_icon_pixbuf,
+    normalize_sni_address,
 )
 
 
@@ -73,6 +74,18 @@ def test_icon_pixbuf_from_argb() -> None:
     assert isinstance(pixbuf, GdkPixbuf.Pixbuf)
 
 
+def test_normalize_sni_address_accepts_bus_name_only() -> None:
+    assert normalize_sni_address(":1.220/StatusNotifierItem") == ":1.220/StatusNotifierItem"
+    assert (
+        normalize_sni_address("org.kde.StatusNotifierItem-1234-1")
+        == "org.kde.StatusNotifierItem-1234-1/StatusNotifierItem"
+    )
+    assert (
+        normalize_sni_address("/StatusNotifierItem", sender=":1.9")
+        == ":1.9/StatusNotifierItem"
+    )
+
+
 def test_tray_service_starts_in_recovery_enabled_state() -> None:
     service = SystemTrayService()
     assert service._started is False
@@ -85,4 +98,6 @@ if __name__ == "__main__":
     test_parse_sni_methods_from_introspection()
     test_argb32_to_rgba()
     test_icon_pixbuf_from_argb()
+    test_normalize_sni_address_accepts_bus_name_only()
+    test_tray_service_starts_in_recovery_enabled_state()
     print("tray safe tests OK")

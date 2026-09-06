@@ -537,7 +537,9 @@ flowbox.pinned-apps-overflow-content {
    5d. Widgets — Application launcher
    ========================================================================== */
 
-window#shell-app-launcher {
+window#shell-app-launcher,
+window#shell-clipboard-picker,
+window#shell-emoji-picker {
     background-color: transparent;
 }
 
@@ -665,6 +667,26 @@ button.shell-app-menu-item {
 
 button.shell-app-menu-item:hover {
     background-color: @shell_hover_bg_soft;
+}
+
+flowbox.picker-emoji-grid {
+    background: transparent;
+}
+
+flowboxchild.picker-emoji-cell {
+    border-radius: 10px;
+    padding: 4px;
+    min-width: 36px;
+    min-height: 36px;
+}
+
+flowboxchild.picker-emoji-cell:hover,
+flowboxchild.picker-emoji-cell:selected {
+    background-color: @shell_hover_bg_faint;
+}
+
+label.picker-emoji-glyph {
+    font-size: 22px;
 }
 
 /* ==========================================================================

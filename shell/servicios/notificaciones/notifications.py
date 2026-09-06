@@ -379,6 +379,43 @@ class NotificationService:
     def get(self, notification_id: int) -> NotificationSnapshot | None:
         return self._store.get(notification_id)
 
+    def post(
+        self,
+        *,
+        app_name: str,
+        summary: str,
+        body: str,
+        app_icon: str = "",
+        actions: tuple[NotificationAction, ...] = (),
+        urgency: int = 1,
+        expire_timeout_ms: int = -1,
+    ) -> NotificationSnapshot | None:
+        """Post a shell-originated notification through the existing store."""
+        if self._closing:
+            return None
+        snapshot = self._store.add(
+            app_name=app_name,
+            replaces_id=0,
+            app_icon=app_icon,
+            icon_name=app_icon,
+            image_path="",
+            desktop_entry="com.jugoo.Shell",
+            summary=summary,
+            body=body,
+            actions=actions,
+            urgency=max(0, min(int(urgency), 2)),
+            expire_timeout_ms=int(expire_timeout_ms),
+        )
+        self._persist_state()
+        self._schedule_expiration(snapshot)
+        self._log(
+            f"Notify id={snapshot.id} app={snapshot.app_name!r} "
+            f"summary={snapshot.summary!r}",
+        )
+        self._event_bus.emit(NOTIFICATION_RECEIVED, snapshot)
+        self._emit_changed()
+        return snapshot
+
     def start(self) -> None:
         if self._started:
             return

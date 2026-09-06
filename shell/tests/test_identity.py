@@ -57,6 +57,9 @@ def test_identity_install_is_idempotent(tmp_path: Path) -> None:
         assert wrapper.read_text(encoding="utf-8").count("python3 -m shell") == 1
         assert "--task-watcher" in unit
         assert "Restart=on-failure" in unit
+        assert "PYTHONUNBUFFERED=1" in unit
+        assert "WantedBy=default.target" in unit
+        assert "WantedBy=graphical-session.target" in unit
 
         assert uninstall_identity() == 0
         assert not desktop.exists()

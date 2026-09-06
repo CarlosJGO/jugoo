@@ -8,19 +8,15 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
-gi.require_version("GtkLayerShell", "0.1")
 gi.require_version("Pango", "1.0")
 
-from gi.repository import Gdk, GLib, Gtk, GtkLayerShell, Pango
+from gi.repository import Gdk, GLib, Gtk, Pango
 
-from ...config import (
-    LAUNCHER_MAX_HEIGHT,
-    LAUNCHER_ROW_ICON_SIZE,
-    LAUNCHER_WIDTH,
-)
+from ...config import LAUNCHER_MAX_HEIGHT, LAUNCHER_ROW_ICON_SIZE
+from ...identity import TITLE_APP_LAUNCHER
 from ...models import ApplicationsSnapshot, DesktopApplication, filter_applications
-from ...popup_handle import hide_popup, present_popup
-from ...window_identity import TITLE_APP_LAUNCHER, configure_interactive_popup, configure_toplevel, register_shell_popup
+from ..pickers.overlay import PickerOverlay
+from ..pickers.session import PickerSession
 from .context_menu import fill_application_menu
 
 
@@ -129,7 +125,7 @@ class LauncherAppRow(Gtk.ListBoxRow):
         )
 
 
-class AppLauncherWindow(Gtk.Window):
+class AppLauncherWindow(PickerOverlay):
     """Centered GtkLayerShell overlay with in-memory application search."""
 
     def __init__(
@@ -142,7 +138,15 @@ class AppLauncherWindow(Gtk.Window):
         on_favorite_toggle: Callable[[str], None],
         on_refresh: Callable[[], ApplicationsSnapshot],
     ) -> None:
-        super().__init__(type=Gtk.WindowType.TOPLEVEL)
+        super().__init__(
+            shell_window,
+            window_name="shell-app-launcher",
+            title=TITLE_APP_LAUNCHER,
+            namespace="shell-app-launcher",
+            placeholder="Buscar aplicaciones...",
+            empty_text="Sin resultados",
+            session=PickerSession(columns=1),
+        )
         self._on_launch = on_launch
         self._on_new_instance = on_new_instance
         self._on_pin_toggle = on_pin_toggle
@@ -150,62 +154,6 @@ class AppLauncherWindow(Gtk.Window):
         self._on_refresh = on_refresh
         self._snapshot = ApplicationsSnapshot()
         self._rows: tuple[LauncherAppRow, ...] = ()
-        self._closing = False
-
-        self.set_name("shell-app-launcher")
-        register_shell_popup(self, shell_window)
-        configure_toplevel(self, title=TITLE_APP_LAUNCHER)
-        configure_interactive_popup(self)
-        self.set_default_size(LAUNCHER_WIDTH, -1)
-        self._configure_layer_shell()
-
-        backdrop = Gtk.EventBox()
-        backdrop.get_style_context().add_class("launcher-backdrop")
-        backdrop.connect("button-press-event", self._on_backdrop_press)
-        self.add(backdrop)
-
-        aligner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        aligner.set_halign(Gtk.Align.CENTER)
-        aligner.set_valign(Gtk.Align.CENTER)
-        backdrop.add(aligner)
-
-        card = Gtk.EventBox()
-        card.get_style_context().add_class("launcher-card-host")
-        card.connect("button-press-event", self._on_card_press)
-        aligner.pack_start(card, False, False, 0)
-
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        outer.get_style_context().add_class("launcher-card")
-        outer.set_size_request(LAUNCHER_WIDTH, -1)
-        card.add(outer)
-
-        search_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        search_row.get_style_context().add_class("launcher-search-row")
-        search_icon = Gtk.Image.new_from_icon_name("edit-find-symbolic", Gtk.IconSize.MENU)
-        search_icon.set_pixel_size(16)
-        search_row.pack_start(search_icon, False, False, 0)
-
-        self._search = Gtk.SearchEntry()
-        self._search.get_style_context().add_class("launcher-search")
-        self._search.set_placeholder_text("Buscar aplicaciones...")
-        self._search.set_hexpand(True)
-        self._search.connect("search-changed", self._on_query_changed)
-        self._search.connect("activate", self._on_search_activate)
-        self._search.connect("focus-in-event", self._on_search_focus)
-        search_row.pack_start(self._search, True, True, 0)
-        outer.pack_start(search_row, False, False, 0)
-
-        self._empty = Gtk.Label(label="Sin resultados")
-        self._empty.get_style_context().add_class("launcher-empty")
-        self._empty.set_no_show_all(True)
-        outer.pack_start(self._empty, False, False, 0)
-
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scrolled.set_propagate_natural_height(True)
-        scrolled.set_max_content_height(LAUNCHER_MAX_HEIGHT)
-        scrolled.get_style_context().add_class("launcher-scroll")
-        self._scrolled = scrolled
 
         self._list = Gtk.ListBox()
         self._list.get_style_context().add_class("launcher-list")
@@ -214,12 +162,19 @@ class AppLauncherWindow(Gtk.Window):
         self._list.connect("row-activated", self._on_row_activated)
         self._list.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
         self._list.connect("button-press-event", self._on_list_button_press)
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_propagate_natural_height(True)
+        scrolled.set_max_content_height(LAUNCHER_MAX_HEIGHT)
+        scrolled.get_style_context().add_class("launcher-scroll")
+        self._scrolled = scrolled
         scrolled.add(self._list)
         scrolled.connect("button-press-event", self._on_list_button_press)
 
         self._list_overlay = Gtk.Overlay()
         self._list_overlay.add(scrolled)
-        outer.pack_start(self._list_overlay, True, True, 0)
+        self.content_box.pack_start(self._list_overlay, True, True, 0)
 
         self._menu_catcher = Gtk.EventBox()
         self._menu_catcher.get_style_context().add_class("launcher-menu-catcher")
@@ -240,60 +195,38 @@ class AppLauncherWindow(Gtk.Window):
         self._list_overlay.add_overlay(self._action_menu)
         self._action_menu.hide()
 
-        self.add_events(Gdk.EventMask.KEY_PRESS_MASK)
-        self.connect("key-press-event", self._on_key_press)
-        self.connect("map", self._on_map)
+        self._search.connect("focus-in-event", self._on_search_focus)
 
-    def _configure_layer_shell(self) -> None:
-        GtkLayerShell.init_for_window(self)
-        GtkLayerShell.set_namespace(self, "shell-app-launcher")
-        GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY)
-        GtkLayerShell.set_exclusive_zone(self, -1)
-        GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.EXCLUSIVE)
-        for edge in (
-            GtkLayerShell.Edge.TOP,
-            GtkLayerShell.Edge.BOTTOM,
-            GtkLayerShell.Edge.LEFT,
-            GtkLayerShell.Edge.RIGHT,
-        ):
-            GtkLayerShell.set_anchor(self, edge, True)
+    def open_launcher(self) -> None:
+        self.open_picker()
+
+    def close_launcher(self) -> None:
+        self._dismiss_action_menu()
+        self.close_picker()
+
+    def toggle_launcher(self) -> None:
+        self.toggle_picker()
 
     def set_snapshot(self, snapshot: ApplicationsSnapshot) -> None:
         self._snapshot = snapshot
         if self.get_visible():
             self._rebuild_rows(keep_selection=True)
 
-    def open_launcher(self) -> None:
-        self._closing = False
+    def on_prepare_open(self) -> None:
         self._snapshot = self._on_refresh()
-        self._search.set_text("")
+
+    def on_query_changed(self, query: str) -> None:
         self._rebuild_rows()
-        present_popup(self)
-        GLib.idle_add(self._focus_search)
 
-    def close_launcher(self) -> None:
-        self._dismiss_action_menu()
-        if self._closing or not self.get_visible():
-            hide_popup(self)
-            return
-        self._closing = True
-        hide_popup(self)
+    def on_activate(self) -> None:
+        self._launch_selected()
 
-    def toggle_launcher(self) -> None:
-        if self.get_visible():
-            self.close_launcher()
-        else:
-            self.open_launcher()
-
-    def _focus_search(self) -> bool:
-        self._search.grab_focus()
-        return False
-
-    def _on_map(self, *_args) -> None:
-        self._focus_search()
-
-    def _on_query_changed(self, *_args) -> None:
-        self._rebuild_rows()
+    def on_selection_moved(self) -> None:
+        index = self.session.selected_index
+        if 0 <= index < len(self._rows):
+            row = self._rows[index]
+            self._list.select_row(row)
+            GLib.idle_add(self._ensure_row_visible, row)
 
     def _rebuild_rows(self, *, keep_selection: bool = False) -> None:
         self._dismiss_action_menu()
@@ -326,35 +259,26 @@ class AppLauncherWindow(Gtk.Window):
             rows.append(row)
         self._rows = tuple(rows)
         self._list.show_all()
+        self.session.set_items(len(rows), reset_selection=not keep_selection)
 
         if rows:
-            self._empty.hide()
+            self.set_empty_visible(False)
             self._list.show()
             chosen = next((row for row in rows if row.application.id == selected_id), rows[0])
+            if keep_selection:
+                self.session.select_index(rows.index(chosen))
+            else:
+                chosen = rows[self.session.selected_index]
             self._list.select_row(chosen)
         else:
             self._list.hide()
-            self._empty.show()
+            self.set_empty_visible(True)
 
     def _selected_application(self) -> DesktopApplication | None:
         row = self._list.get_selected_row()
         if isinstance(row, LauncherAppRow):
             return row.application
         return None
-
-    def _move_selection(self, delta: int) -> None:
-        self._dismiss_action_menu()
-        if not self._rows:
-            return
-        current = self._list.get_selected_row()
-        try:
-            index = self._rows.index(current) if current in self._rows else 0
-        except ValueError:
-            index = 0
-        index = max(0, min(len(self._rows) - 1, index + delta))
-        row = self._rows[index]
-        self._list.select_row(row)
-        GLib.idle_add(self._ensure_row_visible, row)
 
     def _ensure_row_visible(self, row: Gtk.ListBoxRow) -> bool:
         alloc = row.get_allocation()
@@ -472,35 +396,17 @@ class AppLauncherWindow(Gtk.Window):
         if isinstance(row, LauncherAppRow):
             self._open_application(row.application.id)
 
-    def _on_search_activate(self, *_args) -> None:
-        self._launch_selected()
-
-    def _on_backdrop_press(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
-        if event.button != 1:
-            return False
-        self.close_launcher()
-        return True
-
-    def _on_key_press(self, _widget: Gtk.Widget, event: Gdk.EventKey) -> bool:
+    def _on_key_press(self, widget: Gtk.Widget, event: Gdk.EventKey) -> bool:
         key = event.keyval
         state = event.state & Gtk.accelerator_get_default_mod_mask()
         super_space = (
             key in (Gdk.KEY_space, Gdk.KEY_KP_Space)
             and state & Gdk.ModifierType.SUPER_MASK
         )
-        if key == Gdk.KEY_Escape or super_space:
-            if self._action_menu.get_visible() and key == Gdk.KEY_Escape:
-                self._dismiss_action_menu()
-                return True
+        if key == Gdk.KEY_Escape and self._action_menu.get_visible():
+            self._dismiss_action_menu()
+            return True
+        if super_space:
             self.close_launcher()
             return True
-        if key in (Gdk.KEY_Down, Gdk.KEY_KP_Down):
-            self._move_selection(1)
-            return True
-        if key in (Gdk.KEY_Up, Gdk.KEY_KP_Up):
-            self._move_selection(-1)
-            return True
-        if key in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
-            self._launch_selected()
-            return True
-        return False
+        return super()._on_key_press(widget, event)

@@ -21,6 +21,7 @@ from ....models import TASK_STATUS_OVERDUE
 from ..proveedor import LocalTaskProvider, TaskProvider
 from .config import WatcherConfig
 from .contexto import ContextDetector, start_hyprland_context
+from .sesion import acquire_watcher_lock, release_watcher_lock
 from .estado import ReminderState
 from .eventos import (
     KIND_AI_REMINDER,
@@ -68,11 +69,16 @@ class TaskWatcher:
         self._ai_thread: threading.Thread | None = None
         self._notification_tasks: dict[int, str] = {}
         self._closed = False
+        self._lock_fd: int | None = None
 
     def run(self) -> int:
         if GLib is None:
-            print("shell: task-watcher: GLib is required")
+            print("Task watcher: GLib is required")
             return 1
+        self._lock_fd = acquire_watcher_lock()
+        if self._lock_fd is None:
+            print("Task watcher: already running")
+            return 0
         self._install_signals()
         self._notifier.start(self._on_notification_action)
         if self._config.enabled:
@@ -82,12 +88,13 @@ class TaskWatcher:
                     self._context,
                 )
             except Exception as error:
-                print(f"shell: task-watcher: hyprland unavailable: {error}")
+                print(f"Task watcher: hyprland unavailable: {error}")
         interval = max(15, int(self._config.poll_interval_sec))
         self._tick_source_id = GLib.timeout_add_seconds(interval, self._on_tick)
-        GLib.idle_add(self._on_tick)
+        GLib.idle_add(self._on_startup_tick)
         self._loop = GLib.MainLoop()
-        print("shell: task-watcher: running")
+        print("Task watcher: started")
+        print("Task watcher: waiting for next tick")
         try:
             self._loop.run()
         finally:
@@ -98,6 +105,8 @@ class TaskWatcher:
         if self._closed:
             return
         self._closed = True
+        release_watcher_lock(self._lock_fd)
+        self._lock_fd = None
         if self._tick_source_id and GLib is not None:
             GLib.source_remove(self._tick_source_id)
             self._tick_source_id = 0
@@ -124,15 +133,21 @@ class TaskWatcher:
         context = activity if activity is not None else self._context.snapshot(now=when.timestamp())
         return choose_reminder(board, self._state, context, now=when, config=self._config)
 
+    def _on_startup_tick(self) -> bool:
+        self._on_tick()
+        return False
+
     def _on_tick(self) -> bool:
         if self._closed:
             return False
+        print("Task watcher: tick")
         try:
             announced = self._tick()
             if not announced and self._config.enabled:
                 self._announce(KIND_HEARTBEAT)
         except Exception as error:
-            print(f"shell: task-watcher: tick failed: {error}")
+            print(f"Task watcher: tick failed: {error}")
+        print("Task watcher: waiting for next tick")
         return True
 
     def _tick(self) -> bool:
@@ -184,7 +199,7 @@ class TaskWatcher:
                 return
             self._finish_reminder(decision, body, source)
         except Exception as error:
-            print(f"shell: task-watcher: reminder failed: {error}")
+            print(f"Task watcher: reminder failed: {error}")
             with self._ai_lock:
                 self._ai_inflight = False
 
@@ -212,7 +227,7 @@ class TaskWatcher:
         if notification_id is not None:
             self._notification_tasks[notification_id] = snapshot.id
         self._announce(KIND_AI_REMINDER if source == "ai" else KIND_REMINDER)
-        print(f"shell: task-watcher: reminded {snapshot.id} ({decision.reason})")
+        print(f"Task watcher: reminded {snapshot.id} ({decision.reason})")
 
     def _announce(self, kind: str) -> None:
         self._event_bus.emit(event_name_for_kind(kind), kind)

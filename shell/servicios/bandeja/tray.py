@@ -21,6 +21,32 @@ WATCHER_PATH = "/StatusNotifierWatcher"
 WATCHER_IFACE = "org.kde.StatusNotifierWatcher"
 SNI_IFACE = "org.kde.StatusNotifierItem"
 
+_WATCHER_XML = """
+<node>
+  <interface name="org.kde.StatusNotifierWatcher">
+    <method name="RegisterStatusNotifierItem">
+      <arg type="s" name="service" direction="in"/>
+    </method>
+    <method name="RegisterStatusNotifierHost">
+      <arg type="s" name="service" direction="in"/>
+    </method>
+    <method name="GetRegisteredItems">
+      <arg type="as" name="items" direction="out"/>
+    </method>
+    <property name="RegisteredStatusNotifierItems" type="as" access="read"/>
+    <property name="IsStatusNotifierHostRegistered" type="b" access="read"/>
+    <property name="ProtocolVersion" type="i" access="read"/>
+    <signal name="StatusNotifierItemRegistered">
+      <arg type="s" name="service"/>
+    </signal>
+    <signal name="StatusNotifierItemUnregistered">
+      <arg type="s" name="service"/>
+    </signal>
+    <signal name="StatusNotifierHostRegistered"/>
+  </interface>
+</node>
+"""
+
 _STALE_DBUS_MARKERS = (
     "org.freedesktop.DBus.Error.ServiceUnknown",
     "org.freedesktop.DBus.Error.UnknownObject",
@@ -89,6 +115,11 @@ class SystemTrayService:
         self._retry_source_id: int = 0
         self._closing = False
         self._started = False
+        self._providing_watcher = False
+        self._watcher_owner_id: int = 0
+        self._watcher_registration_id: int = 0
+        self._watcher_iface = Gio.DBusNodeInfo.new_for_xml(_WATCHER_XML).interfaces[0]
+        self._registration_error_logged = False
 
     def set_listener(self, listener: Listener | None) -> None:
         self._listener = listener
@@ -134,6 +165,13 @@ class SystemTrayService:
         for address in list(self._items):
             self._remove_item(address)
         self._unsubscribe_watcher_signals()
+        if self._watcher_registration_id and self._bus is not None:
+            self._bus.unregister_object(self._watcher_registration_id)
+            self._watcher_registration_id = 0
+        if self._watcher_owner_id:
+            Gio.bus_unown_name(self._watcher_owner_id)
+            self._watcher_owner_id = 0
+        self._providing_watcher = False
         if self._bus_owner_id:
             Gio.bus_unown_name(self._bus_owner_id)
             self._bus_owner_id = 0
@@ -171,6 +209,8 @@ class SystemTrayService:
     def _register_with_watcher(self) -> bool:
         if self._closing or self._bus is None:
             return False
+        if self._providing_watcher:
+            return False
         self._unsubscribe_watcher_signals()
         try:
             self._bus.call_sync(
@@ -184,10 +224,16 @@ class SystemTrayService:
                 5000,
             )
         except GLib.Error as error:
-            print(f"shell: could not register StatusNotifierHost: {error.message}")
+            if _watcher_missing(error):
+                self._become_watcher()
+                return False
+            if not self._registration_error_logged:
+                print(f"shell: could not register StatusNotifierHost: {error.message}")
+                self._registration_error_logged = True
             self._schedule_registration_retry()
             return False
 
+        self._registration_error_logged = False
         self._register_signal_id = self._bus.signal_subscribe(
             WATCHER_BUS,
             WATCHER_IFACE,
@@ -218,7 +264,10 @@ class SystemTrayService:
                 Gio.DBusCallFlags.NONE,
                 5000,
             )
-        except GLib.Error:
+        except GLib.Error as error:
+            if _watcher_missing(error):
+                self._become_watcher()
+                return False
             self._schedule_registration_retry()
             return False
 
@@ -255,8 +304,111 @@ class SystemTrayService:
         if self._closing:
             return False
         self._unsubscribe_watcher_signals()
-        self._clear_items()
+        if not self._providing_watcher:
+            self._clear_items()
+            self._become_watcher()
         return False
+
+    def _become_watcher(self) -> None:
+        if self._closing or self._providing_watcher or self._watcher_owner_id:
+            return
+        if self._retry_source_id:
+            GLib.source_remove(self._retry_source_id)
+            self._retry_source_id = 0
+        self._providing_watcher = True
+        print("shell: tray: no StatusNotifierWatcher on the bus; providing one")
+        self._watcher_owner_id = Gio.bus_own_name(
+            Gio.BusType.SESSION,
+            WATCHER_BUS,
+            Gio.BusNameOwnerFlags.NONE,
+            self._on_watcher_bus_acquired,
+            None,
+            self._on_watcher_name_lost,
+        )
+
+    def _on_watcher_bus_acquired(self, bus: Gio.DBusConnection, _name: str) -> None:
+        self._bus = bus
+        if self._watcher_registration_id:
+            bus.unregister_object(self._watcher_registration_id)
+        self._watcher_registration_id = bus.register_object(
+            WATCHER_PATH,
+            self._watcher_iface,
+            self._on_watcher_method,
+            self._on_watcher_get_property,
+            None,
+        )
+        try:
+            bus.emit_signal(
+                None,
+                WATCHER_PATH,
+                WATCHER_IFACE,
+                "StatusNotifierHostRegistered",
+                None,
+            )
+        except GLib.Error:
+            pass
+
+    def _on_watcher_name_lost(self, *_args) -> None:
+        self._watcher_owner_id = 0
+        self._providing_watcher = False
+        if self._watcher_registration_id and self._bus is not None:
+            self._bus.unregister_object(self._watcher_registration_id)
+            self._watcher_registration_id = 0
+        if not self._closing:
+            self._schedule_registration_retry()
+
+    def _on_watcher_method(
+        self,
+        _connection: Gio.DBusConnection,
+        _sender: str,
+        _path: str,
+        _interface: str,
+        method: str,
+        parameters: GLib.Variant,
+        invocation: Gio.DBusMethodInvocation,
+    ) -> None:
+        if method == "RegisterStatusNotifierItem":
+            service = str(parameters.unpack()[0])
+            address = normalize_sni_address(service, sender=_sender)
+            GLib.idle_add(self._add_item, address)
+            self._emit_watcher_signal("StatusNotifierItemRegistered", address)
+            invocation.return_value(None)
+            return
+        if method == "RegisterStatusNotifierHost":
+            self._emit_watcher_signal("StatusNotifierHostRegistered", None)
+            invocation.return_value(None)
+            return
+        if method == "GetRegisteredItems":
+            invocation.return_value(GLib.Variant("(as)", (list(self._items),)))
+            return
+        invocation.return_error(
+            Gio.DBusError.new(Gio.DBusError.UNKNOWN_METHOD, method)
+        )
+
+    def _on_watcher_get_property(
+        self,
+        _connection: Gio.DBusConnection,
+        _sender: str,
+        _path: str,
+        _interface: str,
+        name: str,
+    ) -> GLib.Variant | None:
+        if name == "RegisteredStatusNotifierItems":
+            return GLib.Variant("as", list(self._items))
+        if name == "IsStatusNotifierHostRegistered":
+            return GLib.Variant("b", True)
+        if name == "ProtocolVersion":
+            return GLib.Variant("i", 0)
+        return None
+
+    def _emit_watcher_signal(self, name: str, service: str | None) -> None:
+        if self._bus is None:
+            return
+        try:
+            parameters = None if service is None else GLib.Variant("(s)", (service,))
+            self._bus.emit_signal(None, WATCHER_PATH, WATCHER_IFACE, name, parameters)
+        except GLib.Error:
+            return
 
     def _unsubscribe_watcher_signals(self) -> None:
         if self._bus is None:
@@ -336,6 +488,9 @@ class SystemTrayService:
         except ValueError as error:
             print(f"shell: {error}")
             return False
+        if not bus_name or not object_path.startswith("/"):
+            print(f"shell: invalid SNI address: {address}")
+            return False
 
         try:
             proxy = Gio.DBusProxy.new_for_bus_sync(
@@ -347,8 +502,9 @@ class SystemTrayService:
                 SNI_IFACE,
                 None,
             )
-        except GLib.Error as error:
-            print(f"shell: could not connect to SNI {address}: {error.message}")
+        except (GLib.Error, TypeError) as error:
+            message = getattr(error, "message", str(error))
+            print(f"shell: could not connect to SNI {address}: {message}")
             return False
 
         methods = _discover_sni_methods(self._bus, bus_name, object_path)
@@ -420,6 +576,8 @@ class SystemTrayService:
             state.proxy.disconnect(state.name_vanished_id)
         if state.watch_id:
             GLib.source_remove(state.watch_id)
+        if self._providing_watcher:
+            self._emit_watcher_signal("StatusNotifierItemUnregistered", state.address)
         self._notify_listener()
         return False
 
@@ -483,6 +641,29 @@ def _parse_service_address(address: str) -> tuple[str, str]:
         raise ValueError(f"invalid SNI address: {address}")
     bus_name, object_path = address.split("/", 1)
     return bus_name, f"/{object_path}"
+
+
+def normalize_sni_address(service: str, sender: str = "") -> str:
+    text = str(service or "").strip()
+    owner = str(sender or "").strip()
+    if text.startswith("/"):
+        return f"{owner}{text}" if owner else text
+    if "/" in text:
+        return text
+    if text:
+        return f"{text}/StatusNotifierItem"
+    if owner:
+        return f"{owner}/StatusNotifierItem"
+    return text
+
+
+def _watcher_missing(error: GLib.Error) -> bool:
+    message = error.message
+    return (
+        "org.freedesktop.DBus.Error.ServiceUnknown" in message
+        or "The name is not activatable" in message
+        or "NameHasNoOwner" in message
+    )
 
 
 def _snapshot_from_proxy(

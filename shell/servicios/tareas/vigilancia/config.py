@@ -25,16 +25,18 @@ class WatcherConfig:
     ai_model_path: str = "~/IA/models/llama-3.1-8b-instruct-q6_k.gguf"
     ai_context_size: int = 512
     ai_max_tokens: int = 32
-    ai_timeout_sec: int = 25
+    ai_timeout_sec: int = 45
+    briefing_enabled: bool = True
+    briefing_max_tokens: int = 80
     ai_ngl: int = 99
     ai_batch_size: int = 64
     ai_threads: int = 4
     ai_layer_count: int = 32
     resource_monitor_enabled: bool = True
-    minimum_vram_margin_bytes: int = 384 * 1024 * 1024
+    minimum_vram_margin_bytes: int = 64 * 1024 * 1024
     maximum_gpu_usage_percent: float = 80.0
     minimum_available_ram_bytes: int = 1536 * 1024 * 1024
-    compute_overhead_bytes: int = 384 * 1024 * 1024
+    compute_overhead_bytes: int = 64 * 1024 * 1024
 
     @classmethod
     def from_shell(cls) -> WatcherConfig:
@@ -57,6 +59,8 @@ class WatcherConfig:
             ai_context_size=int(shell_config.TASK_WATCHER_AI_CONTEXT_SIZE),
             ai_max_tokens=int(shell_config.TASK_WATCHER_AI_MAX_TOKENS),
             ai_timeout_sec=int(shell_config.TASK_WATCHER_AI_TIMEOUT_SEC),
+            briefing_enabled=bool(shell_config.TASK_STARTUP_BRIEFING_ENABLED),
+            briefing_max_tokens=int(shell_config.TASK_STARTUP_BRIEFING_MAX_TOKENS),
             ai_ngl=int(shell_config.TASK_WATCHER_AI_NGL),
             ai_batch_size=int(shell_config.TASK_WATCHER_AI_BATCH_SIZE),
             ai_threads=int(shell_config.TASK_WATCHER_AI_THREADS),

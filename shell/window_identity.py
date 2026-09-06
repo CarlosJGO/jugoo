@@ -46,7 +46,7 @@ HYPR_WINDOW_CLASS = WAYLAND_APP_ID
 # - Media popup: player combo + seek
 # - Workspace audio / panel: volume sliders and device selectors
 # - Notifications / Power: buttons and confirmation dialogs
-# - App launcher: search entry and keyboard navigation
+# - App launcher / clipboard / emoji pickers: search entry and keyboard navigation
 # - Tasks: title/notes entry when adding a task
 # OSD windows must never take focus or keyboard (see configure_osd_window).
 

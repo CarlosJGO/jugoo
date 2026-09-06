@@ -55,6 +55,8 @@ def install_identity(*, assets: Path | None = None) -> int:
     icon_installed = _install_icon(logo) if logo is not None else False
     _write_desktop_file(binary, icon_installed)
     _write_task_watcher_service(binary)
+    if _user_systemd_is_live():
+        _enable_task_watcher_service()
     _refresh_caches()
     _print_summary(binary, logo, icon_installed)
     return 0
@@ -62,6 +64,8 @@ def install_identity(*, assets: Path | None = None) -> int:
 
 def uninstall_identity() -> int:
     """Remove files this installer created. Leaves user data (pins, history) alone."""
+    if _user_systemd_is_live():
+        _run_optional(["systemctl", "--user", "disable", "--now", _TASK_WATCHER_SERVICE])
     for path in (desktop_file_path(), wrapper_path(), task_watcher_service_path()):
         _remove_file(path)
     _remove_installed_icons()
@@ -125,6 +129,7 @@ def _write_task_watcher_service(binary: Path) -> Path:
         "Type=simple\n"
         f"WorkingDirectory={_unit_path(str(root))}\n"
         f"ExecStart={_unit_path(str(binary))} --task-watcher\n"
+        "Environment=PYTHONUNBUFFERED=1\n"
         "Restart=on-failure\n"
         "RestartSec=3\n"
         "TimeoutStopSec=15\n"
@@ -132,11 +137,20 @@ def _write_task_watcher_service(binary: Path) -> Path:
         "KillSignal=SIGTERM\n"
         "\n"
         "[Install]\n"
+        "WantedBy=default.target\n"
         "WantedBy=graphical-session.target\n"
     )
     path.write_text(payload, encoding="utf-8")
     _run_optional(["systemctl", "--user", "daemon-reload"])
     return path
+
+
+def _enable_task_watcher_service() -> None:
+    _run_optional(["systemctl", "--user", "enable", _TASK_WATCHER_SERVICE])
+
+
+def _user_systemd_is_live() -> bool:
+    return xdg_config_home().resolve() == (Path.home() / ".config").resolve()
 
 
 def _install_icon(logo: Path) -> bool:

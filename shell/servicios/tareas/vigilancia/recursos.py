@@ -37,8 +37,8 @@ def estimate_model_vram_bytes(
         fraction = 1.0
     else:
         fraction = ngl / layers
-    # GGUF size is close to weight memory; a small factor covers extra tensors.
-    weights = int(file_size * 1.05 * fraction)
+    # Quantized GGUF size is already close to weight memory on GPU.
+    weights = int(file_size * fraction)
     # Llama-style KV: 2 * layers * kv_heads * head_dim * ctx * 2 bytes (fp16).
     kv = 2 * 32 * 8 * 128 * max(int(context_size), 1) * 2
     return weights + kv + max(0, int(overhead_bytes))

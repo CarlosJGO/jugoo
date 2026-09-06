@@ -155,10 +155,12 @@ class FakeGenerator:
     def __init__(self, text: str | None = "Ey, acuérdate del informe 👀") -> None:
         self.text = text
         self.calls = 0
+        self.prompts: list[str] = []
         self.closed = False
 
-    def generate(self, prompt: str) -> str | None:
+    def generate(self, prompt: str, **_kwargs) -> str | None:
         self.calls += 1
+        self.prompts.append(prompt)
         return self.text
 
     def close(self) -> None:
@@ -822,6 +824,20 @@ def test_pulse_icon_one_shot_timer_stops() -> None:
     assert icon.source_id == 0
     assert icon.scale == 1.0
     icon.stop()
+
+
+def test_watcher_lock_prevents_a_second_instance(tmp_path: Path) -> None:
+    from shell.servicios.tareas.vigilancia.sesion import (
+        acquire_watcher_lock,
+        release_watcher_lock,
+    )
+
+    lock = tmp_path / "task-watcher.lock"
+    first = acquire_watcher_lock(lock)
+    second = acquire_watcher_lock(lock)
+    assert first is not None
+    assert second is None
+    release_watcher_lock(first)
 
 
 if __name__ == "__main__":
