@@ -38,7 +38,7 @@ class EmojiPickerWindow(PickerOverlay):
         shell_window: Gtk.Window,
         *,
         on_refresh: Callable[[], tuple[EmojiRecord, ...]],
-        on_copy: Callable[[str], bool],
+        on_copy: Callable[[str], None],
     ) -> None:
         super().__init__(
             shell_window,
@@ -114,8 +114,8 @@ class EmojiPickerWindow(PickerOverlay):
             self.set_empty_visible(True)
 
     def _select_emoji(self, emoji: EmojiRecord) -> None:
-        if self._on_copy(emoji.glyph):
-            self.close_picker()
+        self._on_copy(emoji.glyph)
+        self.close_picker()
 
     def _on_child_activated(self, _flow: Gtk.FlowBox, child: Gtk.FlowBoxChild) -> None:
         if isinstance(child, EmojiCell):

@@ -20,6 +20,42 @@ CopyFn = Callable[[str], bool]
 WatchFactory = Callable[[], subprocess.Popen[str]]
 
 
+def paste_text_to_window(
+    address: str,
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> bool:
+    """Focus the previous window and send Ctrl+V without blocking GTK."""
+    if not address.strip():
+        return False
+    escaped_address = address.strip().replace("\\", "\\\\").replace('"', '\\"')
+    try:
+        focused = runner(
+            [
+                "hyprctl",
+                "dispatch",
+                f'hl.dsp.focus({{ window = "address:{escaped_address}" }})',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            check=False,
+        )
+        if focused.returncode != 0:
+            return False
+        time.sleep(0.15)
+        pasted = runner(
+            ["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"],
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return pasted.returncode == 0
+
+
 def paste_text(*, runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run) -> str | None:
     try:
         completed = runner(

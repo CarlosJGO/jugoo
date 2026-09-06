@@ -192,6 +192,7 @@ class ShellApplication(Gtk.Window):
             self.clipboard_service,
             self,
             close_launcher=self.applications_controller.close_launcher,
+            hyprland=self.hyprland,
         )
 
         self.compact_controller = ShellCompactController(

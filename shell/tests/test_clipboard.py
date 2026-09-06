@@ -11,7 +11,7 @@ from shell.servicios.portapapeles.historia import (
     save_history,
     search_entries,
 )
-from shell.servicios.portapapeles.servicio import ClipboardService, copy_text
+from shell.servicios.portapapeles.servicio import ClipboardService, copy_text, paste_text_to_window
 from shell.eventbus import EventBus
 
 
@@ -144,6 +144,27 @@ def test_copy_text_sends_payload_only_on_stdin() -> None:
     assert copy_text("no-log", runner=runner) is True
     assert seen["command"][0] == "wl-copy"
     assert seen["input"] == "no-log"
+
+
+def test_paste_text_to_window_sends_shortcut_to_address() -> None:
+    seen: list[object] = []
+
+    class _Result:
+        returncode = 0
+
+    def runner(command, **kwargs):
+        seen.append(command)
+        return _Result()
+
+    assert paste_text_to_window("0x123", runner=runner) is True
+    assert seen == [
+        [
+            "hyprctl",
+            "dispatch",
+            'hl.dsp.focus({ window = "address:0x123" })',
+        ],
+        ["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"],
+    ]
 
 
 def _run() -> None:

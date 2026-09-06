@@ -64,7 +64,7 @@ class ClipboardPickerWindow(PickerOverlay):
         shell_window: Gtk.Window,
         *,
         on_refresh: Callable[[], tuple[ClipboardEntry, ...]],
-        on_copy: Callable[[str], bool],
+        on_copy: Callable[[str], None],
     ) -> None:
         super().__init__(
             shell_window,
@@ -141,9 +141,8 @@ class ClipboardPickerWindow(PickerOverlay):
             self.set_empty_visible(True)
 
     def _select_entry(self, entry: ClipboardEntry) -> None:
-        copied = self._on_copy(entry.id)
-        if copied:
-            self.close_picker()
+        self._on_copy(entry.id)
+        self.close_picker()
 
     def _on_row_activated(self, _list: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
         if isinstance(row, ClipboardRow):
