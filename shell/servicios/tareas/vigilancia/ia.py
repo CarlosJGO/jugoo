@@ -59,12 +59,23 @@ _SKIP_LINE_PREFIXES = (
     "ftype",
     "modalities",
     "available commands",
+    "/exit",
+    "/regen",
+    "/clear",
+    "/read",
+    "/glob",
     "loading model",
     "exiting",
 )
 _PROMPT_INSTRUCTION_PREFIXES = (
     "eres el asistente local del escritorio.",
     "saluda brevemente al usuario y resume su estado de tareas.",
+    "escribe una notificación matutina breve y natural sobre el estado de sus tareas.",
+    "resume primero las tareas vencidas y las de hoy; menciona una tarea por su título solo si aporta contexto.",
+    "si no hay tareas para hoy, dilo claramente y menciona la próxima solo si existe.",
+    "puedes saludar, pero no uses una charla genérica como 'hola, ¿cómo te va?'.",
+    "no copies las etiquetas de los datos internos ni hagas una lista.",
+    "no muestres fechas, fechas iso, paréntesis ni el formato 'título (fecha)'.",
     "sé natural, breve y útil.",
     "no inventes tareas ni información.",
     "no menciones que eres una ia.",
@@ -73,11 +84,11 @@ _PROMPT_INSTRUCTION_PREFIXES = (
     "responde con una o dos frases breves en español.",
     "tono natural y cercano.",
     "sin explicaciones.",
-    "contexto:",
+    "datos internos de tareas:",
 )
 _CONTEXT_FIELD = re.compile(
     r"^-\s*(?:tareas pendientes hoy|tareas vencidas|vencidas relevantes|"
-    r"pendientes relevantes|próxima tarea|recurrencia):\s*",
+    r"pendientes relevantes|próxima tarea|próxima tarea relevante|recurrencia):\s*",
     re.I,
 )
 _CONTEXT_FIELD_VALUES = (
@@ -85,7 +96,8 @@ _CONTEXT_FIELD_VALUES = (
     "cada mes",
 )
 _LEADING_TITLE_ECHO = re.compile(
-    r"^(?!(?:¡)?(?:hola|hey|buenos|buenas)\b)([^.!?]{1,60}?)\s+(?=(?:¡)?(?:hola|hey)\b)",
+    r"^(?!(?:¡)?(?:hola|hey|buenos|buenas)\b)([^.!?]{1,60}?)\s+"
+    r"(?=(?:¡)?(?:hola|hey|buenos|buenas)\b)",
     re.I,
 )
 _TRUNCATED_MARKER = "... (truncated)"
@@ -281,7 +293,7 @@ class LocalTextGenerator:
         )
         try:
             proc = self._popen(
-                argv,
+                ["nice", "-n", "10", *argv],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 stdin=subprocess.DEVNULL,

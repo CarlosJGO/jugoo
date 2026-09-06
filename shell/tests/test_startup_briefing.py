@@ -135,6 +135,10 @@ def test_facts_use_real_task_state_without_ids(tmp_path: Path) -> None:
     assert "tareas vencidas: 1" in prompt
     assert "Estudiar X" in prompt
     assert "Pagar luz" in prompt
+    assert prompt.count("Estudiar X") == 1
+    assert "Estudiar X (" not in prompt
+    assert "No muestres fechas" in prompt
+    assert "Hola, ¿cómo te va?" in prompt
     assert "secret-id" not in prompt
     assert "other-id" not in prompt
     assert "tasks.json" not in prompt
@@ -385,6 +389,9 @@ def test_validate_extracts_spanish_from_llama_cli_banner() -> None:
         "\n\nLoading model... \n\n"
         "build      : b10809\n"
         "model      : /tmp/x.gguf\n"
+        "available commands:\n"
+        "/exit or Ctrl+C     stop or exit\n"
+        "/regen              regenerate the last response\n"
         "> <|begin_of_text|>system stuff\n"
         "Buenos días. Tienes una pendiente: estudiar.\n"
         "[ Prompt: 393,0 t/s | Generation: 32,2 t/s ]\n"
@@ -473,6 +480,17 @@ def test_validate_strips_truncated_prompt_echo() -> None:
     assert text is not None
     assert text.startswith("Hola,")
     assert not text.startswith("Dejar de proyectarse Hola")
+
+
+def test_validate_strips_title_before_buenos_dias() -> None:
+    text = validate_ai_output(
+        "Dejar de proyectarse Buenos días, tienes una tarea para hoy.",
+        max_chars=280,
+        max_words=48,
+        max_lines=2,
+        join_lines=True,
+    )
+    assert text == "Buenos días, tienes una tarea para hoy."
 
 
 def test_fallback_is_emergency_only() -> None:
@@ -601,6 +619,35 @@ def test_daily_recurrence_hint_is_included() -> None:
     prompt = build_briefing_prompt(facts)
     assert "recurrencia: cada día" in prompt
     assert "ignored" not in prompt
+
+
+def test_briefing_prompt_does_not_format_task_as_title_and_date() -> None:
+    today = date.today()
+    facts = collect_briefing_facts(
+        TasksSnapshot(
+            today=today.isoformat(),
+            tasks=(
+                TaskSnapshot(
+                    id="task",
+                    title="Dejar de proyectarse",
+                    notes="",
+                    repeat="none",
+                    due_date=today.isoformat(),
+                    month_day=today.day,
+                    status=TASK_STATUS_PENDING,
+                    period_key=today.isoformat(),
+                    missed_count=0,
+                    created_at="",
+                    occurrence_date=today.isoformat(),
+                ),
+            ),
+            pending_today_count=1,
+        )
+    )
+    prompt = build_briefing_prompt(facts)
+    assert "Dejar de proyectarse (" not in prompt
+    assert "No muestres fechas" in prompt
+    assert "no uses una charla genérica" in prompt
 
 
 if __name__ == "__main__":

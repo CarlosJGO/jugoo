@@ -110,23 +110,28 @@ def build_briefing_prompt(facts: TaskBriefingFacts) -> str:
         lines.append("vencidas relevantes: " + ", ".join(facts.overdue_titles))
     if facts.pending_titles:
         lines.append("pendientes relevantes: " + ", ".join(facts.pending_titles))
-    if facts.next_title:
-        nxt = facts.next_title
-        if facts.next_due:
-            nxt = f"{nxt} ({facts.next_due})"
-        lines.append(f"próxima tarea: {nxt}")
+    if facts.next_title and facts.next_title not in (
+        *facts.overdue_titles,
+        *facts.pending_titles,
+    ):
+        lines.append(f"próxima tarea relevante: {facts.next_title}")
     if facts.next_repeat:
         lines.append(f"recurrencia: {facts.next_repeat}")
     context = "\n".join(f"- {line}" for line in lines)
     return (
-        f"Contexto:\n{context}\n\n"
+        f"Datos internos de tareas:\n{context}\n\n"
         "Eres el asistente local del escritorio.\n"
-        "Saluda brevemente al usuario y resume su estado de tareas.\n"
+        "Escribe una notificación matutina breve y natural sobre el estado de sus tareas.\n"
+        "Resume primero las tareas vencidas y las de hoy; menciona una tarea por su título solo si aporta contexto.\n"
+        "Si no hay tareas para hoy, dilo claramente y menciona la próxima solo si existe.\n"
+        "Puedes saludar, pero no uses una charla genérica como 'Hola, ¿cómo te va?'.\n"
+        "No copies las etiquetas de los datos internos ni hagas una lista.\n"
+        "No muestres fechas, fechas ISO, paréntesis ni el formato 'título (fecha)'.\n"
         "Sé natural, breve y útil.\n"
         "No inventes tareas ni información.\n"
         "No menciones que eres una IA.\n"
         "No expliques tu proceso.\n"
-        "Máximo 1-2 frases."
+        "Usa una o dos frases y termina ahí."
     )
 
 
@@ -266,7 +271,17 @@ class StartupTaskBriefing:
             return False, "binary_missing"
         viability = self._resources.viability(self._config)
         if not viability.viable:
-            return False, viability.reason
+            details = []
+            if viability.available_vram_bytes is not None:
+                details.append(
+                    f"VRAM libre {viability.available_vram_bytes // (1024 * 1024)} MiB"
+                )
+            if viability.estimated_vram_bytes is not None:
+                details.append(
+                    f"estimada {viability.estimated_vram_bytes // (1024 * 1024)} MiB"
+                )
+            suffix = f" ({', '.join(details)})" if details else ""
+            return False, f"{viability.reason}{suffix}"
         return True, "ok"
 
     def _deliver(self, body: str) -> None:
