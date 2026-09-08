@@ -22,6 +22,7 @@ from ...config import (
 from ...models import NotificationSnapshot
 from ...popup_handle import hide_popup, present_popup
 from ...servicios.notificaciones.notifications import NotificationService
+from ...ui.disfraces import WindowRole, dress_window
 from ...ui.notification_icon import apply_notification_icon
 from ...window_identity import (
     TITLE_NOTIFICATION_GROUP,
@@ -81,7 +82,7 @@ class NotificationGroupWindow(Gtk.Window):
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         outer.get_style_context().add_class("notification-group-window-content")
         outer.set_size_request(NOTIFICATION_POPUP_WIDTH, window_height)
-        self.add(outer)
+        dress_window(self, WindowRole.NOTIFICATION_GROUP, outer)
 
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)

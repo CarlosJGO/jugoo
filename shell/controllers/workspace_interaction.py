@@ -11,7 +11,7 @@ gi.require_version("Gdk", "3.0")
 
 from gi.repository import Gdk, GLib, Gtk
 
-from ..config import WORKSPACE_HOVER_DELAY_MS, WORKSPACE_HOVER_GRACE_MS
+from .. import config as shell_config
 from ..eventbus import EventBus
 from ..models import AudioSnapshot, WorkspaceAudioState
 from ..servicios.audio.audio import AUDIO_CHANGED, AudioService
@@ -129,7 +129,7 @@ class WorkspaceInteractionController:
         self._hover_button_widget = widget
 
         self._hover_timer_id = GLib.timeout_add(
-            WORKSPACE_HOVER_DELAY_MS,
+            shell_config.WORKSPACE_HOVER_DELAY_MS,
             self._on_hover_timer_triggered,
             workspace_id,
         )
@@ -150,7 +150,7 @@ class WorkspaceInteractionController:
     def _schedule_hover_close(self) -> None:
         self._cancel_close_timer()
         self._close_timer_id = GLib.timeout_add(
-            WORKSPACE_HOVER_GRACE_MS,
+            shell_config.WORKSPACE_HOVER_GRACE_MS,
             self._on_close_timer_triggered,
         )
 

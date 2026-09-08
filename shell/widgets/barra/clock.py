@@ -11,8 +11,9 @@ gi.require_version("Gdk", "3.0")
 
 from gi.repository import Gdk, GLib, Gtk
 
-from ...config import CLOCK_DATE_FORMAT, CLOCK_TIME_FORMAT
+from ... import config as shell_config
 from ...eventbus import EventBus
+from ...settings.manager import SETTINGS_CHANGED
 from ...popup_handle import PopupOutsideDismiss, hide_popup, present_popup
 from ...servicios.tareas.logic import format_day_label
 from ...servicios.tareas.tasks import TASKS_CHANGED, TasksService
@@ -252,20 +253,31 @@ class ClockWidget(ShellModule):
         self.pack_start(self._hover_surface, False, False, 0)
 
         self.connect("destroy", self._on_destroy)
+        if self._event_bus is not None:
+            self._event_bus.subscribe(SETTINGS_CHANGED, self._on_settings_changed)
         self._refresh_display()
         self._schedule_next_tick()
 
     @staticmethod
     def _format_time(value: datetime) -> str:
-        return value.strftime(CLOCK_TIME_FORMAT)
+        return value.strftime(shell_config.CLOCK_TIME_FORMAT)
 
     def apply_shell_compact(self, compact: bool) -> None:
         return
 
+    def _on_settings_changed(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        if payload.get("key") in {
+            "widgets.clock_time_format",
+            "widgets.clock_date_format",
+        }:
+            self._refresh_display()
+
     def _refresh_display(self) -> None:
         now = datetime.now()
         self._time_label.set_text(self._format_time(now))
-        self._date_label.set_text(now.strftime(CLOCK_DATE_FORMAT))
+        self._date_label.set_text(now.strftime(shell_config.CLOCK_DATE_FORMAT))
 
     def _schedule_next_tick(self) -> None:
         now = datetime.now()
@@ -325,6 +337,8 @@ class ClockWidget(ShellModule):
 
     def _on_destroy(self, *_args) -> None:
         self._outside_dismiss.uninstall()
+        if self._event_bus is not None:
+            self._event_bus.unsubscribe(SETTINGS_CHANGED, self._on_settings_changed)
         if self._tick_source_id is not None:
             GLib.source_remove(self._tick_source_id)
             self._tick_source_id = None

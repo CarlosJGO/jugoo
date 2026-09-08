@@ -11,7 +11,7 @@ gi.require_version("Gtk", "3.0")
 
 from gi.repository import Gdk, GLib, Gtk
 
-from .config import POPUP_OUTSIDE_DISMISS_GRACE_MS
+from . import config as shell_config
 from .models import ActiveWindow
 from .servicios.escritorio.hyprland import ACTIVE_WINDOW_CHANGED
 from .ui.theme import active_theme
@@ -19,6 +19,10 @@ from .ui.theme import active_theme
 T = TypeVar("T", bound=Gtk.Window)
 
 _POPUP_FADE_TICK_MS = 16
+
+
+def _popup_dismiss_grace_ms() -> int:
+    return int(shell_config.POPUP_OUTSIDE_DISMISS_GRACE_MS)
 
 
 def _popup_fade_step() -> float:
@@ -435,7 +439,7 @@ class PopupOutsideDismiss:
         self._cancel_deferred_dismiss()
         generation = self._dismiss_generation
         self._deferred_dismiss_source_id = GLib.timeout_add(
-            POPUP_OUTSIDE_DISMISS_GRACE_MS,
+            _popup_dismiss_grace_ms(),
             self._on_deferred_dismiss,
             generation,
         )

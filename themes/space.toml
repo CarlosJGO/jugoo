@@ -2,9 +2,10 @@
 name = "Space"
 
 [colors]
-background = "#070A14"
-surface = "#0D1120"
-surface_alt = "#11172A"
+# Colder void — the bar starfield reads this as deep space.
+background = "#04060E"
+surface = "#0B1020"
+surface_alt = "#101728"
 surface_hover = "#18213A"
 surface_active = "#202C50"
 primary = "#7C8CFF"

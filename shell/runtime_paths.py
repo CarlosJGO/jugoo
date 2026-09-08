@@ -42,6 +42,10 @@ def clipboard_history_path() -> Path:
     return xdg_data_dir() / CLIPBOARD_HISTORY_PATH
 
 
+def settings_path() -> Path:
+    return xdg_data_dir() / "settings.json"
+
+
 def notification_icons_dir() -> Path:
     return xdg_cache_dir() / "notification-icons"
 

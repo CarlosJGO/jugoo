@@ -26,6 +26,7 @@ from ...config import (
 from ...models import NotificationSnapshot
 from ...popup_handle import pointer_inside_widget, present_popup, hide_popup
 from ...servicios.notificaciones.notifications import NotificationService
+from ...ui.disfraces import WindowRole, dress_window
 from ...ui.notification_icon import apply_notification_icon
 from ...window_identity import (
     TITLE_NOTIFICATIONS,
@@ -297,7 +298,7 @@ class NotificationPopup(Gtk.Window):
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         outer.set_size_request(NOTIFICATION_POPUP_WIDTH, -1)
         outer.get_style_context().add_class("notification-popup-content")
-        self.add(outer)
+        dress_window(self, WindowRole.NOTIFICATIONS_POPUP, outer)
 
         header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         header.get_style_context().add_class("notification-popup-header")

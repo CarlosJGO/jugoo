@@ -25,12 +25,14 @@ from .controllers.applications import ApplicationsController
 from .controllers.control_center import ControlCenterController
 from .controllers.pickers import PickersController
 from .controllers.media import MediaController
+from .controllers.settings import SettingsController
 from .controllers.shell_compact import ShellCompactController
 from .controllers.volume_osd import VolumeOsdController
 from .controllers.workspace_interaction import WorkspaceInteractionController
 from .eventbus import EventBus
 from .identity import project_root
 from .layout import ShellLayout
+from .runtime_paths import settings_path
 from .servicios.aplicaciones.applications import ApplicationsService
 from .servicios.portapapeles.servicio import ClipboardService
 from .servicios.audio.audio import AudioService
@@ -46,16 +48,19 @@ from .servicios.tareas.briefing import StartupTaskBriefing
 from .servicios.tareas.presencia import TaskWatcherBridge
 from .servicios.tareas.tasks import TasksService
 from .servicios.tareas.vigilancia.sesion import ensure_task_watcher_service
+from .settings.manager import SettingsManager
 from .widgets.barra.active_window import ActiveWindowWidget
 from .widgets.barra.clock import ClockWidget
 from .widgets.barra.ethernet import EthernetWidget
 from .widgets.barra.notifications import NotificationsWidget
 from .widgets.barra.pinned_apps import PinnedAppsWidget
 from .widgets.barra.power import PowerWidget
+from .widgets.barra.settings import SettingsWidget
 from .widgets.barra.stats import StatsWidget
 from .widgets.barra.tasks import TasksWidget
 from .widgets.barra.tray import SystemTrayWidget
 from .widgets.barra.workspace import WorkspaceWidget
+from .ui.starfield import StarfieldBackground
 from .ui.theme import ThemeManager
 from .window_identity import APPLICATION_ID, TITLE_BAR, configure_toplevel, init_window_identity
 
@@ -87,6 +92,12 @@ class ShellApplication(Gtk.Window):
             structural_css_path=Path(__file__).with_name("style.css"),
             active_name=ACTIVE_THEME,
             hypr_export_path=Path(HYPRLAND_THEME_EXPORT_PATH).expanduser(),
+        )
+        self.settings_manager = SettingsManager(
+            self.event_bus,
+            path=settings_path(),
+            theme_setter=self.theme_manager.set_theme,
+            theme_choices=self._theme_choices,
         )
         self.hyprland = HyprlandService(self.event_bus, PERSISTENT_WORKSPACES)
         self.applications = ApplicationsService(self.event_bus)
@@ -125,11 +136,13 @@ class ShellApplication(Gtk.Window):
         monitor = _gdk_monitor()
         if monitor is not None:
             self.layout.set_size_request(monitor.get_geometry().width, -1)
-        self._bar_host = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+
+        # Starfield paints the void; layout modules sit as its child above the stars.
+        self._bar_host = StarfieldBackground(self.event_bus)
         self._bar_host.get_style_context().add_class("shell-bar-host")
         self._bar_host.set_hexpand(True)
         self._bar_host.set_halign(Gtk.Align.FILL)
-        self._bar_host.pack_start(self.layout, True, True, 0)
+        self._bar_host.add(self.layout)
 
         self._overlay = Gtk.Overlay()
         self._overlay.set_hexpand(True)
@@ -167,6 +180,8 @@ class ShellApplication(Gtk.Window):
         self.layout.right.add(self.tasks_widget)
         self.clock_widget = ClockWidget(self.event_bus, self.tasks_service)
         self.layout.right.add(self.clock_widget)
+        self.settings_widget = SettingsWidget(self.toggle_settings)
+        self.layout.right.add(self.settings_widget)
         self.power_widget = PowerWidget(self.power_service, self, self.event_bus)
         self.layout.right.add(self.power_widget)
         self.control_center_controller = ControlCenterController(
@@ -210,6 +225,16 @@ class ShellApplication(Gtk.Window):
             close_launcher=self.applications_controller.close_launcher,
             hyprland=self.hyprland,
         )
+        self.settings_controller = SettingsController(
+            self,
+            self.settings_manager,
+            close_others=self._close_overlays_for_settings,
+        )
+        self.settings_manager.set_volume_osd_delay_hook(
+            self.volume_osd_controller.set_hide_delay_ms
+        )
+        # Load persisted overrides after live hooks exist so first apply is complete.
+        self.settings_manager.start()
 
         self.compact_controller = ShellCompactController(
             self.event_bus,
@@ -222,6 +247,7 @@ class ShellApplication(Gtk.Window):
                 self.tray_widget,
                 self.notifications_widget,
                 self.tasks_widget,
+                self.settings_widget,
                 self.power_widget,
                 self.pinned_apps_widget,
             ),
@@ -255,20 +281,36 @@ class ShellApplication(Gtk.Window):
         self.control_center_controller.close_popup()
 
     def toggle_launcher(self) -> None:
+        self.settings_controller.close()
         self.pickers_controller.close_pickers()
         self.applications_controller.toggle_launcher()
 
     def toggle_clipboard_picker(self) -> None:
+        self.settings_controller.close()
         self.pickers_controller.toggle_clipboard()
 
     def toggle_emoji_picker(self) -> None:
+        self.settings_controller.close()
         self.pickers_controller.toggle_emoji()
+
+    def toggle_settings(self) -> None:
+        self.settings_controller.toggle()
 
     def open_tasks_panel(self) -> None:
         self.tasks_service.request_panel()
 
     def reload_theme(self) -> None:
         self.theme_manager.reload_current()
+
+    def _close_overlays_for_settings(self) -> None:
+        self.pickers_controller.close_pickers()
+        self.applications_controller.close_launcher()
+
+    def _theme_choices(self) -> tuple[tuple[str, str], ...]:
+        return tuple(
+            (name, name.replace("-", " ").replace("_", " ").title())
+            for name in self.theme_manager.available_themes
+        )
 
     def _ensure_task_watcher(self) -> bool:
         ensure_task_watcher_service()
@@ -291,6 +333,7 @@ class ShellApplication(Gtk.Window):
     def _on_destroy(self, *_args) -> None:
         # No service may enqueue UI work once destruction starts.
         self.theme_manager.close()
+        self.settings_manager.close()
         self.event_bus.close()
         self.volume_osd_controller.close()
         self.audio_service.close()
@@ -301,6 +344,7 @@ class ShellApplication(Gtk.Window):
         self._startup_briefing.close()
         self.task_watcher_bridge.close()
         self.tasks_service.close()
+        self.settings_controller.close()
         self.pickers_controller.close()
         self.applications_controller.close_launcher()
         self.clipboard_service.close()
@@ -335,6 +379,9 @@ class ShellGtkApplication(Gtk.Application):
         reload_theme = Gio.SimpleAction.new("reload-theme", None)
         reload_theme.connect("activate", self._on_reload_theme_action)
         self.add_action(reload_theme)
+        settings = Gio.SimpleAction.new("toggle-settings", None)
+        settings.connect("activate", self._on_toggle_settings_action)
+        self.add_action(settings)
 
     def do_activate(self) -> None:
         if self._shell_window is None:
@@ -353,6 +400,8 @@ class ShellGtkApplication(Gtk.Application):
             self._open_tasks_panel()
         if "--reload-theme" in arguments[1:]:
             self._reload_theme()
+        if "--toggle-settings" in arguments[1:]:
+            self._toggle_settings()
         return 0
 
     def _on_toggle_launcher_action(self, *_args) -> None:
@@ -375,6 +424,10 @@ class ShellGtkApplication(Gtk.Application):
         self.activate()
         self._reload_theme()
 
+    def _on_toggle_settings_action(self, *_args) -> None:
+        self.activate()
+        self._toggle_settings()
+
     def _toggle_launcher(self) -> None:
         if self._shell_window is not None:
             self._shell_window.toggle_launcher()
@@ -394,6 +447,10 @@ class ShellGtkApplication(Gtk.Application):
     def _reload_theme(self) -> None:
         if self._shell_window is not None:
             self._shell_window.reload_theme()
+
+    def _toggle_settings(self) -> None:
+        if self._shell_window is not None:
+            self._shell_window.toggle_settings()
 
 
 def main() -> None:

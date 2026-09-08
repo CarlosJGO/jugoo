@@ -43,6 +43,9 @@ class VolumeOsdController:
     def hide_delay_ms(self) -> int:
         return self._hide_delay_ms
 
+    def set_hide_delay_ms(self, delay_ms: int) -> None:
+        self._hide_delay_ms = max(100, int(delay_ms))
+
     def start(self) -> None:
         """Baseline current volume without showing the OSD."""
         snapshot = self._audio_service.snapshot

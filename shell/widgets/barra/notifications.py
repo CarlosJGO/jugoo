@@ -14,10 +14,9 @@ from gi.repository import Gdk, GLib, Gtk
 from ...config import (
     NOTIFICATION_COMPACT_ICON_SIZE,
     NOTIFICATION_ICON_SIZE,
-    NOTIFICATIONS_SOUND_ENABLED,
     NOTIFICATIONS_SOUND_PATH,
-    NOTIFICATIONS_TOAST_ENABLED,
 )
+from ... import config as shell_config
 from ...eventbus import EventBus
 from ...models import NotificationSnapshot
 from ...popup_handle import (
@@ -162,9 +161,9 @@ class NotificationsWidget(ShellModule):
         self._sync_badge()
         if not self._service.paused:
             self._animate_bell()
-            if NOTIFICATIONS_SOUND_ENABLED and self._service.should_play_sound(snapshot):
+            if shell_config.NOTIFICATIONS_SOUND_ENABLED and self._service.should_play_sound(snapshot):
                 play_notification_sound(self._sound_path, enabled=True)
-            if NOTIFICATIONS_TOAST_ENABLED:
+            if shell_config.NOTIFICATIONS_TOAST_ENABLED:
                 self._toast_manager.enqueue(snapshot)
         return False
 

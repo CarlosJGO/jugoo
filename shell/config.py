@@ -7,6 +7,10 @@ from __future__ import annotations
 ACTIVE_THEME = "space"
 HYPRLAND_THEME_EXPORT_PATH = "~/.config/hypr/config/jugoo_theme_generated.lua"
 
+# Settings Center overlay (same layer-shell family as Search/Clipboard/Emoji).
+SETTINGS_CARD_WIDTH = 780
+SETTINGS_CARD_HEIGHT = 560
+
 # ``None`` mirrors Hyprland exactly. Set an integer to retain empty targets 1..N.
 PERSISTENT_WORKSPACES: int | None = None
 

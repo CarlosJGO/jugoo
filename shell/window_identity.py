@@ -14,7 +14,7 @@ gi.require_version("Gtk", "3.0")
 
 from gi.repository import Gdk, GLib, Gtk
 
-from .config import POPUP_EDGE_MARGIN
+from . import config as shell_config
 from .identity import (
     APPLICATION_ID,
     APPLICATION_NAME,
@@ -207,9 +207,10 @@ def compute_popup_top_left(
     offset: int,
     fixed_top: int | None = None,
     monitor: MonitorRect | None = None,
-    margin: int = POPUP_EDGE_MARGIN,
+    margin: int | None = None,
 ) -> tuple[int, int]:
     """Top-left popup coordinates: centered on the anchor, top below the button."""
+    edge = shell_config.POPUP_EDGE_MARGIN if margin is None else margin
     popup_left = button_center_x - popup_width // 2
     popup_top = fixed_top if fixed_top is not None else button_bottom + offset
 
@@ -220,12 +221,12 @@ def compute_popup_top_left(
         mon_bottom = monitor.y + monitor.height
 
         popup_left = max(
-            mon_left + margin,
-            min(popup_left, mon_right - popup_width - margin),
+            mon_left + edge,
+            min(popup_left, mon_right - popup_width - edge),
         )
         # Never slide the window up to fit a taller size: that overlaps the bar.
         # Popups grow downward; content that does not fit scrolls.
-        popup_top = max(mon_top + margin, popup_top)
+        popup_top = max(mon_top + edge, popup_top)
 
     return int(popup_left), int(popup_top)
 
@@ -291,7 +292,7 @@ def position_popup_below_anchor(
     title: str,
     offset: int,
     fixed_top: int | None = None,
-    margin: int = POPUP_EDGE_MARGIN,
+    margin: int | None = None,
     extra_y_offset: int = 0,
 ) -> int | None:
     """Position a popup from anchor geometry and popup size; return the top edge used."""

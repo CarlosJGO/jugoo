@@ -19,6 +19,7 @@ from ...config import (
 from ...models import NotificationSnapshot
 from ...popup_handle import is_pointer_leaving_surface, pointer_inside_widget
 from ...servicios.notificaciones.notifications import NotificationService
+from ...ui.disfraces import WindowRole, dress_content
 from ...ui.notification_icon import apply_notification_icon
 
 ToastDismissReason = Literal["timeout", "click", "cancel"]
@@ -63,7 +64,7 @@ class NotificationToast(Gtk.EventBox):
         card_style = self._card.get_style_context()
         card_style.add_class("notification-toast-content")
         card_style.add_class("notification-toast-card")
-        self.add(self._card)
+        self.add(dress_content(WindowRole.NOTIFICATION_TOAST, self._card))
 
         # Header: Icon + App title / Urgency + Close button
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)

@@ -18,14 +18,22 @@ box.shell-bar-host {
 }
 
 box.shell-bar {
-    background-color: @shell_bar_bg;
-    border: 1px solid @shell_bar_border;
-    /* Flush to the top/left screen edges; only the trailing bottom corner stays rounded. */
-    border-radius: 0 0 20px 0;
+    /* Void + stars are painted by StarfieldBackground under the bar. */
+    background-color: transparent;
+    /* Square silhouette — thicker outline so the bar reads as a hard edge, not a crop. */
+    border-radius: 0;
+    border: 2px solid @shell_bar_border;
     /* No padding: GTK3 clips children to the content box, so negative child
        margins cannot reach the screen edge — they only crop the widget. */
     padding: 0;
-    box-shadow: 0 4px 14px @shell_shadow_soft;
+    box-shadow:
+        0 1px 0 @shell_glass_highlight,
+        0 3px 10px @shell_shadow_soft;
+}
+
+eventbox.shell-starfield,
+eventbox.shell-bar-host {
+    background-color: transparent;
 }
 
 box#shell-left {
@@ -54,8 +62,11 @@ box#shell-right {
 
 window#shell.compact box.shell-bar {
     padding: 0;
-    border-radius: 0 0 12px 0;
-    box-shadow: 0 1px 6px @shell_shadow_soft;
+    border-radius: 0;
+    border-width: 2px;
+    box-shadow:
+        0 1px 0 @shell_glass_highlight,
+        0 2px 6px @shell_shadow_soft;
 }
 
 window#shell.compact box.shell-module {
@@ -139,6 +150,12 @@ window#shell.compact button.tasks-button {
     padding: 2px 4px;
     min-height: 18px;
     min-width: 18px;
+}
+
+window#shell.compact button.settings-button {
+    padding: 1px;
+    min-height: 20px;
+    min-width: 20px;
 }
 
 window#shell.compact box.ethernet-widget {
@@ -507,7 +524,8 @@ flowbox.pinned-apps-overflow-content {
 
 window#shell-app-launcher,
 window#shell-clipboard-picker,
-window#shell-emoji-picker {
+window#shell-emoji-picker,
+window#shell-settings {
     background-color: transparent;
 }
 
@@ -1689,6 +1707,10 @@ window#shell-notification-toast-layer {
     background-color: transparent;
 }
 
+eventbox#shell-notification-toast {
+    background-color: transparent;
+}
+
 box.notification-toast-container {
     background-color: transparent;
     padding: 0;
@@ -2088,3 +2110,160 @@ label.volume-osd-device {
 window#shell-volume-osd.volume-osd-muted label.volume-osd-headline {
     color: @shell_text_secondary;
 }
+
+/* ==========================================================================
+   Settings Center (picker-family overlay)
+   ========================================================================== */
+
+window#shell-settings {
+    background-color: transparent;
+}
+
+box.settings-card {
+    min-width: 780px;
+    min-height: 520px;
+}
+
+box.settings-header {
+    padding: 2px 2px 4px 2px;
+}
+
+label.settings-header-title {
+    color: @shell_text_primary;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+button.settings-close {
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    padding: 4px;
+    color: @shell_text_muted;
+}
+
+button.settings-close:hover {
+    background-color: @shell_hover_bg_soft;
+    color: @shell_text_primary;
+}
+
+box.settings-body {
+    min-height: 440px;
+}
+
+box.settings-nav {
+    padding: 2px;
+}
+
+button.settings-nav-button {
+    background: transparent;
+    border: 0;
+    border-radius: 10px;
+    padding: 8px 10px;
+    color: @shell_text_secondary;
+}
+
+button.settings-nav-button:hover {
+    background-color: @shell_hover_bg_faint;
+    color: @shell_text_primary;
+}
+
+button.settings-nav-button.active {
+    background-color: @shell_accent_soft;
+    color: @shell_text_primary;
+    font-weight: 600;
+}
+
+box.settings-content {
+    padding: 2px 4px 8px 4px;
+}
+
+label.settings-page-title {
+    color: @shell_text_primary;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+label.settings-page-subtitle,
+label.settings-page-note,
+label.settings-row-desc {
+    color: @shell_text_secondary;
+    font-size: 12px;
+}
+
+label.settings-section {
+    color: @shell_text_primary;
+    font-size: 13px;
+    font-weight: 600;
+    margin-top: 6px;
+}
+
+box.settings-row {
+    background-color: @shell_hover_bg_faint;
+    border: 1px solid @shell_border_subtle;
+    border-radius: 12px;
+    padding: 10px 12px;
+}
+
+label.settings-row-title {
+    color: @shell_text_primary;
+    font-weight: 600;
+}
+
+label.settings-row-hint {
+    color: @shell_warning;
+    font-size: 11px;
+}
+
+label.settings-row-unit {
+    color: @shell_text_muted;
+    font-size: 12px;
+}
+
+box.settings-banner,
+box.settings-intro,
+box.settings-layout-preview {
+    background-color: alpha(@shell_accent, 0.08);
+    border: 1px solid @shell_border_subtle;
+    border-radius: 12px;
+    padding: 10px 12px;
+}
+
+box.settings-layout-canvas {
+    padding: 4px 0;
+}
+
+label.settings-layout-chip {
+    background-color: @shell_surface_bg_elevated;
+    border: 1px solid @shell_border_medium;
+    border-radius: 8px;
+    color: @shell_text_primary;
+    font-size: 11px;
+    padding: 4px 8px;
+}
+
+button.settings-button {
+    background: transparent;
+    border: 0;
+    border-radius: 10px;
+    box-shadow: none;
+    min-width: 28px;
+    min-height: 28px;
+    padding: 2px;
+}
+
+button.settings-button:hover {
+    background-color: @shell_hover_bg;
+}
+
+drawingarea.settings-black-hole {
+    color: @shell_accent;
+    min-width: 22px;
+    min-height: 22px;
+}
+
+/* ==========================================================================
+   Window disguises (dormant)
+   Shaped asteroid/meteor CSS lives with the costume code; all roles use
+   DisguiseId.NORMAL for now so notification panels keep their stock look.
+   ========================================================================== */
