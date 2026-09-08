@@ -37,11 +37,11 @@ def paint_spectrum(
     radius = min(2.5, bar_width / 2.0)
 
     for index, level in enumerate(bars):
-        if level > 0.001:
+        color = colors[index] if index < len(colors) else None
+        if level > 0.001 and color is not None:
             # Slight vertical gradient: denser near the base.
             bar_height = max(3, int(height * (0.08 + 0.92 * level)))
             y = height - bar_height
-            color = colors[index] if index < len(colors) else (1.0, 1.0, 1.0, 0.2)
             red, green, blue, alpha = color
             # Soften mid-height so titles stay readable.
             center_boost = 1.0 - 0.18 * math.sin(math.pi * ((x + bar_width * 0.5) / max(1, width)))
@@ -49,10 +49,9 @@ def paint_spectrum(
             _rounded_rect(cr, x, y, bar_width, bar_height, radius)
             cr.fill()
 
-        if index < len(peaks) and peaks[index] > 0.04:
+        if color is not None and index < len(peaks) and peaks[index] > 0.04:
             peak_level = peaks[index]
             peak_y = height - max(_PEAK_HEIGHT, height * (0.08 + 0.92 * peak_level))
-            color = colors[index] if index < len(colors) else (1.0, 1.0, 1.0, 0.2)
             red, green, blue, alpha = color
             cr.set_source_rgba(red, green, blue, min(0.55, alpha + 0.18))
             cr.rectangle(x, peak_y, bar_width, _PEAK_HEIGHT)

@@ -9,7 +9,10 @@ flowchart TD
     C --> D[Servicios]
     C --> E[Widgets]
     C --> F[ShellLayout]
-    C --> G[shell/style.css]
+    C --> G[ThemeManager]
+    G --> K[themes/space.toml]
+    G --> L[shell/style.css]
+    G --> M[Hyprland theme export]
     D --> H[EventBus]
     H --> I[Controllers]
     E --> J[GTK / GTK Layer Shell]
@@ -40,13 +43,24 @@ Los controllers conectan eventos con acciones o popups. La lógica de interacci�
 
 [`shell/eventbus.py`](../../shell/eventbus.py) distribuye eventos internos. Las constantes de eventos suelen vivir junto al servicio que los produce.
 
+### Tema
+
+[`shell/ui/theme.py`](../../shell/ui/theme.py) valida el TOML activo, compila
+los roles semánticos junto con la hoja estructural y conserva el
+`Gtk.CssProvider` global. El evento `theme_changed` actualiza componentes
+programáticos como el espectro. Un cambio inválido se rechaza sin sustituir el
+último tema válido.
+
+GTK3 recibe color, opacidad y radios. El blur se exporta a Hyprland, porque GTK3
+no puede desenfocar por sí mismo el fondo del compositor.
+
 ## Ciclo de un dato
 
 1. Un servicio descubre una fuente del sistema.
 2. El servicio devuelve un dataclass o snapshot.
 3. Un widget lee el snapshot en un timer o recibe un evento.
 4. El widget actualiza labels, clases CSS, iconos o ventanas.
-5. El CSS aplica color, espaciado, tamaño y estado visual.
+5. El CSS compilado desde el tema aplica color, espaciado, tamaño y estado visual.
 
 ## Punto de entrada real de la barra propia
 

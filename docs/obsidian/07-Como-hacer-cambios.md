@@ -23,7 +23,22 @@
 - No pongas comandos de sistema dentro del CSS.
 - No confundas tooltip con `Gtk.Window`.
 - No uses el hot spot para cambiar el estado del ventilador sin cambiar explícitamente el contrato térmico.
-- No edites la raíz `style.css` esperando cambiar `shell/style.css`.
+- No pongas colores literales en `shell/style.css` o widgets: usa un rol de tema.
+
+## Cambiar el tema
+
+1. Edita [`themes/space.toml`](../../themes/space.toml).
+2. Conserva todas las claves del contrato; los colores usan `#RRGGBB`.
+3. Guarda el archivo. Jugoo aplica el cambio automáticamente si es válido.
+4. Si hace falta, fuerza la operación con `jugoo --reload-theme`.
+
+Para añadir otro tema, crea `themes/nombre.toml` y cambia `ACTIVE_THEME` en
+[`shell/config.py`](../../shell/config.py). El `ThemeManager` descubre todos los
+TOML del directorio y deja disponible `set_theme(name)` para un selector futuro.
+
+La exportación Hyprland es automática. No edites
+`~/.config/hypr/config/jugoo_theme_generated.lua`: se sobrescribe en cada
+recarga. Los binds, autostart y window rules no forman parte del tema.
 
 ## Arranque manual
 

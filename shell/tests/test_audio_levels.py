@@ -157,11 +157,12 @@ def test_band_energies_prefer_matching_frequency() -> None:
     assert low_bands.index(max(low_bands)) < high_bands.index(max(high_bands))
 
 
-def test_frequency_to_rgba_maps_bass_to_warm_and_treble_to_cool() -> None:
-    bass = frequency_to_rgba(60.0, 0.8)
-    treble = frequency_to_rgba(8000.0, 0.8)
-    assert bass[0] > bass[2]  # red-ish
-    assert treble[2] > treble[0]  # blue-ish
+def test_frequency_to_rgba_maps_across_theme_palette() -> None:
+    palette = ((0.1, 0.2, 0.9), (0.5, 0.2, 0.8), (0.9, 0.1, 0.6))
+    bass = frequency_to_rgba(60.0, 0.8, palette=palette)
+    treble = frequency_to_rgba(8000.0, 0.8, palette=palette)
+    assert bass[2] > bass[0]
+    assert treble[0] > bass[0]
     assert bass[3] > 0.2
     assert treble[3] > 0.2
 
@@ -456,7 +457,7 @@ if __name__ == "__main__":
     test_fft_magnitudes_peaks_near_tone_bin()
     test_logarithmic_band_centers_increase()
     test_band_energies_prefer_matching_frequency()
-    test_frequency_to_rgba_maps_bass_to_warm_and_treble_to_cool()
+    test_frequency_to_rgba_maps_across_theme_palette()
     test_smooth_levels_attack_faster_than_release()
     test_update_peaks_hold_then_fall()
     test_compute_bars_from_pcm_reacts_to_audio_energy()

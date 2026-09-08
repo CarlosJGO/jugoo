@@ -97,43 +97,29 @@ def frequency_to_rgba(
     freq_hz: float,
     level: float,
     *,
+    palette: Sequence[tuple[float, float, float]],
     f_min: float = _F_MIN_HZ,
     f_max: float = 12_000.0,
 ) -> tuple[float, float, float, float]:
-    """Map band frequency → hue and amplitude → saturation/value/alpha."""
+    """Map band frequency across the active theme palette."""
+    if not palette:
+        raise ValueError("spectrum palette cannot be empty")
     clamped = max(f_min, min(f_max, max(1.0, freq_hz)))
     t = (math.log(clamped) - math.log(f_min)) / max(1e-9, math.log(f_max) - math.log(f_min))
     t = max(0.0, min(1.0, t))
-    # Graves → red/orange (hue ~0–0.08), medios → yellow/green/cyan, agudos → blue/violet.
-    hue = t * 0.78
     amplitude = max(0.0, min(1.0, level))
-    saturation = 0.55 + 0.40 * amplitude
-    value = 0.45 + 0.50 * amplitude
     alpha = 0.10 + 0.32 * (amplitude**0.85)
-    red, green, blue = _hsv_to_rgb(hue, saturation, value)
-    return (red, green, blue, alpha)
-
-
-def _hsv_to_rgb(h: float, s: float, v: float) -> tuple[float, float, float]:
-    if s <= 0.0:
-        return (v, v, v)
-    sector = (h % 1.0) * 6.0
-    index = int(sector)
-    frac = sector - index
-    p = v * (1.0 - s)
-    q = v * (1.0 - s * frac)
-    t = v * (1.0 - s * (1.0 - frac))
-    if index == 0:
-        return (v, t, p)
-    if index == 1:
-        return (q, v, p)
-    if index == 2:
-        return (p, v, t)
-    if index == 3:
-        return (p, q, v)
-    if index == 4:
-        return (t, p, v)
-    return (v, p, q)
+    position = t * max(1, len(palette) - 1)
+    left = min(int(position), len(palette) - 1)
+    right = min(left + 1, len(palette) - 1)
+    blend = position - left
+    brightness = 0.58 + 0.42 * amplitude
+    channels = tuple(
+        (palette[left][index] * (1.0 - blend) + palette[right][index] * blend)
+        * brightness
+        for index in range(3)
+    )
+    return (channels[0], channels[1], channels[2], alpha)
 
 
 def _hann_window(size: int) -> tuple[float, ...]:
@@ -284,6 +270,7 @@ def compute_bars_from_pcm(
     previous: Sequence[float],
     sample_rate: int = 16_000,
     previous_peaks: Sequence[float] | None = None,
+    palette: Sequence[tuple[float, float, float]] | None = None,
 ) -> tuple[float, ...]:
     """Compatibility wrapper: return only smoothed bar heights."""
     bars, _peaks, _colors = compute_spectrum_frame(
@@ -292,6 +279,7 @@ def compute_bars_from_pcm(
         previous_bars=previous,
         previous_peaks=previous_peaks or empty_bars(bar_count),
         sample_rate=sample_rate,
+        palette=palette,
     )
     return bars
 
@@ -303,6 +291,7 @@ def compute_spectrum_frame(
     previous_bars: Sequence[float],
     previous_peaks: Sequence[float],
     sample_rate: int = 16_000,
+    palette: Sequence[tuple[float, float, float]] | None = None,
 ) -> tuple[
     tuple[float, ...],
     tuple[float, ...],
@@ -314,7 +303,14 @@ def compute_spectrum_frame(
         bars = decay_bars(previous_bars)
         peaks = decay_peaks(previous_peaks)
         centers = logarithmic_band_centers(bar_count, sample_rate=sample_rate)
-        colors = tuple(frequency_to_rgba(centers[index], bars[index]) for index in range(bar_count))
+        colors = (
+            tuple(
+                frequency_to_rgba(centers[index], bars[index], palette=palette)
+                for index in range(bar_count)
+            )
+            if palette
+            else empty_colors(bar_count)
+        )
         return bars, peaks, colors
 
     window_size = _FFT_SIZE
@@ -335,7 +331,14 @@ def compute_spectrum_frame(
     bars = smooth_levels(targets, previous_bars)
     peaks = update_peaks(bars, previous_peaks)
     centers = logarithmic_band_centers(bar_count, sample_rate=sample_rate)
-    colors = tuple(frequency_to_rgba(centers[index], bars[index]) for index in range(bar_count))
+    colors = (
+        tuple(
+            frequency_to_rgba(centers[index], bars[index], palette=palette)
+            for index in range(bar_count)
+        )
+        if palette
+        else empty_colors(bar_count)
+    )
     return bars, peaks, colors
 
 
@@ -346,6 +349,7 @@ def merge_visualizer_snapshot(
     bar_count: int,
     colors: Sequence[tuple[float, float, float, float]] | None = None,
     peaks: Sequence[float] | None = None,
+    palette: Sequence[tuple[float, float, float]] | None = None,
 ) -> tuple[bool, tuple[float, ...], tuple[float, ...], tuple[tuple[float, float, float, float], ...]]:
     normalized = tuple(
         float(bars[index]) if index < len(bars) else 0.0 for index in range(bar_count)
@@ -356,8 +360,13 @@ def merge_visualizer_snapshot(
     )
     if colors is None:
         centers = logarithmic_band_centers(bar_count, sample_rate=16_000)
-        color_values = tuple(
-            frequency_to_rgba(centers[index], normalized[index]) for index in range(bar_count)
+        color_values = (
+            tuple(
+                frequency_to_rgba(centers[index], normalized[index], palette=palette)
+                for index in range(bar_count)
+            )
+            if palette
+            else empty_colors(bar_count)
         )
     else:
         color_values = tuple(

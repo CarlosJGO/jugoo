@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 
+# Theme catalog entry from ``themes/<name>.toml``.
+ACTIVE_THEME = "space"
+HYPRLAND_THEME_EXPORT_PATH = "~/.config/hypr/config/jugoo_theme_generated.lua"
+
 # ``None`` mirrors Hyprland exactly. Set an integer to retain empty targets 1..N.
 PERSISTENT_WORKSPACES: int | None = None
 
@@ -19,7 +23,7 @@ POPUP_EDGE_MARGIN = 8
 POPUP_OUTSIDE_DISMISS_GRACE_MS = 500
 
 # Volume OSD auto-hide delay after the last default-sink volume/mute/output change.
-VOLUME_OSD_HIDE_DELAY_MS = 200
+VOLUME_OSD_HIDE_DELAY_MS = 1200
 
 # Hyprland activewindow.fullscreen value for MainMod+D (hl.dsp.window.fullscreen mode 1).
 HYPRLAND_MAXIMIZED_FULLSCREEN = 1

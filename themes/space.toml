@@ -1,0 +1,32 @@
+[meta]
+name = "Space"
+
+[colors]
+background = "#070A14"
+surface = "#0D1120"
+surface_alt = "#11172A"
+surface_hover = "#18213A"
+surface_active = "#202C50"
+primary = "#7C8CFF"
+secondary = "#8B5CF6"
+accent = "#D946EF"
+text = "#E8E9F2"
+text_muted = "#9298B5"
+text_disabled = "#555B75"
+border = "#29345C"
+border_active = "#5264B5"
+success = "#5CE6A8"
+warning = "#F5C76B"
+error = "#FF6B8A"
+info = "#65B7FF"
+
+[effects]
+blur = 8
+opacity = 0.94
+
+[shape]
+radius = 12
+
+[animation]
+enabled = true
+duration = 160

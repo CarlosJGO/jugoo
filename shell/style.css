@@ -1,40 +1,8 @@
 /* ==========================================================================
-   1. Design tokens
-   GTK3 exposes colors via @define-color. Spacing/radii are documented here
-   and mirrored in shell/ui/tokens.py where widgets need programmatic values.
-
-   Spacing scale:  2 · 4 · 6 · 8 · 10 · 12 · 16
-   Radius scale:   8 (sm) · 10 (md) · 12 (lg) · 14 (xl) · 16 (module)
+   1. Structural stylesheet
+   The semantic palette and visual parameters are compiled from the themes directory
+   by shell/ui/theme.py and prepended to this stylesheet at runtime.
    ========================================================================== */
-
-@define-color shell_surface_bg rgba(18, 18, 24, 0.86);
-@define-color shell_bar_bg rgba(10, 10, 16, 0.94);
-@define-color shell_bar_border rgba(255, 255, 255, 0.08);
-@define-color shell_surface_bg_elevated rgba(18, 18, 24, 0.96);
-@define-color shell_surface_bg_panel rgba(18, 18, 24, 0.98);
-@define-color shell_text_primary #d9d9d9;
-@define-color shell_text_secondary rgba(255, 255, 255, 0.62);
-@define-color shell_text_muted rgba(255, 255, 255, 0.42);
-@define-color shell_accent #a58bff;
-@define-color shell_accent_soft rgba(124, 92, 255, 0.22);
-@define-color shell_special #74beff;
-@define-color shell_special_soft rgba(116, 190, 255, 0.12);
-@define-color shell_special_active rgba(116, 190, 255, 0.22);
-@define-color shell_border_subtle rgba(255, 255, 255, 0.10);
-@define-color shell_border_medium rgba(255, 255, 255, 0.12);
-@define-color shell_border_strong rgba(255, 255, 255, 0.15);
-@define-color shell_hover_bg rgba(255, 255, 255, 0.12);
-@define-color shell_hover_bg_soft rgba(255, 255, 255, 0.08);
-@define-color shell_hover_bg_faint rgba(255, 255, 255, 0.05);
-@define-color shell_danger rgba(255, 100, 100, 0.75);
-@define-color shell_success #5ddc8a;
-@define-color shell_warning #f2c14e;
-
-/* Shared thermal state palette (CPU bar, GPU fan, future sensors). */
-@define-color shell_temp_cold #5aa9ff;
-@define-color shell_temp_normal #5ddc8a;
-@define-color shell_temp_warm #f2c14e;
-@define-color shell_temp_hot #ff5f5f;
 
 
 /* ==========================================================================
@@ -57,7 +25,7 @@ box.shell-bar {
     /* No padding: GTK3 clips children to the content box, so negative child
        margins cannot reach the screen edge — they only crop the widget. */
     padding: 0;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+    box-shadow: 0 4px 14px @shell_shadow_soft;
 }
 
 box#shell-left {
@@ -87,7 +55,7 @@ box#shell-right {
 window#shell.compact box.shell-bar {
     padding: 0;
     border-radius: 0 0 12px 0;
-    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
+    box-shadow: 0 1px 6px @shell_shadow_soft;
 }
 
 window#shell.compact box.shell-module {
@@ -286,13 +254,13 @@ button.workspace-button:hover {
 
 button.workspace-button.dragging {
     background-color: @shell_accent_soft;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 4px 14px @shell_shadow;
 }
 
 button.workspace-button.drag-ghost {
     background-color: @shell_accent_soft;
     border: 1px solid @shell_accent;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 6px 18px @shell_shadow;
 }
 
 button.workspace-button.drop-target {
@@ -325,7 +293,7 @@ box.application-icons image {
 
 button.workspace-button.special {
     background-color: @shell_special_soft;
-    border: 1px solid rgba(116, 190, 255, 0.26);
+    border: 1px solid alpha(@shell_special, 0.38);
     border-radius: 8px;
 }
 
@@ -334,7 +302,7 @@ button.workspace-button.special.active {
 }
 
 label.workspace-overflow {
-    color: rgba(255, 255, 255, 0.68);
+    color: @shell_text_secondary;
     font-size: 11px;
     font-weight: 600;
     padding: 0 1px;
@@ -355,8 +323,8 @@ eventbox.workspace-application-icon.focused image {
 button.workspace-button.audio-has-stream {
     background-image: linear-gradient(
         to top,
-        rgba(165, 139, 255, 0.55) 0,
-        rgba(165, 139, 255, 0.55) 3px,
+        alpha(@shell_accent, 0.55) 0,
+        alpha(@shell_accent, 0.55) 3px,
         transparent 3px
     );
 }
@@ -402,7 +370,7 @@ eventbox.active-window-widget {
 }
 
 eventbox.active-window-widget.active-window-media {
-    background-color: rgba(18, 18, 24, 0.90);
+    background-color: @shell_surface_bg_elevated;
 }
 
 box.active-window-header {
@@ -418,21 +386,21 @@ label.active-window-application {
     color: @shell_text_primary;
     font-weight: 600;
     min-width: 0;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.78);
+    text-shadow: 0 1px 3px @shell_shadow_strong;
 }
 
 label.active-window-title {
     color: @shell_text_secondary;
     font-size: 12px;
     min-width: 0;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.72);
+    text-shadow: 0 1px 3px @shell_shadow_strong;
 }
 
 label.active-window-status {
     color: @shell_text_secondary;
     font-size: 11px;
     min-width: 12px;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.72);
+    text-shadow: 0 1px 3px @shell_shadow_strong;
 }
 
 drawingarea.active-window-spectrum {
@@ -463,8 +431,8 @@ button.pinned-app-button:hover {
 button.pinned-app-button.running {
     background-image: linear-gradient(
         to top,
-        rgba(165, 139, 255, 0.55) 0,
-        rgba(165, 139, 255, 0.55) 2px,
+        alpha(@shell_accent, 0.55) 0,
+        alpha(@shell_accent, 0.55) 2px,
         transparent 2px
     );
 }
@@ -530,7 +498,7 @@ flowbox.pinned-apps-overflow-content {
     border: 1px solid @shell_bar_border;
     border-radius: 0 0 14px 14px;
     padding: 6px 8px;
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.32);
+    box-shadow: 0 6px 16px @shell_shadow;
 }
 
 /* ==========================================================================
@@ -544,7 +512,7 @@ window#shell-emoji-picker {
 }
 
 eventbox.launcher-backdrop {
-    background-color: rgba(8, 8, 12, 0.42);
+    background-color: @shell_backdrop;
 }
 
 box.launcher-card {
@@ -552,7 +520,7 @@ box.launcher-card {
     border: 1px solid @shell_border_strong;
     border-radius: 16px;
     padding: 12px;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42);
+    box-shadow: 0 12px 32px @shell_shadow;
 }
 
 box.launcher-search-row {
@@ -654,7 +622,7 @@ box.launcher-action-menu {
     border-radius: 10px;
     padding: 6px;
     min-width: 196px;
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.42);
+    box-shadow: 0 8px 20px @shell_shadow;
 }
 
 button.shell-app-menu-item {
@@ -710,7 +678,7 @@ box.volume-osd-content {
     background-color: @shell_surface_bg_elevated;
     border: 1px solid @shell_border_medium;
     border-radius: 16px;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 6px 18px @shell_shadow;
 }
 
 box.media-popup-content {
@@ -769,7 +737,7 @@ scale.media-popup-progress {
 }
 
 scale.media-popup-progress trough {
-    background-color: rgba(255, 255, 255, 0.14);
+    background-color: @shell_border_medium;
     border-radius: 4px;
     min-height: 4px;
 }
@@ -783,7 +751,7 @@ scale.media-popup-progress slider {
     min-width: 10px;
     min-height: 10px;
     border-radius: 50%;
-    background-color: #ffffff;
+    background-color: @shell_on_accent;
 }
 
 button.media-popup-control {
@@ -869,7 +837,7 @@ button.tasks-button.tasks-watcher-quiet .tasks-icon {
 
 label.tasks-badge {
     background-color: @shell_accent;
-    color: #ffffff;
+    color: @shell_on_accent;
     border-radius: 999px;
     font-size: 9px;
     font-weight: 700;
@@ -888,7 +856,7 @@ box.clock-calendar-content {
     background-color: @shell_surface_bg_panel;
     border: 1px solid @shell_border_strong;
     border-radius: 16px;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 6px 18px @shell_shadow;
 }
 
 box.tasks-popup-content {
@@ -1075,7 +1043,7 @@ box.stats-widget {
 }
 
 box.stats-cpu-bar {
-    background-color: rgba(255, 255, 255, 0.14);
+    background-color: @shell_border_medium;
     border-radius: 6px;
     min-height: 14px;
 }
@@ -1108,10 +1076,10 @@ label.stats-cpu-label {
 }
 
 label.stats-cpu-temperature {
-    color: #ffffff;
+    color: @shell_on_accent;
     font-size: 10px;
     font-weight: 700;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+    text-shadow: 0 1px 2px @shell_shadow_strong;
 }
 
 label.stats-memory-label {
@@ -1244,7 +1212,7 @@ box.workspace-audio-row {
 }
 
 label.audio-stream-name {
-    color: #e0e0e0;
+    color: @shell_text_primary;
     font-size: 12px;
     font-weight: 500;
 }
@@ -1254,7 +1222,7 @@ box.volume-slider {
 }
 
 scale.audio-scale trough {
-    background-color: rgba(255, 255, 255, 0.15);
+    background-color: @shell_border_medium;
     border-radius: 4px;
     min-height: 4px;
 }
@@ -1268,7 +1236,7 @@ scale.audio-scale slider {
     min-width: 10px;
     min-height: 10px;
     border-radius: 50%;
-    background-color: #ffffff;
+    background-color: @shell_on_accent;
     box-shadow: none;
 }
 
@@ -1283,7 +1251,7 @@ box.workspace-panel-content {
 }
 
 label.workspace-panel-header {
-    color: #ffffff;
+    color: @shell_text_primary;
     font-size: 14px;
     font-weight: bold;
     margin-bottom: 4px;
@@ -1398,7 +1366,7 @@ drawingarea.notifications-bell {
 
 label.notifications-badge {
     background-color: @shell_accent;
-    color: #ffffff;
+    color: @shell_on_accent;
     border-radius: 999px;
     font-size: 9px;
     font-weight: 700;
@@ -1417,18 +1385,18 @@ box.notification-popup-content {
         linear,
         left top,
         right bottom,
-        from(rgba(116, 190, 255, 0.16)),
-        color-stop(0.48, rgba(255, 255, 255, 0.035)),
-        to(rgba(116, 190, 255, 0.10))
+        from(alpha(@shell_secondary, 0.16)),
+        color-stop(0.48, alpha(@shell_text_primary, 0.035)),
+        to(alpha(@shell_special, 0.10))
     );
-    border: 1px solid rgba(116, 190, 255, 0.34);
+    border: 1px solid alpha(@shell_secondary, 0.34);
     border-radius: 16px;
     box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.20),
-        inset 1px 0 0 rgba(116, 190, 255, 0.14),
-        inset 0 -1px 0 rgba(116, 190, 255, 0.22),
-        inset -1px 0 0 rgba(255, 255, 255, 0.12),
-        0 6px 18px rgba(0, 0, 0, 0.35);
+        inset 0 1px 0 @shell_glass_highlight,
+        inset 1px 0 0 alpha(@shell_secondary, 0.14),
+        inset 0 -1px 0 alpha(@shell_special, 0.22),
+        inset -1px 0 0 alpha(@shell_text_primary, 0.12),
+        0 6px 18px @shell_shadow;
     min-width: 440px;
 }
 
@@ -1518,7 +1486,7 @@ box.notification-item-low {
 }
 
 box.notification-item-critical {
-    border-color: rgba(255, 95, 95, 0.45);
+    border-color: alpha(@shell_danger, 0.45);
 }
 
 image.notification-item-icon {
@@ -1533,7 +1501,7 @@ label.notification-item-app {
 }
 
 label.notification-item-urgency {
-    color: #ff8a8a;
+    color: @shell_danger;
     font-size: 10px;
     font-weight: 700;
 }
@@ -1544,7 +1512,7 @@ label.notification-item-urgency-low {
 }
 
 label.notification-item-urgency-critical {
-    color: #ff8a8a;
+    color: @shell_danger;
 }
 
 label.notification-item-summary {
@@ -1604,7 +1572,7 @@ box.notification-group-row-unread {
 }
 
 box.notification-group-row-critical {
-    border-color: rgba(255, 95, 95, 0.45);
+    border-color: alpha(@shell_danger, 0.45);
 }
 
 box.notification-group-row-low {
@@ -1629,7 +1597,7 @@ label.notification-group-row-app {
 }
 
 label.notification-group-row-urgency {
-    color: #ff8a8a;
+    color: @shell_danger;
     font-size: 10px;
     font-weight: 700;
 }
@@ -1640,7 +1608,7 @@ label.notification-group-row-urgency-low {
 }
 
 label.notification-group-row-urgency-critical {
-    color: #ff8a8a;
+    color: @shell_danger;
 }
 
 label.notification-group-row-summary {
@@ -1671,8 +1639,8 @@ box.notification-group-window-content {
     border-radius: 14px;
     padding: 8px;
     box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.12),
-        0 8px 24px rgba(0, 0, 0, 0.50);
+        inset 0 1px 0 @shell_glass_highlight,
+        0 8px 24px @shell_shadow;
 }
 
 box.notification-group-window-list {
@@ -1734,21 +1702,21 @@ box.notification-toast-content {
     border-radius: 14px;
     padding: 12px 14px;
     box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.12),
-        0 8px 24px rgba(0, 0, 0, 0.50);
+        inset 0 1px 0 @shell_glass_highlight,
+        0 8px 24px @shell_shadow;
 }
 
 .notification-toast-content:hover,
 .notification-toast-card:hover {
-    border-color: rgba(255, 255, 255, 0.28);
+    border-color: @shell_border_strong;
 }
 
 .notification-toast-critical,
 box.notification-toast-critical {
-    border: 1px solid rgba(255, 95, 95, 0.70);
+    border: 1px solid alpha(@shell_danger, 0.70);
     box-shadow:
-        inset 0 1px 0 rgba(255, 95, 95, 0.40),
-        0 8px 24px rgba(255, 50, 50, 0.28);
+        inset 0 1px 0 alpha(@shell_danger, 0.40),
+        0 8px 24px alpha(@shell_danger, 0.28);
 }
 
 .notification-toast-low,
@@ -1773,17 +1741,17 @@ label.notification-toast-app {
 }
 
 label.notification-toast-urgency {
-    color: #ff8a8a;
+    color: @shell_danger;
     font-size: 10px;
     font-weight: 700;
     padding: 1px 5px;
     border-radius: 4px;
-    background-color: rgba(255, 95, 95, 0.18);
+    background-color: alpha(@shell_danger, 0.18);
 }
 
 label.notification-toast-urgency-critical {
-    color: #ff8a8a;
-    background-color: rgba(255, 95, 95, 0.22);
+    color: @shell_danger;
+    background-color: alpha(@shell_danger, 0.22);
 }
 
 label.notification-toast-urgency-low {
@@ -1838,7 +1806,7 @@ button.notification-toast-action-btn {
 button.notification-toast-action-btn:hover {
     background-color: @shell_hover_bg;
     border-color: @shell_border_strong;
-    color: #ffffff;
+    color: @shell_text_primary;
 }
 
 window#shell-power-menu,
@@ -1908,13 +1876,13 @@ button.power-confirm-action {
 }
 
 button.power-confirm-action-destructive {
-    background-color: rgba(255, 95, 95, 0.18);
-    border-color: rgba(255, 95, 95, 0.35);
+    background-color: alpha(@shell_danger, 0.18);
+    border-color: alpha(@shell_danger, 0.35);
     color: @shell_temp_hot;
 }
 
 button.power-confirm-action-destructive:hover {
-    background-color: rgba(255, 95, 95, 0.28);
+    background-color: alpha(@shell_danger, 0.28);
 }
 
 
@@ -1994,7 +1962,7 @@ button.control-center-action:active {
 }
 
 switch {
-    background-color: rgba(255, 255, 255, 0.12);
+    background-color: @shell_border_medium;
     border-radius: 12px;
     min-width: 40px;
     min-height: 22px;
@@ -2005,7 +1973,7 @@ switch:checked {
 }
 
 switch slider {
-    background-color: #ffffff;
+    background-color: @shell_on_accent;
     border-radius: 50%;
     min-width: 18px;
     min-height: 18px;
@@ -2060,7 +2028,7 @@ eventbox.tray-item:hover {
 }
 
 eventbox.tray-item-attention {
-    background-color: rgba(255, 95, 95, 0.12);
+    background-color: alpha(@shell_danger, 0.12);
 }
 
 menu.tray-menu {

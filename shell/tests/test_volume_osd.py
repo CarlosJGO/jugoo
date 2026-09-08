@@ -42,8 +42,8 @@ def test_popup_outside_dismiss_grace_remains_500() -> None:
     assert POPUP_OUTSIDE_DISMISS_GRACE_MS == 500
 
 
-def test_volume_osd_hide_delay_is_200() -> None:
-    assert VOLUME_OSD_HIDE_DELAY_MS == 200
+def test_volume_osd_hide_delay_is_1200() -> None:
+    assert VOLUME_OSD_HIDE_DELAY_MS == 1200
 
 
 def test_friendly_device_description_skips_null() -> None:
@@ -211,7 +211,7 @@ def test_controller_does_not_show_on_baseline_start() -> None:
 
 if __name__ == "__main__":
     test_popup_outside_dismiss_grace_remains_500()
-    test_volume_osd_hide_delay_is_200()
+    test_volume_osd_hide_delay_is_1200()
     test_friendly_device_description_skips_null()
     test_build_system_volume_state_from_default_sink()
     test_volume_osd_headline_and_mute()

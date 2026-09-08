@@ -180,3 +180,18 @@ Pero sí tenía que ser mío.
 **Significado:** JGO + Universe + Orbit
 
 **Idea central:** Construir mi propio universo y encontrar mi propia órbita
+
+## Tema visual
+
+Jugoo usa un tema semántico centralizado. El tema predeterminado está en
+[`themes/space.toml`](themes/space.toml): colores, opacidad, blur, radios y
+animaciones se cambian allí, sin editar widgets individuales.
+
+Con la shell abierta, guarda el TOML para recargarlo automáticamente o ejecuta:
+
+```sh
+jugoo --reload-theme
+```
+
+El mismo tema genera `~/.config/hypr/config/jugoo_theme_generated.lua`, de modo
+que bordes, grupos, blur y opacidad de Hyprland mantienen la misma identidad.

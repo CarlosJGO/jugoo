@@ -15,7 +15,12 @@ gi.require_version("GtkLayerShell", "0.1")
 
 from gi.repository import Gdk, Gio, GLib, Gtk, GtkLayerShell
 
-from .config import PERSISTENT_WORKSPACES, TOP_MARGIN
+from .config import (
+    ACTIVE_THEME,
+    HYPRLAND_THEME_EXPORT_PATH,
+    PERSISTENT_WORKSPACES,
+    TOP_MARGIN,
+)
 from .controllers.applications import ApplicationsController
 from .controllers.control_center import ControlCenterController
 from .controllers.pickers import PickersController
@@ -24,6 +29,7 @@ from .controllers.shell_compact import ShellCompactController
 from .controllers.volume_osd import VolumeOsdController
 from .controllers.workspace_interaction import WorkspaceInteractionController
 from .eventbus import EventBus
+from .identity import project_root
 from .layout import ShellLayout
 from .servicios.aplicaciones.applications import ApplicationsService
 from .servicios.portapapeles.servicio import ClipboardService
@@ -50,6 +56,7 @@ from .widgets.barra.stats import StatsWidget
 from .widgets.barra.tasks import TasksWidget
 from .widgets.barra.tray import SystemTrayWidget
 from .widgets.barra.workspace import WorkspaceWidget
+from .ui.theme import ThemeManager
 from .window_identity import APPLICATION_ID, TITLE_BAR, configure_toplevel, init_window_identity
 
 APP_ID = "shell"
@@ -73,6 +80,14 @@ class ShellApplication(Gtk.Window):
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
         self.set_application(application)
         self.event_bus = EventBus(dispatch_on_main=True)
+        root = project_root()
+        self.theme_manager = ThemeManager(
+            self.event_bus,
+            themes_dir=root / "themes",
+            structural_css_path=Path(__file__).with_name("style.css"),
+            active_name=ACTIVE_THEME,
+            hypr_export_path=Path(HYPRLAND_THEME_EXPORT_PATH).expanduser(),
+        )
         self.hyprland = HyprlandService(self.event_bus, PERSISTENT_WORKSPACES)
         self.applications = ApplicationsService(self.event_bus)
         self.clipboard_service = ClipboardService(self.event_bus)
@@ -93,6 +108,7 @@ class ShellApplication(Gtk.Window):
             self.event_bus,
             self.media_service,
             self.audio_service,
+            self.theme_manager,
         )
 
         self.set_name(APP_ID)
@@ -103,7 +119,7 @@ class ShellApplication(Gtk.Window):
         # falls back to the natural size, leaving the bar short of the edges.
         self.set_resizable(True)
         self._configure_layer_shell()
-        self._load_css()
+        self.theme_manager.start()
 
         self.layout = ShellLayout()
         monitor = _gdk_monitor()
@@ -251,6 +267,9 @@ class ShellApplication(Gtk.Window):
     def open_tasks_panel(self) -> None:
         self.tasks_service.request_panel()
 
+    def reload_theme(self) -> None:
+        self.theme_manager.reload_current()
+
     def _ensure_task_watcher(self) -> bool:
         ensure_task_watcher_service()
         return False
@@ -269,16 +288,9 @@ class ShellApplication(Gtk.Window):
         GtkLayerShell.auto_exclusive_zone_enable(self)
         GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.NONE)
 
-    @staticmethod
-    def _load_css() -> None:
-        provider = Gtk.CssProvider()
-        provider.load_from_path(str(Path(__file__).with_name("style.css")))
-        Gtk.StyleContext.add_provider_for_screen(
-            Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-        )
-
     def _on_destroy(self, *_args) -> None:
         # No service may enqueue UI work once destruction starts.
+        self.theme_manager.close()
         self.event_bus.close()
         self.volume_osd_controller.close()
         self.audio_service.close()
@@ -320,6 +332,9 @@ class ShellGtkApplication(Gtk.Application):
         open_tasks = Gio.SimpleAction.new("open-tasks", None)
         open_tasks.connect("activate", self._on_open_tasks_action)
         self.add_action(open_tasks)
+        reload_theme = Gio.SimpleAction.new("reload-theme", None)
+        reload_theme.connect("activate", self._on_reload_theme_action)
+        self.add_action(reload_theme)
 
     def do_activate(self) -> None:
         if self._shell_window is None:
@@ -336,6 +351,8 @@ class ShellGtkApplication(Gtk.Application):
             self._toggle_emoji()
         if "--open-tasks" in arguments[1:]:
             self._open_tasks_panel()
+        if "--reload-theme" in arguments[1:]:
+            self._reload_theme()
         return 0
 
     def _on_toggle_launcher_action(self, *_args) -> None:
@@ -354,6 +371,10 @@ class ShellGtkApplication(Gtk.Application):
         self.activate()
         self._open_tasks_panel()
 
+    def _on_reload_theme_action(self, *_args) -> None:
+        self.activate()
+        self._reload_theme()
+
     def _toggle_launcher(self) -> None:
         if self._shell_window is not None:
             self._shell_window.toggle_launcher()
@@ -369,6 +390,10 @@ class ShellGtkApplication(Gtk.Application):
     def _open_tasks_panel(self) -> None:
         if self._shell_window is not None:
             self._shell_window.open_tasks_panel()
+
+    def _reload_theme(self) -> None:
+        if self._shell_window is not None:
+            self._shell_window.reload_theme()
 
 
 def main() -> None:

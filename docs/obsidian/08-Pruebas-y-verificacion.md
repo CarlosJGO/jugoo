@@ -15,7 +15,7 @@ Las verificaciones están en [`shell/tests/`](../../shell/tests/). Hay cobertura
 Para ejecutar una prueba directa que no requiera pytest:
 
 ```sh
-python3 shell/tests/test_power_safe.py
+PYTHONPATH=. python3 shell/tests/test_power_safe.py
 ```
 
 Para una colección con pytest, si está instalado:
@@ -23,6 +23,26 @@ Para una colección con pytest, si está instalado:
 ```sh
 python3 -m pytest shell/tests
 ```
+
+## Tema
+
+La prueba focalizada valida el contrato TOML, ausencia de paletas en el CSS
+estructural, parseo GTK3 y exportación Lua:
+
+```sh
+PYTHONPATH=. python3 shell/tests/test_theme.py
+```
+
+Después de editar el tema:
+
+```sh
+jugoo --reload-theme
+hyprctl getoption general:col:active_border
+```
+
+Comprueba barra normal y compacta, launcher, clipboard, emoji, media, tareas,
+RAM, notificaciones, centro de control, power menu y OSD. Un TOML inválido debe
+mostrar un error en la salida de Jugoo y conservar el último tema válido.
 
 ## Antes y después de tocar GPU
 

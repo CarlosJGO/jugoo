@@ -24,6 +24,7 @@ from ...config import (
 )
 from ...eventbus import EventBus
 from ...models import AudioSnapshot, AudioVisualizerSnapshot, MediaSnapshot
+from ...ui.theme import THEME_CHANGED, Theme, ThemeManager, color_to_rgb
 from .audio import AUDIO_CHANGED, AudioService
 from .audio_levels import (
     bars_have_energy,
@@ -52,10 +53,13 @@ class AudioVisualizerService:
         event_bus: EventBus,
         media_service: MediaService,
         audio_service: AudioService,
+        theme_manager: ThemeManager | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._media_service = media_service
         self._audio_service = audio_service
+        self._theme_manager = theme_manager
+        self._spectrum_palette: tuple[tuple[float, float, float], ...] | None = None
         self._snapshot = AudioVisualizerSnapshot.hidden(AUDIO_VISUALIZER_BAR_COUNT)
         self._bars = empty_bars(AUDIO_VISUALIZER_BAR_COUNT)
         self._peaks = empty_bars(AUDIO_VISUALIZER_BAR_COUNT)
@@ -72,18 +76,27 @@ class AudioVisualizerService:
 
         self._event_bus.subscribe(MEDIA_CHANGED, self._on_media_changed, on_main=False)
         self._event_bus.subscribe(AUDIO_CHANGED, self._on_audio_changed, on_main=False)
+        self._event_bus.subscribe(THEME_CHANGED, self._on_theme_changed, on_main=False)
 
     @property
     def snapshot(self) -> AudioVisualizerSnapshot:
         return self._snapshot
 
     def start(self) -> None:
+        if self._theme_manager is not None:
+            self._on_theme_changed(self._theme_manager.theme)
         self._sync_sampling(force=True)
 
     def close(self) -> None:
         self._event_bus.unsubscribe(MEDIA_CHANGED, self._on_media_changed)
         self._event_bus.unsubscribe(AUDIO_CHANGED, self._on_audio_changed)
+        self._event_bus.unsubscribe(THEME_CHANGED, self._on_theme_changed)
         self._stop_sampling()
+
+    def _on_theme_changed(self, theme: Theme) -> None:
+        palette = tuple(color_to_rgb(color) for color in theme.spectrum_palette)
+        with self._state_lock:
+            self._spectrum_palette = palette
 
     def _on_media_changed(self, _media_snapshot: MediaSnapshot) -> None:
         self._handle_target_or_sampling_changed()
@@ -196,6 +209,7 @@ class AudioVisualizerService:
                     previous_bars=self._bars,
                     previous_peaks=self._peaks,
                     sample_rate=AUDIO_VISUALIZER_PCM_RATE,
+                    palette=self._spectrum_palette,
                 )
                 bars = tuple(self._bars)
                 target = self._monitor_target
@@ -256,6 +270,7 @@ class AudioVisualizerService:
                 previous_bars=self._bars,
                 previous_peaks=self._peaks,
                 sample_rate=AUDIO_VISUALIZER_PCM_RATE,
+                palette=self._spectrum_palette,
             )
             exhausted = not self._sampler_enabled and not bars_have_energy(self._bars)
             if exhausted:

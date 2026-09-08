@@ -13,6 +13,7 @@ from ...config import (
     NOTIFICATION_POPUP_OFFSET,
     NOTIFICATIONS_TOAST_WIDTH,
 )
+from ...ui.theme import active_theme
 from ...window_identity import (
     TITLE_NOTIFICATION_TOAST,
     anchor_button_geometry,
@@ -27,7 +28,15 @@ from ...window_identity import (
 from .notification_toast import NotificationToast
 
 _FADE_TICK_MS = 16
-_FADE_STEP = 0.20
+
+
+def _fade_step() -> float:
+    theme = active_theme()
+    if theme is None:
+        return 0.20
+    if not theme.animation.enabled or theme.animation.duration <= _FADE_TICK_MS:
+        return 1.0
+    return min(1.0, _FADE_TICK_MS / theme.animation.duration)
 
 
 class NotificationToastLayer(Gtk.Window):
@@ -99,6 +108,13 @@ class NotificationToastLayer(Gtk.Window):
             self._position_later()
             return
         self._cancel_fade()
+        theme = active_theme()
+        if theme is not None and not theme.animation.enabled:
+            self.set_opacity(1.0)
+            self.show()
+            self._box.show()
+            self._position_later()
+            return
         self.set_opacity(0.0)
         self.show()
         self._box.show()
@@ -109,6 +125,11 @@ class NotificationToastLayer(Gtk.Window):
         self._anchor_button = None
         self._cancel_fade()
         if not self.get_visible():
+            self.hide()
+            self.set_opacity(1.0)
+            return
+        theme = active_theme()
+        if theme is not None and not theme.animation.enabled:
             self.hide()
             self.set_opacity(1.0)
             return
@@ -151,7 +172,7 @@ class NotificationToastLayer(Gtk.Window):
         return False
 
     def _fade_in_tick(self) -> bool:
-        opacity = min(1.0, self.get_opacity() + _FADE_STEP)
+        opacity = min(1.0, self.get_opacity() + _fade_step())
         self.set_opacity(opacity)
         if opacity >= 1.0:
             self._fade_source_id = 0
@@ -159,7 +180,7 @@ class NotificationToastLayer(Gtk.Window):
         return True
 
     def _fade_out_tick(self) -> bool:
-        opacity = max(0.0, self.get_opacity() - _FADE_STEP)
+        opacity = max(0.0, self.get_opacity() - _fade_step())
         self.set_opacity(opacity)
         if opacity <= 0.02:
             self._fade_source_id = 0

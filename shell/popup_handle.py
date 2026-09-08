@@ -14,11 +14,20 @@ from gi.repository import Gdk, GLib, Gtk
 from .config import POPUP_OUTSIDE_DISMISS_GRACE_MS
 from .models import ActiveWindow
 from .servicios.escritorio.hyprland import ACTIVE_WINDOW_CHANGED
+from .ui.theme import active_theme
 
 T = TypeVar("T", bound=Gtk.Window)
 
 _POPUP_FADE_TICK_MS = 16
-_POPUP_FADE_STEP = 0.20
+
+
+def _popup_fade_step() -> float:
+    theme = active_theme()
+    if theme is None:
+        return 0.20
+    if not theme.animation.enabled or theme.animation.duration <= _POPUP_FADE_TICK_MS:
+        return 1.0
+    return min(1.0, _POPUP_FADE_TICK_MS / theme.animation.duration)
 
 
 def _cancel_popup_fade(window: Gtk.Window) -> None:
@@ -29,7 +38,7 @@ def _cancel_popup_fade(window: Gtk.Window) -> None:
 
 
 def _fade_in_tick(window: Gtk.Window) -> bool:
-    next_opacity = min(1.0, window.get_opacity() + _POPUP_FADE_STEP)
+    next_opacity = min(1.0, window.get_opacity() + _popup_fade_step())
     window.set_opacity(next_opacity)
     if next_opacity >= 1.0:
         setattr(window, "_shell_fade_source_id", 0)
@@ -38,7 +47,7 @@ def _fade_in_tick(window: Gtk.Window) -> bool:
 
 
 def _fade_out_tick(window: Gtk.Window) -> bool:
-    next_opacity = max(0.0, window.get_opacity() - _POPUP_FADE_STEP)
+    next_opacity = max(0.0, window.get_opacity() - _popup_fade_step())
     window.set_opacity(next_opacity)
     if next_opacity <= 0.02:
         setattr(window, "_shell_fade_source_id", 0)
@@ -59,6 +68,12 @@ def present_popup(window: Gtk.Window) -> None:
     if window.get_visible():
         window.set_opacity(1.0)
         return
+    theme = active_theme()
+    if theme is not None and not theme.animation.enabled:
+        window.set_opacity(1.0)
+        window.show_all()
+        window.present()
+        return
     window.set_opacity(0.0)
     window.show_all()
     window.present()
@@ -70,6 +85,11 @@ def hide_popup(window: Gtk.Window) -> None:
     """Hide a popup with a short opacity fade."""
     _cancel_popup_fade(window)
     if not window.get_visible():
+        window.hide()
+        window.set_opacity(1.0)
+        return
+    theme = active_theme()
+    if theme is not None and not theme.animation.enabled:
         window.hide()
         window.set_opacity(1.0)
         return

@@ -344,8 +344,8 @@ class StatsWidget(ShellModule):
         section.pack_start(self._memory_value_label, False, False, 0)
         anchor = Gtk.EventBox()
         anchor.set_visible_window(False)
-        anchor.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK)
-        anchor.connect("enter-notify-event", self._on_memory_enter)
+        anchor.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+        anchor.connect("button-press-event", self._on_memory_press)
         anchor.add(section)
         self._memory_section = anchor
         return anchor
@@ -395,9 +395,15 @@ class StatsWidget(ShellModule):
         if popup is not None and popup.get_visible():
             popup.open_for(self._memory_section, stats)
 
-    def _on_memory_enter(self, _widget: Gtk.Widget, _event: object) -> bool:
-        self._popup.get().open_for(self._memory_section, self._stats_service.read())
-        return False
+    def _on_memory_press(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
+        if event.button != 1:
+            return False
+        popup = self._popup.get()
+        if popup.get_visible():
+            self._close_memory_popup()
+        else:
+            popup.open_for(self._memory_section, self._stats_service.read())
+        return True
 
     def _close_memory_popup(self) -> None:
         popup = self._popup.maybe

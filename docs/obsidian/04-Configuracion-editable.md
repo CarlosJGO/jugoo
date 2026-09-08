@@ -19,7 +19,25 @@
 
 ## CSS
 
-Usa [`shell/style.css`](../../shell/style.css) para apariencia del shell propio. Los tokens están al principio y las reglas están agrupadas por módulo. Para el monitor busca `stats-gpu` o `stats-gpu-fan`.
+La apariencia se define en [`themes/space.toml`](../../themes/space.toml).
+`[colors]` contiene roles semánticos; `[effects]`, `[shape]` y `[animation]`
+controlan opacidad/blur, radios y fades.
+
+[`shell/style.css`](../../shell/style.css) solo contiene selectores y estructura.
+No agregues colores literales allí ni en widgets. Para crear otro tema, copia
+`space.toml`, cambia sus valores y selecciona el nombre con `ACTIVE_THEME` en
+[`shell/config.py`](../../shell/config.py).
+
+El archivo activo se vigila y recarga al guardarlo. También se puede forzar:
+
+```sh
+jugoo --reload-theme
+```
+
+Una recarga válida regenera
+`~/.config/hypr/config/jugoo_theme_generated.lua` y ejecuta `hyprctl reload`.
+La línea que aplica ese archivo debe permanecer al final de
+`~/.config/hypr/hyprland.lua`, después de Noctalia.
 
 
 ## Fuentes externas
