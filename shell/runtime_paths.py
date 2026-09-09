@@ -38,6 +38,11 @@ def tasks_path() -> Path:
     return xdg_data_dir() / TASKS_PATH
 
 
+def briefing_path() -> Path:
+    """Last startup briefing message (single entry, next to tasks.json)."""
+    return xdg_data_dir() / "briefing.json"
+
+
 def clipboard_history_path() -> Path:
     return xdg_data_dir() / CLIPBOARD_HISTORY_PATH
 

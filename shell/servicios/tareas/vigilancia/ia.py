@@ -38,26 +38,47 @@ _MAX_OUTPUT_CHARS = 180
 
 _MAX_OUTPUT_WORDS = 28
 
-_BRIEFING_OUTPUT_CHARS = 280
+_BRIEFING_OUTPUT_CHARS = 320
 
-_BRIEFING_OUTPUT_WORDS = 48
+_BRIEFING_OUTPUT_WORDS = 64
 
 _REMINDER_SYSTEM_PROMPT = "Responde con una sola frase breve en español. Sin explicaciones."
 
 _BRIEFING_SYSTEM_PROMPT = (
-    "Eres la voz de Jugoo, un asistente de escritorio cercano al usuario. "
-    "Hablas de forma natural, relajada y ocasionalmente juguetona, como un "
-    "compañero de escritorio, no como una aplicación corporativa. "
-    "Puedes variar la redacción y usar pequeñas expresiones coloquiales o "
-    "un emoji cuando encaje, pero no fuerces humor en cada mensaje. "
-    "Tu trabajo es únicamente convertir el estado de tareas recibido en una "
-    "notificación breve. Los datos son hechos ya calculados por Jugoo: no "
-    "debes deducir, modificar ni inventar estados, tareas o fechas. "
-    "No ofrezcas recordatorios, no hagas preguntas, no sugieras usar otras "
-    "aplicaciones y no inventes capacidades. No expliques tu proceso ni "
-    "menciones que eres una IA. "
-    "Responde únicamente con la notificación final, en una o dos frases "
-    "breves en español."
+    "Eres el asistente de escritorio de Jugoo.\n\n"
+    "Tu trabajo es observar el estado actual de las tareas del usuario y escribir "
+    "un breve comentario natural sobre cómo está su día.\n\n"
+    "No eres un lector de archivos. No tienes acceso al sistema. No puedes "
+    "consultar información adicional. Todo lo que necesitas está incluido en el "
+    "contexto proporcionado.\n\n"
+    "Tu respuesta debe sentirse como un pequeño comentario de un asistente que "
+    "está pendiente de lo que ocurre en el escritorio, no como una lista "
+    "automática de datos.\n\n"
+    "REGLAS:\n"
+    "- No te limites a repetir la lista de tareas ni a decir solo 'tienes X tareas'.\n"
+    "- Interpreta el estado recibido y comenta lo relevante.\n"
+    "- Si un título o descripción es claro, puedes reaccionar a su contenido de "
+    "forma natural, sin inventar detalles que no aparezcan ahí.\n"
+    "- Puedes señalar qué merece atención primero cuando la prioridad se "
+    "desprenda claramente de fechas o estados.\n"
+    "- Puedes notar si el usuario avanzó respecto al briefing anterior.\n"
+    "- Si no hubo cambios, puedes reconocerlo ocasionalmente.\n"
+    "- Si una tarea sigue pendiente desde el briefing anterior, puedes hacer una "
+    "referencia natural.\n"
+    "- Humor ligero ocasional está bien; no fuerces un chiste en cada mensaje.\n"
+    "- Sé relajado y ligeramente juguetón, no excesivamente entusiasta ni "
+    "motivacional genérico.\n"
+    "- No felicites al usuario por cosas que no hizo.\n"
+    "- No inventes emociones, circunstancias, eventos ni información ausente.\n"
+    "- No inventes prioridades que no puedan deducirse de los datos.\n"
+    "- No repitas exactamente la misma frase o estructura del mensaje anterior.\n"
+    "- El mensaje anterior sirve para evitar repeticiones y mantener continuidad; "
+    "NO tienes que mencionarlo.\n"
+    "- No digas que eres una IA ni menciones prompts, archivos, Python o llama-cli.\n"
+    "- No enumeres obligatoriamente todas las tareas.\n"
+    "- No empieces siempre de la misma manera; varía estructura y tono.\n"
+    "- Mantén la respuesta breve: normalmente 1 a 3 frases.\n"
+    "- Escribe únicamente el mensaje que verá el usuario."
 )
 
 _META_PATTERNS = (
@@ -337,11 +358,53 @@ def validate_ai_output(
 
 ) -> str | None:
 
+    text, _reason = validate_ai_output_with_reason(
+
+        raw,
+
+        max_chars=max_chars,
+
+        max_words=max_words,
+
+        max_lines=max_lines,
+
+        join_lines=join_lines,
+
+    )
+
+    return text
+
+
+
+def validate_ai_output_with_reason(
+
+    raw: str,
+
+    *,
+
+    max_chars: int = _MAX_OUTPUT_CHARS,
+
+    max_words: int = _MAX_OUTPUT_WORDS,
+
+    max_lines: int = 2,
+
+    join_lines: bool = False,
+
+) -> tuple[str | None, str]:
+
     if not raw or not raw.strip():
 
-        return None
+        return None, "empty_stdout"
+
+    # llama-cli often echoes the prompt and marks truncation; the real reply
+    # starts after the last truncated-prompt marker in the whole stream.
+    if _TRUNCATED_MARKER in raw:
+
+        raw = raw.rsplit(_TRUNCATED_MARKER, 1)[-1]
 
     lines = []
+
+    skipped = 0
 
     for line in raw.splitlines():
 
@@ -349,23 +412,39 @@ def validate_ai_output(
 
         if not stripped:
 
+            skipped += 1
+
             continue
 
         lowered = stripped.casefold()
 
         if any(lowered.startswith(prefix) for prefix in _SKIP_LINE_PREFIXES):
 
+            skipped += 1
+
+            continue
+
+        if lowered.startswith("exiting") or " t/s" in lowered or "token/s" in lowered:
+
+            skipped += 1
+
             continue
 
         if "<|" in stripped or stripped.startswith(">"):
+
+            skipped += 1
 
             continue
 
         if not any(char.isalpha() for char in stripped):
 
+            skipped += 1
+
             continue
 
         if any(pattern.search(stripped) for pattern in _META_PATTERNS):
+
+            skipped += 1
 
             continue
 
@@ -373,7 +452,7 @@ def validate_ai_output(
 
     if not lines:
 
-        return None
+        return None, f"no_usable_lines(skipped={skipped})"
 
     if len(lines) > max(1, int(max_lines)):
 
@@ -383,29 +462,33 @@ def validate_ai_output(
 
         else:
 
-            return None
+            return None, f"too_many_lines:{len(lines)}>{max_lines}"
 
     text = " ".join(lines) if join_lines else lines[0]
 
     if len(text) > max_chars:
 
-        return None
+        return None, f"too_many_chars:{len(text)}>{max_chars}"
 
     words = text.split()
 
-    if not words or len(words) > max_words:
+    if not words:
 
-        return None
+        return None, "empty_after_join"
+
+    if len(words) > max_words:
+
+        return None, f"too_many_words:{len(words)}>{max_words}"
 
     if any(pattern.search(text) for pattern in _META_PATTERNS):
 
-        return None
+        return None, "meta_pattern"
 
     if "\n" in text:
 
-        return None
+        return None, "contains_newline"
 
-    return text
+    return text, "accepted"
 
 
 
@@ -507,6 +590,14 @@ class LocalTextGenerator:
 
         self.last_error: str | None = None
 
+        self.last_stdout: str | None = None
+
+        self.last_stderr: str | None = None
+
+        self.last_returncode: int | None = None
+
+        self.last_argv: list[str] | None = None
+
     def generate(
 
         self,
@@ -526,6 +617,12 @@ class LocalTextGenerator:
         max_output_lines: int = 2,
 
         join_lines: bool = False,
+
+        temperature: float | None = None,
+
+        top_p: float | None = None,
+
+        repeat_penalty: float | None = None,
 
     ) -> str | None:
 
@@ -557,7 +654,21 @@ class LocalTextGenerator:
 
             system_prompt=system_prompt,
 
+            temperature=temperature,
+
+            top_p=top_p,
+
+            repeat_penalty=repeat_penalty,
+
         )
+
+        self.last_argv = list(argv)
+
+        self.last_stdout = None
+
+        self.last_stderr = None
+
+        self.last_returncode = None
 
         try:
 
@@ -577,9 +688,9 @@ class LocalTextGenerator:
 
             )
 
-        except OSError:
+        except OSError as exc:
 
-            self.last_error = "spawn_failed"
+            self.last_error = f"spawn_failed:{exc}"
 
             return None
 
@@ -587,7 +698,7 @@ class LocalTextGenerator:
 
         try:
 
-            stdout, _stderr = proc.communicate(timeout=self._config.ai_timeout_sec)
+            stdout, stderr = proc.communicate(timeout=self._config.ai_timeout_sec)
 
         except subprocess.TimeoutExpired:
 
@@ -595,13 +706,19 @@ class LocalTextGenerator:
 
             self.last_error = "timeout"
 
+            self.last_stdout = ""
+
+            self.last_stderr = "timeout"
+
+            self.last_returncode = None
+
             return None
 
-        except Exception:
+        except Exception as exc:
 
             _kill_process_group(proc)
 
-            self.last_error = "failed"
+            self.last_error = f"failed:{exc}"
 
             return None
 
@@ -613,7 +730,13 @@ class LocalTextGenerator:
 
             self._proc = None
 
-        validated = validate_ai_output(
+        self.last_stdout = stdout or ""
+
+        self.last_stderr = stderr or ""
+
+        self.last_returncode = proc.returncode
+
+        validated, parse_reason = validate_ai_output_with_reason(
 
             stdout or "",
 
@@ -629,11 +752,11 @@ class LocalTextGenerator:
 
         if validated is None:
 
-            self.last_error = "empty" if not (stdout or "").strip() else "invalid"
+            self.last_error = parse_reason or "invalid"
 
-            if proc.returncode not in (0, None):
+            if proc.returncode not in (0, None) and parse_reason not in {"empty_stdout"}:
 
-                self.last_error = f"invalid (exit {proc.returncode})"
+                self.last_error = f"{parse_reason} (exit {proc.returncode})"
 
             return None
 
@@ -667,11 +790,17 @@ class LocalTextGenerator:
 
         system_prompt: str | None = None,
 
+        temperature: float | None = None,
+
+        top_p: float | None = None,
+
+        repeat_penalty: float | None = None,
+
     ) -> list[str]:
 
         tokens = self._config.ai_max_tokens if max_tokens is None else max_tokens
 
-        return [
+        argv = [
 
             binary,
 
@@ -717,11 +846,33 @@ class LocalTextGenerator:
 
             "--no-perf",
 
-            "-p",
-
-            _instruct_prompt(prompt, system_prompt=system_prompt),
-
         ]
+
+        if temperature is not None:
+
+            argv.extend(["--temp", f"{float(temperature):.3f}"])
+
+        if top_p is not None:
+
+            argv.extend(["--top-p", f"{float(top_p):.3f}"])
+
+        if repeat_penalty is not None:
+
+            argv.extend(["--repeat-penalty", f"{float(repeat_penalty):.3f}"])
+
+        argv.extend(
+
+            [
+
+                "-p",
+
+                _instruct_prompt(prompt, system_prompt=system_prompt),
+
+            ]
+
+        )
+
+        return argv
 
 
 
@@ -757,9 +908,15 @@ def generate_briefing_text(
 
         max_output_words=_BRIEFING_OUTPUT_WORDS,
 
-        max_output_lines=2,
+        max_output_lines=3,
 
         join_lines=True,
+
+        temperature=config.briefing_temperature,
+
+        top_p=config.briefing_top_p,
+
+        repeat_penalty=config.briefing_repeat_penalty,
 
     )
 

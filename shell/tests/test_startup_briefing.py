@@ -21,6 +21,7 @@ from shell.servicios.tareas.briefing import (
     collect_briefing_facts,
     fallback_briefing_text,
     facts_from_provider,
+    validate_briefing_output,
 )
 from shell.servicios.tareas.proveedor import LocalTaskProvider
 from shell.servicios.tareas.store import save_tasks
@@ -131,14 +132,14 @@ def test_facts_use_real_task_state_without_ids(tmp_path: Path) -> None:
     assert "Estudiar X" in facts.pending_titles
     assert facts.overdue_titles == ("Pagar luz",)
     prompt = build_briefing_prompt(facts)
-    assert "tareas pendientes hoy: 2" in prompt
-    assert "tareas vencidas: 1" in prompt
+    assert "Tareas para hoy: 2" in prompt
+    assert "Tareas vencidas: 1" in prompt
     assert "Estudiar X" in prompt
     assert "Pagar luz" in prompt
+    assert "vencida" in prompt
     assert prompt.count("Estudiar X") == 1
     assert "Estudiar X (" not in prompt
-    assert "No muestres fechas" in prompt
-    assert "Hola, ¿cómo te va?" in prompt
+    assert "MENSAJE ANTERIOR DEL ASISTENTE" in prompt
     assert "secret-id" not in prompt
     assert "other-id" not in prompt
     assert "tasks.json" not in prompt
@@ -157,11 +158,12 @@ def test_empty_board_still_asks_llama(tmp_path: Path) -> None:
         generator=generator,
         config=_config(tmp_path),
         which=lambda _name: "llama-cli",
+        memory_path=tmp_path / "briefing.json",
     )
     assert briefing.run() == "ai"
     assert generator.calls == 1
-    assert "tareas pendientes hoy: 0" in generator.prompts[0]
-    assert "tareas vencidas: 0" in generator.prompts[0]
+    assert "Tareas para hoy: 0" in generator.prompts[0]
+    assert "Tareas vencidas: 0" in generator.prompts[0]
     assert bodies == ["Todo tranquilo. No tienes nada pendiente."]
     assert bodies[0] != fallback_briefing_text(facts_from_provider(LocalTaskProvider(path)))
 
@@ -179,10 +181,11 @@ def test_briefing_with_tasks_passes_summary(tmp_path: Path) -> None:
         generator=generator,
         config=_config(tmp_path),
         which=lambda _name: "llama-cli",
+        memory_path=tmp_path / "briefing.json",
     )
     assert briefing.run() == "ai"
     assert "Estudiar X" in generator.prompts[0]
-    assert "tareas pendientes hoy: 1" in generator.prompts[0]
+    assert "Tareas para hoy: 1" in generator.prompts[0]
     assert bodies[0].startswith("Hey.")
 
 
@@ -482,6 +485,33 @@ def test_validate_strips_truncated_prompt_echo() -> None:
     assert not text.startswith("Dejar de proyectarse Hola")
 
 
+def test_validate_keeps_only_reply_after_cli_truncated_marker() -> None:
+    """Regression: echoed ChatML + banner used to exceed max_chars and force fallback."""
+    raw = (
+        "Loading model...\n"
+        "build      : b10809\n"
+        "> <|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+        "Eres el asistente de escritorio de Jugoo.\n"
+        "ESTADO ACTUAL:\nTareas para hoy: 2\n"
+        "está pendiente  ... (truncated)\n"
+        '"Hoy toca dejar de proyectarse, pero sin drama."\n\n'
+        "[ Prompt: 200 t/s | Generation: 30 t/s ]\n"
+        "Exiting...\n"
+    )
+    text = validate_ai_output(
+        raw,
+        max_chars=320,
+        max_words=64,
+        max_lines=3,
+        join_lines=True,
+    )
+    assert text is not None
+    assert "dejar de proyectarse" in text.casefold()
+    assert "ESTADO ACTUAL" not in text
+    assert "Eres el asistente" not in text
+    assert len(text) < 200
+
+
 def test_validate_strips_title_before_buenos_dias() -> None:
     text = validate_ai_output(
         "Dejar de proyectarse Buenos días, tienes una tarea para hoy.",
@@ -602,7 +632,7 @@ def test_daily_recurrence_hint_is_included() -> None:
                 TaskSnapshot(
                     id="water",
                     title="Agua",
-                    notes="ignored",
+                    notes="Beber un vaso",
                     repeat=TASK_REPEAT_DAILY,
                     due_date=None,
                     month_day=today.day,
@@ -617,8 +647,9 @@ def test_daily_recurrence_hint_is_included() -> None:
         )
     )
     prompt = build_briefing_prompt(facts)
-    assert "recurrencia: cada día" in prompt
-    assert "ignored" not in prompt
+    assert "hoy (cada día)" in prompt
+    assert "Beber un vaso" in prompt
+    assert "water" not in prompt
 
 
 def test_briefing_prompt_does_not_format_task_as_title_and_date() -> None:
@@ -646,8 +677,131 @@ def test_briefing_prompt_does_not_format_task_as_title_and_date() -> None:
     )
     prompt = build_briefing_prompt(facts)
     assert "Dejar de proyectarse (" not in prompt
-    assert "No muestres fechas" in prompt
-    assert "no uses una charla genérica" in prompt
+    assert "TAREAS RELEVANTES" in prompt
+    assert "TAREA MÁS URGENTE" in prompt
+
+
+def test_briefing_memory_round_trip_and_corrupt_safe(tmp_path: Path) -> None:
+    from shell.servicios.tareas.briefing_memory import (
+        describe_briefing_changes,
+        load_briefing_memory,
+        save_briefing_memory,
+    )
+
+    path = tmp_path / "briefing.json"
+    assert load_briefing_memory(path) is None
+    save_briefing_memory(
+        "Primera pasada. El informe sigue pendiente.",
+        open_ids=("a", "b"),
+        overdue=1,
+        pending_today=2,
+        upcoming=0,
+        path=path,
+    )
+    memory = load_briefing_memory(path)
+    assert memory is not None
+    assert memory.last_message.startswith("Primera pasada")
+    assert memory.open_ids == ("a", "b")
+
+    path.write_text("{not-json", encoding="utf-8")
+    assert load_briefing_memory(path) is None
+
+    changes = describe_briefing_changes(
+        memory,
+        open_ids=("b", "c"),
+        overdue=1,
+        pending_today=1,
+        upcoming=1,
+    )
+    assert "Salieron 1 tarea" in changes
+    assert "Se agregó 1 tarea nueva" in changes
+    assert "1 tarea sigue pendiente" in changes
+
+
+def test_briefing_passes_previous_message_and_replaces_memory(tmp_path: Path) -> None:
+    from shell.servicios.tareas.briefing_memory import load_briefing_memory, save_briefing_memory
+
+    today = date.today()
+    path = tmp_path / "tasks.json"
+    memory_path = tmp_path / "briefing.json"
+    save_tasks(path, (_record("a", "Entregar informe", today - timedelta(days=1)),))
+    save_briefing_memory(
+        "Ese informe sigue ahí esperándote.",
+        open_ids=("a",),
+        overdue=1,
+        pending_today=1,
+        upcoming=0,
+        path=memory_path,
+    )
+    generator = _Generator(
+        "Pues vuelvo y te repito: ese informe vencido sigue pidiendo atención."
+    )
+    briefing = StartupTaskBriefing(
+        provider=LocalTaskProvider(path),
+        notify=lambda _body: None,
+        resource_monitor=_free_resources(),
+        generator=generator,
+        config=_config(tmp_path),
+        which=lambda _name: "llama-cli",
+        memory_path=memory_path,
+    )
+    assert briefing.run() == "ai"
+    prompt = generator.prompts[0]
+    assert "Ese informe sigue ahí esperándote." in prompt
+    assert "MENSAJE ANTERIOR DEL ASISTENTE" in prompt
+    assert "sigue pendiente" in prompt or "No hubo cambios relevantes" in prompt
+    saved = load_briefing_memory(memory_path)
+    assert saved is not None
+    assert "informe vencido" in saved.last_message.casefold()
+    assert saved.last_message != "Ese informe sigue ahí esperándote."
+
+
+def test_briefing_prompt_includes_notes_for_content(tmp_path: Path) -> None:
+    today = date.today()
+    path = tmp_path / "tasks.json"
+    task = TaskRecord(
+        id="n1",
+        title="Entregar informe",
+        notes="Reporte de limpieza del dataset de ventas.",
+        repeat="none",
+        due_date=today.isoformat(),
+        created_at=today.isoformat() + "T08:00:00",
+        period_cursor=today.isoformat(),
+    )
+    save_tasks(path, (task,))
+    facts = facts_from_provider(LocalTaskProvider(path), today=today)
+    prompt = build_briefing_prompt(facts)
+    assert "Entregar informe" in prompt
+    assert "limpieza del dataset de ventas" in prompt
+    assert "n1" not in prompt
+
+
+def test_validate_allows_natural_sentence_starting_with_title() -> None:
+    today = date.today()
+    facts = collect_briefing_facts(
+        TasksSnapshot(
+            today=today.isoformat(),
+            tasks=(
+                TaskSnapshot(
+                    id="task",
+                    title="Dejar de proyectarse",
+                    notes="Es mejor así.",
+                    repeat=TASK_REPEAT_DAILY,
+                    due_date=None,
+                    month_day=today.day,
+                    status=TASK_STATUS_PENDING,
+                    period_key=today.isoformat(),
+                    missed_count=0,
+                    created_at="",
+                    occurrence_date=today.isoformat(),
+                ),
+            ),
+            pending_today_count=1,
+        )
+    )
+    natural = "Dejar de proyectarse sigue ahí para hoy. Mejor no lo arrastres."
+    assert validate_briefing_output(natural, facts) == natural
+    assert validate_briefing_output("Dejar de proyectarse", facts) is None
 
 
 if __name__ == "__main__":

@@ -28,6 +28,9 @@ class WatcherConfig:
     ai_timeout_sec: int = 45
     briefing_enabled: bool = True
     briefing_max_tokens: int = 80
+    briefing_temperature: float = 0.9
+    briefing_top_p: float = 0.92
+    briefing_repeat_penalty: float = 1.12
     ai_ngl: int = 99
     ai_batch_size: int = 64
     ai_threads: int = 4
@@ -61,6 +64,9 @@ class WatcherConfig:
             ai_timeout_sec=int(shell_config.TASK_WATCHER_AI_TIMEOUT_SEC),
             briefing_enabled=bool(shell_config.TASK_STARTUP_BRIEFING_ENABLED),
             briefing_max_tokens=int(shell_config.TASK_STARTUP_BRIEFING_MAX_TOKENS),
+            briefing_temperature=float(shell_config.TASK_STARTUP_BRIEFING_TEMPERATURE),
+            briefing_top_p=float(shell_config.TASK_STARTUP_BRIEFING_TOP_P),
+            briefing_repeat_penalty=float(shell_config.TASK_STARTUP_BRIEFING_REPEAT_PENALTY),
             ai_ngl=int(shell_config.TASK_WATCHER_AI_NGL),
             ai_batch_size=int(shell_config.TASK_WATCHER_AI_BATCH_SIZE),
             ai_threads=int(shell_config.TASK_WATCHER_AI_THREADS),

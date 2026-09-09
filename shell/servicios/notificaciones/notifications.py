@@ -440,6 +440,17 @@ class NotificationService:
             f"Notify id={snapshot.id} app={snapshot.app_name!r} "
             f"summary={snapshot.summary!r}",
         )
+        if snapshot.summary == "Jugoo Tasks":
+            try:
+                from datetime import datetime, timezone
+                from pathlib import Path as _P
+                line = (
+                    f"[Notify {datetime.now(timezone.utc).strftime('%H:%M:%S.%f')[:-3]}] "
+                    f"Jugoo Tasks body={snapshot.body!r} id={snapshot.id}\n"
+                )
+                _P("/tmp/jugoo-briefing-diag.log").open("a", encoding="utf-8").write(line)
+            except Exception:
+                pass
         self._event_bus.emit(NOTIFICATION_RECEIVED, snapshot)
         self._emit_changed()
         return snapshot
