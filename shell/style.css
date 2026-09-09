@@ -541,6 +541,132 @@ box.launcher-card {
     box-shadow: 0 12px 32px @shell_shadow;
 }
 
+/* One shared shell; three sibling columns (not floating cards). */
+box.launcher-card.control-center-shell {
+    background-color: @shell_surface_bg_panel;
+    border: 1px solid @shell_border_strong;
+    border-radius: 16px;
+    padding: 0;
+    box-shadow: 0 12px 32px @shell_shadow;
+}
+
+box.control-center-body {
+    background-color: transparent;
+}
+
+box.control-center-left,
+box.control-center-center,
+box.control-center-right {
+    background-color: transparent;
+    border: 0;
+    border-radius: 0;
+    padding: 14px;
+    box-shadow: none;
+}
+
+box.control-center-left {
+    border-right: 1px solid @shell_border_subtle;
+}
+
+box.control-center-right {
+    border-left: 1px solid @shell_border_subtle;
+}
+
+box.control-center-user-pane {
+    background-color: transparent;
+    border: 0;
+    padding: 0;
+}
+
+scrolledwindow.control-center-user-scroll {
+    background-color: transparent;
+}
+
+scrolledwindow.control-center-user-scroll > viewport {
+    background-color: transparent;
+}
+
+box.control-center-user-body {
+    padding: 4px 2px 8px 2px;
+}
+
+eventbox.control-center-user-avatar-frame,
+eventbox.control-center-machine-image-frame {
+    border-radius: 999px;
+    background-color: @shell_hover_bg_faint;
+}
+
+eventbox.control-center-machine-image-frame {
+    border-radius: 14px;
+}
+
+label.control-center-user-name,
+label.control-center-machine-name {
+    color: @shell_text_primary;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+label.control-center-user-meta {
+    color: @shell_text_secondary;
+    font-size: 11.5px;
+}
+
+separator.control-center-user-separator {
+    background-color: @shell_border_subtle;
+    min-height: 1px;
+    margin: 6px 8px;
+}
+
+label.control-center-user-field-title,
+label.control-center-hw-key {
+    color: @shell_text_secondary;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+label.control-center-user-field-value,
+label.control-center-hw-value {
+    color: @shell_text_primary;
+    font-size: 12px;
+}
+
+box.settings-profile-field-row {
+    background-color: @shell_hover_bg_faint;
+    border-radius: 10px;
+    padding: 6px;
+}
+
+button.settings-browse-button {
+    background-color: @shell_hover_bg_faint;
+    border: 1px solid @shell_border_subtle;
+    border-radius: 8px;
+    padding: 4px 10px;
+    color: @shell_text_primary;
+}
+
+button.settings-browse-button:hover {
+    background-color: @shell_accent_soft;
+}
+
+window#shell-file-chooser,
+window.shell-file-chooser {
+    background-color: transparent;
+}
+
+box.shell-file-chooser-card {
+    min-width: 760px;
+    min-height: 520px;
+}
+
+widget.shell-file-chooser-widget,
+filechooserwidget.shell-file-chooser-widget {
+    background-color: transparent;
+    color: @shell_text_primary;
+}
+
+
 box.launcher-search-row {
     background-color: @shell_hover_bg_faint;
     border: 1px solid @shell_border_subtle;
@@ -564,10 +690,19 @@ label.launcher-empty {
 }
 
 listbox.launcher-list {
+    background-color: transparent;
+    background: transparent;
+}
+
+scrolledwindow.launcher-scroll,
+scrolledwindow.launcher-scroll > viewport {
+    background-color: transparent;
     background: transparent;
 }
 
 row.launcher-row {
+    background-color: transparent;
+    background: transparent;
     border-radius: 10px;
     margin: 2px 0;
     padding: 0;
@@ -1722,7 +1857,8 @@ box.notification-toast-content {
     background-color: @shell_surface_bg_panel;
     border: 1px solid @shell_border_strong;
     border-radius: 14px;
-    padding: 12px 14px;
+    padding: 10px 14px;
+    min-width: 400px;
     box-shadow:
         inset 0 1px 0 @shell_glass_highlight,
         0 8px 24px @shell_shadow;
@@ -1812,7 +1948,8 @@ label.notification-toast-body {
 }
 
 box.notification-toast-actions {
-    padding-top: 4px;
+    padding-top: 2px;
+    min-height: 0;
 }
 
 button.notification-toast-action-btn {

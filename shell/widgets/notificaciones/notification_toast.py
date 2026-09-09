@@ -14,6 +14,7 @@ from gi.repository import Gdk, Gtk, GLib, Pango
 
 from ...config import (
     NOTIFICATION_POPUP_ICON_SIZE,
+    NOTIFICATIONS_TOAST_MAX_HEIGHT,
     NOTIFICATIONS_TOAST_WIDTH,
 )
 from ...models import NotificationSnapshot
@@ -48,6 +49,8 @@ class NotificationToast(Gtk.EventBox):
         self.set_name("shell-notification-toast")
         self.set_can_focus(False)
         self.set_focus_on_click(False)
+        # Width fixed; height stays natural and is capped in preferred-size overrides.
+        self.set_size_request(NOTIFICATIONS_TOAST_WIDTH, -1)
         self.add_events(
             Gdk.EventMask.ENTER_NOTIFY_MASK
             | Gdk.EventMask.LEAVE_NOTIFY_MASK
@@ -58,7 +61,6 @@ class NotificationToast(Gtk.EventBox):
         self.connect("enter-notify-event", self._on_enter_notify)
         self.connect("leave-notify-event", self._on_leave_notify)
 
-        # Outer card container
         self._card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self._card.set_size_request(NOTIFICATIONS_TOAST_WIDTH, -1)
         card_style = self._card.get_style_context()
@@ -66,7 +68,6 @@ class NotificationToast(Gtk.EventBox):
         card_style.add_class("notification-toast-card")
         self.add(dress_content(WindowRole.NOTIFICATION_TOAST, self._card))
 
-        # Header: Icon + App title / Urgency + Close button
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         header.get_style_context().add_class("notification-toast-header")
 
@@ -87,7 +88,9 @@ class NotificationToast(Gtk.EventBox):
 
         self._app_label = Gtk.Label(xalign=0)
         self._app_label.get_style_context().add_class("notification-toast-app")
-        meta_box.pack_start(self._app_label, False, False, 0)
+        self._app_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self._app_label.set_single_line_mode(True)
+        meta_box.pack_start(self._app_label, True, True, 0)
 
         self._urgency_badge = Gtk.Label(xalign=0)
         self._urgency_badge.get_style_context().add_class("notification-toast-urgency")
@@ -105,7 +108,6 @@ class NotificationToast(Gtk.EventBox):
         header.pack_start(self._close_button, False, False, 0)
         self._card.pack_start(header, False, False, 0)
 
-        # Body: Summary + Detail text
         content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         content_box.get_style_context().add_class("notification-toast-body-box")
 
@@ -123,16 +125,25 @@ class NotificationToast(Gtk.EventBox):
         self._body.set_hexpand(True)
         self._body.set_line_wrap(True)
         self._body.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        self._body.set_lines(4)
+        self._body.set_lines(3)
         self._body.set_ellipsize(Pango.EllipsizeMode.END)
         content_box.pack_start(self._body, False, False, 0)
         self._card.pack_start(content_box, False, False, 0)
 
-        # Actions row (if notification contains actions)
         self._actions_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self._actions_box.get_style_context().add_class("notification-toast-actions")
         self._actions_box.set_no_show_all(True)
         self._card.pack_start(self._actions_box, False, False, 0)
+
+    def do_get_preferred_height(self):
+        minimum, natural = Gtk.EventBox.do_get_preferred_height(self)
+        cap = NOTIFICATIONS_TOAST_MAX_HEIGHT
+        return min(minimum, cap), min(natural, cap)
+
+    def do_get_preferred_height_for_width(self, width: int):
+        minimum, natural = Gtk.EventBox.do_get_preferred_height_for_width(self, width)
+        cap = NOTIFICATIONS_TOAST_MAX_HEIGHT
+        return min(minimum, cap), min(natural, cap)
 
     @property
     def snapshot(self) -> NotificationSnapshot | None:
@@ -181,11 +192,10 @@ class NotificationToast(Gtk.EventBox):
         else:
             self._body.hide()
 
-        # Render action buttons
         for child in self._actions_box.get_children():
             self._actions_box.remove(child)
 
-        action_list = [a for a in snapshot.actions if a.key != "default"]
+        action_list = [a for a in snapshot.actions if a.key != "default"][:2]
         if action_list:
             for action in action_list:
                 btn = Gtk.Button(label=action.label, relief=Gtk.ReliefStyle.NONE)
@@ -256,7 +266,6 @@ class NotificationToast(Gtk.EventBox):
         if event.button != 1 or self._snapshot is None:
             return False
 
-        # Don't intercept clicks that originated on child buttons
         target = event.widget
         while target is not None and target != self:
             if isinstance(target, Gtk.Button):

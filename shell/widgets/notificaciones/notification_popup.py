@@ -40,25 +40,13 @@ from ...window_identity import (
     monitor_containing_point,
     anchor_button_geometry,
 )
+from .notification_grouping import group_notification_snapshots
 
 _URGENCY_LABELS = {
     0: "Baja",
     1: "Normal",
     2: "Urgente",
 }
-
-
-def _grouping_context(snapshot: NotificationSnapshot) -> tuple[str, ...]:
-    app_name = (snapshot.app_name or "").strip().casefold()
-    desktop = (snapshot.desktop_entry or "").strip()
-    summary = " ".join((snapshot.summary or "").split()).casefold()
-
-    context_parts = [app_name or "application"]
-    if desktop:
-        context_parts.append(Path(desktop).stem.casefold())
-    context_parts.append(summary or "untitled")
-
-    return tuple(context_parts)
 
 
 def open_notification_app(snapshot: NotificationSnapshot) -> None:
@@ -399,19 +387,8 @@ class NotificationPopup(Gtk.Window):
 
         self._empty_label.hide()
 
-        groups: dict[tuple[str, ...], list[NotificationSnapshot]] = {}
-        for snapshot in snapshots:
-            key = _grouping_context(snapshot)
-            groups.setdefault(key, []).append(snapshot)
-
-        grouped_snapshots = sorted(
-            groups.values(),
-            key=lambda group: group[0].timestamp,
-            reverse=True,
-        )
-
-        for group in grouped_snapshots:
-            group.sort(key=lambda item: item.timestamp, reverse=True)
+        # Merge by grouping key across the full history (interleaved arrivals OK).
+        for group in group_notification_snapshots(snapshots):
             representative = group[0]
             app_key = self._service.app_key_for(representative)
             row = NotificationGroupRow(

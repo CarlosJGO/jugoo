@@ -43,6 +43,8 @@ class SettingsStoreTests(unittest.TestCase):
         self.assertEqual(len(keys), len(set(keys)))
         self.assertIn(CategoryId.MODO_NOCHE, {item.category for item in catalog})
         self.assertIn("tema.active", settings_by_key())
+        self.assertIn("notificaciones.grouping_mode", settings_by_key())
+        self.assertIn("notificaciones.grouping_exceptions", settings_by_key())
 
     def test_layout_defaults_include_settings_slot(self) -> None:
         ids = {slot.id for slot in DEFAULT_LAYOUT}

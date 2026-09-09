@@ -10,6 +10,26 @@ HYPRLAND_THEME_EXPORT_PATH = "~/.config/hypr/config/jugoo_theme_generated.lua"
 # Settings Center overlay (same layer-shell family as Search/Clipboard/Emoji).
 SETTINGS_CARD_WIDTH = 780
 SETTINGS_CARD_HEIGHT = 560
+# Unified control center: three sibling panels, shared height, flexible center width.
+CONTROL_CENTER_LEFT_WIDTH = 200
+CONTROL_CENTER_RIGHT_WIDTH = 220
+CONTROL_CENTER_CENTER_MIN_WIDTH = 440
+CONTROL_CENTER_CENTER_SETTINGS_WIDTH = 560
+CONTROL_CENTER_HEIGHT = 560
+CONTROL_CENTER_GAP = 0
+CONTROL_CENTER_CHROME = 24  # shell padding
+CONTROL_CENTER_WIDTH = (
+    CONTROL_CENTER_LEFT_WIDTH
+    + CONTROL_CENTER_CENTER_MIN_WIDTH
+    + CONTROL_CENTER_RIGHT_WIDTH
+    + CONTROL_CENTER_CHROME
+)
+CONTROL_CENTER_SETTINGS_WIDTH = (
+    CONTROL_CENTER_LEFT_WIDTH
+    + CONTROL_CENTER_CENTER_SETTINGS_WIDTH
+    + CONTROL_CENTER_RIGHT_WIDTH
+    + CONTROL_CENTER_CHROME
+)
 
 # ``None`` mirrors Hyprland exactly. Set an integer to retain empty targets 1..N.
 PERSISTENT_WORKSPACES: int | None = None
@@ -160,7 +180,13 @@ NOTIFICATIONS_TOAST_ENABLED = True
 NOTIFICATIONS_MAX_VISIBLE_TOASTS = 3
 NOTIFICATIONS_TOAST_STACK_STEP = 88
 NOTIFICATIONS_TOAST_WIDTH = 400
+NOTIFICATIONS_TOAST_MAX_HEIGHT = 120
 NOTIFICATIONS_TOAST_TIMEOUT_MS = 5000
+
+# History grouping: "summary" = by contacto/título (WhatsApp-style);
+# "app" = todas las de una app juntas. EXCEPTIONS flips the default per app key.
+NOTIFICATIONS_GROUPING_MODE = "summary"
+NOTIFICATIONS_GROUPING_EXCEPTIONS = ""
 
 # Sound (non-blocking; shell works without the file).
 NOTIFICATIONS_SOUND_ENABLED = True

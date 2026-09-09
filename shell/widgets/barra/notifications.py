@@ -18,6 +18,7 @@ from ...config import (
 )
 from ... import config as shell_config
 from ...eventbus import EventBus
+from ...identity import assets_dir
 from ...models import NotificationSnapshot
 from ...popup_handle import (
     PopupHandle,
@@ -33,11 +34,20 @@ from ...servicios.notificaciones.notifications import (
     NOTIFICATIONS_SOUND_MUTE_CHANGED,
     NotificationService,
 )
+from ...settings.manager import SETTINGS_CHANGED
 from ...ui import ShellModule
 from ..notificaciones.bell_icon import BellIcon
 from ..notificaciones.notification_popup import NotificationPopup
 from ..notificaciones.notification_toast_manager import NotificationToastManager
 
+
+_GROUPING_SETTING_KEYS = frozenset(
+    {
+        "notificaciones.grouping_mode",
+        "notificaciones.grouping_exceptions",
+    }
+)
+_REFRESH_COALESCE_MS = 40
 
 class NotificationsWidget(ShellModule):
     """Bar button that opens the notification popup and shows unread count."""
@@ -55,9 +65,6 @@ class NotificationsWidget(ShellModule):
         self._shell_window = shell_window
         self._compact = False
         self._shell_press_bound = False
-        self._sound_path = (
-            Path(__file__).resolve().parent.parent / NOTIFICATIONS_SOUND_PATH
-        )
 
         self._overlay = Gtk.Overlay()
         self._button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
@@ -89,11 +96,14 @@ class NotificationsWidget(ShellModule):
         )
         self._outside_click = PopupOutsideDismiss()
         self._group_window: Gtk.Window | None = None
+        self._refresh_source_id = 0
+        self._sound_path = assets_dir() / Path(NOTIFICATIONS_SOUND_PATH).name
 
         self._event_bus.subscribe(NOTIFICATIONS_CHANGED, self._on_notifications_changed)
         self._event_bus.subscribe(NOTIFICATION_RECEIVED, self._on_notification_received)
         self._event_bus.subscribe(NOTIFICATIONS_PAUSED_CHANGED, self._on_paused_changed)
         self._event_bus.subscribe(NOTIFICATIONS_SOUND_MUTE_CHANGED, self._on_sound_mute_changed)
+        self._event_bus.subscribe(SETTINGS_CHANGED, self._on_settings_changed)
         self.connect("destroy", self._on_destroy)
         GLib.idle_add(self._sync_badge)
 
@@ -124,16 +134,25 @@ class NotificationsWidget(ShellModule):
 
     def _on_destroy(self, *_args) -> None:
         self._icon.stop()
+        if self._refresh_source_id:
+            GLib.source_remove(self._refresh_source_id)
+            self._refresh_source_id = 0
         self._event_bus.unsubscribe(NOTIFICATIONS_CHANGED, self._on_notifications_changed)
         self._event_bus.unsubscribe(NOTIFICATION_RECEIVED, self._on_notification_received)
         self._event_bus.unsubscribe(NOTIFICATIONS_PAUSED_CHANGED, self._on_paused_changed)
         self._event_bus.unsubscribe(NOTIFICATIONS_SOUND_MUTE_CHANGED, self._on_sound_mute_changed)
+        self._event_bus.unsubscribe(SETTINGS_CHANGED, self._on_settings_changed)
         self.close_popup()
         self._close_group_window()
         self._toast_manager.destroy()
 
     def _on_notifications_changed(self, _snapshots: object) -> None:
-        GLib.idle_add(self._handle_notifications_changed)
+        if self._refresh_source_id:
+            return
+        self._refresh_source_id = GLib.timeout_add(
+            _REFRESH_COALESCE_MS,
+            self._handle_notifications_changed,
+        )
 
     def _on_notification_received(self, snapshot: NotificationSnapshot) -> None:
         GLib.idle_add(self._handle_notification_received, snapshot)
@@ -144,6 +163,20 @@ class NotificationsWidget(ShellModule):
     def _on_sound_mute_changed(self, _apps: object) -> None:
         GLib.idle_add(self._handle_sound_mute_changed)
 
+    def _on_settings_changed(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        if payload.get("key") not in _GROUPING_SETTING_KEYS:
+            return
+        GLib.idle_add(self._handle_grouping_settings_changed)
+
+    def _handle_grouping_settings_changed(self) -> bool:
+        popup = self._popup.maybe
+        if popup is not None and popup.get_visible():
+            popup.refresh()
+        self._close_group_window()
+        return False
+
     def _handle_sound_mute_changed(self) -> bool:
         popup = self._popup.maybe
         if popup is not None and popup.get_visible():
@@ -151,6 +184,7 @@ class NotificationsWidget(ShellModule):
         return False
 
     def _handle_notifications_changed(self) -> bool:
+        self._refresh_source_id = 0
         self._sync_badge()
         popup = self._popup.maybe
         if popup is not None and popup.get_visible():
@@ -234,8 +268,7 @@ class NotificationsWidget(ShellModule):
         self._service.mark_read(notification_id)
 
     def _mark_group_read(self, snapshots: list[NotificationSnapshot]) -> None:
-        for snapshot in snapshots:
-            self._service.mark_read(snapshot.id)
+        self._service.mark_read_many(snapshot.id for snapshot in snapshots)
 
     def _mark_all_read(self) -> None:
         self._service.mark_all_read()
@@ -244,8 +277,7 @@ class NotificationsWidget(ShellModule):
         self._service.dismiss(notification_id)
 
     def _dismiss_group(self, snapshots: list[NotificationSnapshot]) -> None:
-        for snapshot in snapshots:
-            self._service.dismiss(snapshot.id)
+        self._service.dismiss_many(snapshot.id for snapshot in snapshots)
 
     def _clear_all(self) -> None:
         self._service.dismiss_all()

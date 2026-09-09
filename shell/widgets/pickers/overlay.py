@@ -29,17 +29,23 @@ class PickerOverlay(Gtk.Window):
         placeholder: str,
         empty_text: str,
         session: PickerSession,
+        layout: str = "simple",
+        card_width: int | None = None,
+        card_height: int = -1,
     ) -> None:
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
         self._session = session
         self._closing = False
+        self._layout = layout
+        self._focus_search_on_open = True
 
         self.set_name(window_name)
         self.get_style_context().add_class("shell-picker")
         register_shell_popup(self, shell_window)
         configure_toplevel(self, title=title)
         configure_interactive_popup(self)
-        self.set_default_size(LAUNCHER_WIDTH, -1)
+        resolved_card_width = card_width if card_width is not None else LAUNCHER_WIDTH
+        self.set_default_size(resolved_card_width, card_height)
         self._configure_layer_shell(namespace)
 
         backdrop = Gtk.EventBox()
@@ -59,14 +65,14 @@ class PickerOverlay(Gtk.Window):
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         outer.get_style_context().add_class("launcher-card")
-        outer.set_size_request(LAUNCHER_WIDTH, -1)
+        outer.set_size_request(resolved_card_width, card_height)
         card.add(outer)
 
-        search_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        search_row.get_style_context().add_class("launcher-search-row")
+        self._search_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self._search_row.get_style_context().add_class("launcher-search-row")
         search_icon = Gtk.Image.new_from_icon_name("edit-find-symbolic", Gtk.IconSize.MENU)
         search_icon.set_pixel_size(16)
-        search_row.pack_start(search_icon, False, False, 0)
+        self._search_row.pack_start(search_icon, False, False, 0)
 
         self._search = Gtk.SearchEntry()
         self._search.get_style_context().add_class("launcher-search")
@@ -74,16 +80,59 @@ class PickerOverlay(Gtk.Window):
         self._search.set_hexpand(True)
         self._search.connect("search-changed", self._on_search_changed)
         self._search.connect("activate", self._on_search_activate)
-        search_row.pack_start(self._search, True, True, 0)
-        outer.pack_start(search_row, False, False, 0)
+        self._search_row.pack_start(self._search, True, True, 0)
 
         self._empty = Gtk.Label(label=empty_text)
         self._empty.get_style_context().add_class("launcher-empty")
         self._empty.set_no_show_all(True)
-        outer.pack_start(self._empty, False, False, 0)
-
+        self.left_slot: Gtk.Box | None = None
+        self.right_slot: Gtk.Box | None = None
+        self.center_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.center_slot.pack_start(self._search_row, False, False, 0)
+        self.center_slot.pack_start(self._empty, False, False, 0)
         self.content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        outer.pack_start(self.content_box, True, True, 0)
+        self.center_slot.pack_start(self.content_box, True, True, 0)
+
+        self._shell_outer = outer
+        if self._layout == "control_center":
+            # Three sibling columns in one shell. Shared height; only center width flexes.
+            from ...config import (
+                CONTROL_CENTER_CENTER_MIN_WIDTH,
+                CONTROL_CENTER_HEIGHT,
+                CONTROL_CENTER_LEFT_WIDTH,
+                CONTROL_CENTER_RIGHT_WIDTH,
+            )
+
+            outer.get_style_context().add_class("control-center-shell")
+            outer.set_size_request(resolved_card_width, CONTROL_CENTER_HEIGHT)
+
+            body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+            body.get_style_context().add_class("control-center-body")
+            body.set_hexpand(True)
+            body.set_vexpand(True)
+            outer.pack_start(body, True, True, 0)
+
+            self.left_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            self.left_slot.get_style_context().add_class("control-center-left")
+            self.left_slot.set_size_request(CONTROL_CENTER_LEFT_WIDTH, -1)
+            self.left_slot.set_hexpand(False)
+            self.left_slot.set_vexpand(True)
+            body.pack_start(self.left_slot, False, True, 0)
+
+            self.center_slot.get_style_context().add_class("control-center-center")
+            self.center_slot.set_size_request(CONTROL_CENTER_CENTER_MIN_WIDTH, -1)
+            self.center_slot.set_hexpand(True)
+            self.center_slot.set_vexpand(True)
+            body.pack_start(self.center_slot, True, True, 0)
+
+            self.right_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            self.right_slot.get_style_context().add_class("control-center-right")
+            self.right_slot.set_size_request(CONTROL_CENTER_RIGHT_WIDTH, -1)
+            self.right_slot.set_hexpand(False)
+            self.right_slot.set_vexpand(True)
+            body.pack_start(self.right_slot, False, True, 0)
+        else:
+            outer.pack_start(self.center_slot, True, True, 0)
 
         self.add_events(Gdk.EventMask.KEY_PRESS_MASK)
         self.connect("key-press-event", self._on_key_press)
@@ -103,16 +152,19 @@ class PickerOverlay(Gtk.Window):
         self.content_box.pack_start(scrolled, True, True, 0)
         return scrolled
 
-    def open_picker(self) -> None:
+    def open_picker(self, *, focus_search: bool = True, reset_query: bool = True) -> None:
         self._closing = False
+        self._focus_search_on_open = focus_search
         self._session.open_session(self._session.item_count)
         self.on_prepare_open()
-        if self._search.get_text():
-            self._search.set_text("")
-        else:
-            self.on_query_changed("")
+        if reset_query:
+            if self._search.get_text():
+                self._search.set_text("")
+            else:
+                self.on_query_changed("")
         present_popup(self)
-        GLib.idle_add(self._focus_search)
+        if focus_search:
+            GLib.idle_add(self._focus_search)
 
     def close_picker(self) -> None:
         self._session.close_session()
@@ -165,12 +217,28 @@ class PickerOverlay(Gtk.Window):
         return False
 
     def _on_map(self, *_args) -> None:
-        self._focus_search()
+        if self._focus_search_on_open:
+            self._focus_search()
 
     def _on_search_changed(self, *_args) -> None:
         query = self._search.get_text()
         self._session.query = query
         self.on_query_changed(query)
+
+    def set_search_row_visible(self, visible: bool) -> None:
+        if visible:
+            self._search_row.show()
+        else:
+            self._search_row.hide()
+
+    def set_shell_size(self, width: int, height: int) -> None:
+        """Resize the control-center shell (center column may grow with content)."""
+        if hasattr(self, "_shell_outer") and self._shell_outer is not None:
+            self._shell_outer.set_size_request(width, height)
+            self.queue_resize()
+
+    def focus_search(self) -> None:
+        self._focus_search()
 
     def _on_search_activate(self, *_args) -> None:
         self.on_activate()

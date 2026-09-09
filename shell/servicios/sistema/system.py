@@ -18,12 +18,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import socket
 import time
 
 HWMON_ROOT = Path("/sys/class/hwmon")
 DRM_ROOT = Path("/sys/class/drm")
 PROC_STAT = Path("/proc/stat")
 PROC_MEMINFO = Path("/proc/meminfo")
+PROC_CPUINFO = Path("/proc/cpuinfo")
 PROC_PROCESSES = Path("/proc")
 ZRAM_ROOT = Path("/sys/block")
 PCI_IDS_FILES = (
@@ -166,6 +168,16 @@ class SystemStats:
     gpu: GpuStats = field(default_factory=GpuStats)
 
 
+@dataclass(frozen=True)
+class MachineIdentity:
+    """Static-ish machine summary for profile UI (not live usage gauges)."""
+
+    hostname: str
+    cpu_model: str | None = None
+    gpu_name: str | None = None
+    ram_total_bytes: int | None = None
+
+
 @dataclass
 class _SensorPaths:
     """Resolved hwmon files, cached so each sample is a handful of small reads."""
@@ -198,6 +210,7 @@ class SystemStatsService:
         self._last_cpu_usage: float | None = None
         self._cached_process_pss: int | None = None
         self._last_process_pss_monotonic = 0.0
+        self._cpu_model = _read_cpu_model()
 
         self._discover_sensors()
         self._cpu_sample = self._read_cpu_sample()
@@ -214,6 +227,23 @@ class SystemStatsService:
     @property
     def gpu_name(self) -> str | None:
         return self._sensors.gpu_name
+
+    @property
+    def cpu_model(self) -> str | None:
+        return self._cpu_model
+
+    def identity_summary(self) -> MachineIdentity:
+        """Hostname + hardware labels from the same /proc and hwmon sources as the bar."""
+        self._maybe_rediscover_sensors()
+        if self._cpu_model is None:
+            self._cpu_model = _read_cpu_model()
+        total, _available = _read_meminfo_totals()
+        return MachineIdentity(
+            hostname=read_hostname(),
+            cpu_model=self._cpu_model,
+            gpu_name=self._sensors.gpu_name,
+            ram_total_bytes=total,
+        )
 
     def _maybe_rediscover_sensors(self) -> None:
         if self._sensors.complete:
@@ -342,6 +372,42 @@ class SystemStatsService:
             vram_used_bytes=_read_integer(self._sensors.gpu_vram_used),
             vram_total_bytes=_read_integer(self._sensors.gpu_vram_total),
         )
+
+
+def read_hostname() -> str:
+    """Current machine hostname (updates after hostnamectl / reboot)."""
+    try:
+        return socket.gethostname().strip()
+    except OSError:
+        return ""
+
+
+def format_capacity_bytes(value: int | None) -> str | None:
+    """Human-readable capacity for profile summaries (e.g. ``16 GB``)."""
+    if value is None or value <= 0:
+        return None
+    gib = value / (1024**3)
+    if abs(gib - round(gib)) < 0.12:
+        return f"{int(round(gib))} GB"
+    if gib >= 1:
+        return f"{gib:.1f} GB"
+    mib = value / (1024**2)
+    return f"{mib:.0f} MB"
+
+
+def _read_cpu_model() -> str | None:
+    """CPU product name from ``/proc/cpuinfo`` (same family of sources as bar stats)."""
+    content = _read_text(PROC_CPUINFO)
+    if content is None:
+        return None
+    for line in content.splitlines():
+        lower = line.lower()
+        if lower.startswith("model name") or lower.startswith("hardware"):
+            _key, sep, value = line.partition(":")
+            if sep:
+                cleaned = value.strip()
+                return cleaned or None
+    return None
 
 
 def _read_text(path: Path | None) -> str | None:

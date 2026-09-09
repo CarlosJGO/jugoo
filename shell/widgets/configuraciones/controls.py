@@ -106,11 +106,39 @@ class SettingRow(Gtk.Box):
 
         entry = Gtk.Entry()
         entry.set_text(str(value))
-        entry.set_width_chars(28)
+        entry.set_width_chars(22)
         entry.get_style_context().add_class("settings-entry")
         entry.connect("activate", self._on_entry)
         entry.connect("focus-out-event", self._on_entry_focus_out)
-        return entry
+
+        if definition.value_type != "path":
+            return entry
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        box.pack_start(entry, True, True, 0)
+        browse = Gtk.Button(label="…")
+        browse.set_tooltip_text("Seleccionar archivo")
+        browse.get_style_context().add_class("settings-browse-button")
+        browse.connect("clicked", lambda _btn: self._on_browse(entry))
+        box.pack_start(browse, False, False, 0)
+        self._path_entry = entry
+        return box
+
+    def _on_browse(self, entry: Gtk.Entry) -> None:
+        from ...ui.image_files import choose_file_path, choose_image_path
+
+        parent = self.get_toplevel()
+        window = parent if isinstance(parent, Gtk.Window) else None
+        key = self._definition.key
+        title = f"Seleccionar — {self._definition.label}"
+        if key in {"general.avatar_path", "general.machine_image_path"}:
+            path = choose_image_path(window, title=title)
+        else:
+            path = choose_file_path(window, title=title)
+        if path is None:
+            return
+        entry.set_text(str(path))
+        self._on_change(self._definition.key, str(path))
 
     def _on_switch(self, switch: Gtk.Switch, *_args) -> None:
         if self._suppress:

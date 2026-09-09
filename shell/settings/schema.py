@@ -105,6 +105,42 @@ def build_settings_catalog() -> tuple[SettingDef, ...]:
             tier="A",
             section="Catálogo",
         ),
+        SettingDef(
+            key="general.avatar_path",
+            category=CategoryId.GENERAL,
+            label="Avatar de usuario",
+            description=(
+                "Imagen circular del panel de usuario. "
+                "Si está vacío, Jugoo intenta ~/.face y ~/.face.icon."
+            ),
+            value_type="path",
+            default="",
+            apply=APPLY_LIVE,
+            tier="A",
+            section="Perfil",
+        ),
+        SettingDef(
+            key="general.machine_image_path",
+            category=CategoryId.GENERAL,
+            label="Foto de la PC",
+            description="Imagen asociada a esta máquina en el panel de usuario.",
+            value_type="path",
+            default="",
+            apply=APPLY_LIVE,
+            tier="A",
+            section="Perfil",
+        ),
+        SettingDef(
+            key="general.profile_fields_json",
+            category=CategoryId.GENERAL,
+            label="Datos personalizados",
+            description="Pares título/valor mostrados en el panel de usuario.",
+            value_type="string",
+            default="[]",
+            apply=APPLY_LIVE,
+            tier="A",
+            section="Datos personalizados",
+        ),
         # —— General / Apariencia ——
         SettingDef(
             key="apariencia.animations_follow_theme",
@@ -367,6 +403,41 @@ def build_settings_catalog() -> tuple[SettingDef, ...]:
             step=10,
             tier="C",
             section="Historial",
+        ),
+        SettingDef(
+            key="notificaciones.grouping_mode",
+            category=CategoryId.NOTIFICACIONES,
+            label="Agrupación por defecto",
+            description=(
+                "Por contacto/título mantiene chats separados (p. ej. WhatsApp). "
+                "Por aplicación junta todo lo de esa app."
+            ),
+            value_type="choice",
+            default=shell_config.NOTIFICATIONS_GROUPING_MODE,
+            config_attr="NOTIFICATIONS_GROUPING_MODE",
+            apply=APPLY_LIVE,
+            choices=(
+                ("summary", "Por contacto / título"),
+                ("app", "Por aplicación"),
+            ),
+            tier="A",
+            section="Agrupación",
+        ),
+        SettingDef(
+            key="notificaciones.grouping_exceptions",
+            category=CategoryId.NOTIFICACIONES,
+            label="Excepciones de agrupación",
+            description=(
+                "Apps (separadas por coma) con el modo contrario al por defecto. "
+                "Con agrupación por contacto/título, escribe strawberry para "
+                "juntar todas las de esa app sin mezclar WhatsApp."
+            ),
+            value_type="string",
+            default=shell_config.NOTIFICATIONS_GROUPING_EXCEPTIONS,
+            config_attr="NOTIFICATIONS_GROUPING_EXCEPTIONS",
+            apply=APPLY_LIVE,
+            tier="A",
+            section="Agrupación",
         ),
         # —— Multimedia ——
         SettingDef(

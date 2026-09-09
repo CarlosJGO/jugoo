@@ -217,6 +217,8 @@ class ShellApplication(Gtk.Window):
             self.applications,
             self.hyprland,
             self,
+            self.settings_manager,
+            system_stats=self.system_stats,
         )
         self.pickers_controller = PickersController(
             self.event_bus,
@@ -226,9 +228,8 @@ class ShellApplication(Gtk.Window):
             hyprland=self.hyprland,
         )
         self.settings_controller = SettingsController(
-            self,
-            self.settings_manager,
-            close_others=self._close_overlays_for_settings,
+            open_settings=self.applications_controller.open_settings,
+            close_center=self.applications_controller.close_control_center,
         )
         self.settings_manager.set_volume_osd_delay_hook(
             self.volume_osd_controller.set_hide_delay_ms
@@ -269,6 +270,7 @@ class ShellApplication(Gtk.Window):
         GLib.idle_add(self._ensure_task_watcher)
         GLib.timeout_add(700, self._startup_briefing.schedule)
         self.show_all()
+        GLib.idle_add(self.applications_controller.warm)
 
     # Public API for keybindings or external triggers
     def toggle_workspace_panel(self, workspace_id: int) -> None:
@@ -281,19 +283,19 @@ class ShellApplication(Gtk.Window):
         self.control_center_controller.close_popup()
 
     def toggle_launcher(self) -> None:
-        self.settings_controller.close()
         self.pickers_controller.close_pickers()
         self.applications_controller.toggle_launcher()
 
     def toggle_clipboard_picker(self) -> None:
-        self.settings_controller.close()
+        self.applications_controller.close_control_center()
         self.pickers_controller.toggle_clipboard()
 
     def toggle_emoji_picker(self) -> None:
-        self.settings_controller.close()
+        self.applications_controller.close_control_center()
         self.pickers_controller.toggle_emoji()
 
     def toggle_settings(self) -> None:
+        self.pickers_controller.close_pickers()
         self.settings_controller.toggle()
 
     def open_tasks_panel(self) -> None:
@@ -301,10 +303,6 @@ class ShellApplication(Gtk.Window):
 
     def reload_theme(self) -> None:
         self.theme_manager.reload_current()
-
-    def _close_overlays_for_settings(self) -> None:
-        self.pickers_controller.close_pickers()
-        self.applications_controller.close_launcher()
 
     def _theme_choices(self) -> tuple[tuple[str, str], ...]:
         return tuple(

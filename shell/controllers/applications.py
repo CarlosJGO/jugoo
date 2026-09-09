@@ -16,6 +16,8 @@ from ..models import (
     windows_for_application,
 )
 from ..popup_handle import PopupHandle
+from ..settings.manager import SettingsManager
+from ..settings.schema import CategoryId
 from ..servicios.aplicaciones.applications import (
     APP_ACTIVATE_REQUESTED,
     APP_FAVORITE_TOGGLE_REQUESTED,
@@ -26,6 +28,7 @@ from ..servicios.aplicaciones.applications import (
     ApplicationsService,
 )
 from ..servicios.escritorio.hyprland import WINDOW_FOCUS_REQUESTED, HyprlandService
+from ..servicios.sistema.system import SystemStatsService
 from ..widgets.aplicaciones.launcher import AppLauncherWindow
 
 
@@ -38,6 +41,8 @@ class ApplicationsController:
         applications: ApplicationsService,
         hyprland: HyprlandService,
         shell_window: Gtk.Window,
+        settings_manager: SettingsManager,
+        system_stats: SystemStatsService | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._applications = applications
@@ -51,6 +56,9 @@ class ApplicationsController:
                 on_pin_toggle=self._toggle_pin,
                 on_favorite_toggle=self._toggle_favorite,
                 on_refresh=self._applications.refresh_catalog,
+                settings_manager=settings_manager,
+                event_bus=event_bus,
+                system_stats=system_stats,
             )
         )
 
@@ -65,6 +73,19 @@ class ApplicationsController:
 
     def toggle_launcher(self) -> None:
         self._launcher.get().toggle_launcher()
+
+    def open_search(self) -> None:
+        self._launcher.get().open_search_mode()
+
+    def open_settings(self, category: CategoryId = CategoryId.GENERAL) -> None:
+        self._launcher.get().open_settings_mode(category)
+
+    def close_control_center(self) -> None:
+        self.close_launcher()
+
+    def warm(self) -> bool:
+        self._launcher.get().warm_up()
+        return False
 
     def _on_launcher_toggle(self, _payload: object) -> None:
         GLib.idle_add(self.toggle_launcher)

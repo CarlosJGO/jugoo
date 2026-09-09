@@ -12,8 +12,16 @@ from gi.repository import Gtk
 
 from ...settings.layout_model import parse_layout
 from ...settings.manager import SettingsManager
+from ...settings.profile_model import (
+    MAX_PROFILE_FIELDS,
+    ProfileField,
+    parse_profile_fields,
+    serialize_profile_fields,
+)
 from ...settings.schema import CATEGORY_META, CategoryId
 from .controls import SettingRow
+
+_CUSTOM_EDITOR_KEYS = frozenset({"general.profile_fields_json"})
 
 
 def build_category_page(
@@ -49,6 +57,14 @@ def build_category_page(
 
     current_section = None
     for definition in settings:
+        if definition.key in _CUSTOM_EDITOR_KEYS:
+            if definition.section and definition.section != current_section:
+                current_section = definition.section
+                section = Gtk.Label(label=current_section, xalign=0)
+                section.get_style_context().add_class("settings-section")
+                page.pack_start(section, False, False, 0)
+            page.pack_start(_profile_fields_editor(manager, on_change), False, False, 0)
+            continue
         if definition.section and definition.section != current_section:
             current_section = definition.section
             section = Gtk.Label(label=current_section, xalign=0)
@@ -77,6 +93,106 @@ def build_category_page(
         page.pack_start(note, False, False, 0)
 
     return page
+
+
+def _profile_fields_editor(
+    manager: SettingsManager,
+    on_change: Callable[[str, object], None],
+) -> Gtk.Widget:
+    """Editable title/value pairs persisted as ``general.profile_fields_json``."""
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+    box.get_style_context().add_class("settings-profile-fields")
+
+    hint = Gtk.Label(
+        label="Agrega datos propios (universidad, redes, etc.). Se muestran en el panel izquierdo.",
+        xalign=0,
+    )
+    hint.get_style_context().add_class("settings-row-desc")
+    hint.set_line_wrap(True)
+    box.pack_start(hint, False, False, 0)
+
+    list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    box.pack_start(list_box, False, False, 0)
+
+    def _current_fields() -> list[ProfileField]:
+        return list(parse_profile_fields(str(manager.get("general.profile_fields_json") or "")))
+
+    def _persist(fields: list[ProfileField]) -> None:
+        on_change("general.profile_fields_json", serialize_profile_fields(fields))
+
+    def _rebuild() -> None:
+        for child in list(list_box.get_children()):
+            list_box.remove(child)
+            child.destroy()
+        fields = _current_fields()
+        for index, field in enumerate(fields):
+            list_box.pack_start(_field_row(index, field, fields), False, False, 0)
+        list_box.show_all()
+        add_button.set_sensitive(len(fields) < MAX_PROFILE_FIELDS)
+
+    def _field_row(index: int, field: ProfileField, fields: list[ProfileField]) -> Gtk.Widget:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        row.get_style_context().add_class("settings-profile-field-row")
+
+        title_entry = Gtk.Entry()
+        title_entry.set_placeholder_text("Título")
+        title_entry.set_text(field.title)
+        title_entry.set_width_chars(12)
+        title_entry.get_style_context().add_class("settings-entry")
+        row.pack_start(title_entry, True, True, 0)
+
+        value_entry = Gtk.Entry()
+        value_entry.set_placeholder_text("Valor")
+        value_entry.set_text(field.value)
+        value_entry.set_width_chars(16)
+        value_entry.get_style_context().add_class("settings-entry")
+        row.pack_start(value_entry, True, True, 0)
+
+        def _commit(*_args) -> None:
+            updated = _current_fields()
+            if index >= len(updated):
+                return
+            updated[index] = ProfileField(
+                title=title_entry.get_text().strip() or "Dato",
+                value=value_entry.get_text().strip(),
+            )
+            _persist(updated)
+
+        title_entry.connect("activate", _commit)
+        title_entry.connect("focus-out-event", lambda *_a: (_commit(), False)[1])
+        value_entry.connect("activate", _commit)
+        value_entry.connect("focus-out-event", lambda *_a: (_commit(), False)[1])
+
+        remove = Gtk.Button(label="Eliminar")
+        remove.get_style_context().add_class("settings-browse-button")
+
+        def _remove(_btn) -> None:
+            updated = _current_fields()
+            if 0 <= index < len(updated):
+                del updated[index]
+                _persist(updated)
+                _rebuild()
+
+        remove.connect("clicked", _remove)
+        row.pack_start(remove, False, False, 0)
+        return row
+
+    add_button = Gtk.Button(label="Agregar dato")
+    add_button.get_style_context().add_class("settings-browse-button")
+    add_button.set_halign(Gtk.Align.START)
+
+    def _add(_btn) -> None:
+        fields = _current_fields()
+        if len(fields) >= MAX_PROFILE_FIELDS:
+            return
+        fields.append(ProfileField(title="Nuevo", value=""))
+        _persist(fields)
+        _rebuild()
+
+    add_button.connect("clicked", _add)
+    box.pack_start(add_button, False, False, 0)
+    _rebuild()
+    return box
 
 
 def _general_intro(manager: SettingsManager) -> Gtk.Widget:

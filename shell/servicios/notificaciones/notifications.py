@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+import threading
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 import gi
 
@@ -241,6 +242,14 @@ class NotificationStore:
                 dismissed.append(updated)
         return tuple(dismissed)
 
+    def dismiss_many(self, notification_ids: Iterable[int]) -> tuple[NotificationSnapshot, ...]:
+        dismissed: list[NotificationSnapshot] = []
+        for notification_id in notification_ids:
+            updated = self.dismiss(int(notification_id))
+            if updated is not None:
+                dismissed.append(updated)
+        return tuple(dismissed)
+
     def mark_read(self, notification_id: int) -> NotificationSnapshot | None:
         item = self._items.get(notification_id)
         if item is None or item.read:
@@ -248,6 +257,16 @@ class NotificationStore:
         updated = replace(item, read=True)
         self._items[notification_id] = updated
         return updated
+
+    def mark_read_many(self, notification_ids: Iterable[int]) -> int:
+        changed = 0
+        for notification_id in notification_ids:
+            item = self._items.get(int(notification_id))
+            if item is None or item.dismissed or item.read:
+                continue
+            self._items[item.id] = replace(item, read=True)
+            changed += 1
+        return changed
 
     def mark_all_read(self) -> int:
         changed = 0
@@ -303,6 +322,15 @@ class NotificationService:
         self._active_bus_name: str | None = None
         self._production_retry_source_id = 0
         self._expire_timers: dict[int, int] = {}
+        self._persist_lock = threading.Lock()
+        self._persist_pending: tuple[
+            tuple[NotificationSnapshot, ...],
+            bool,
+            int,
+            frozenset[str],
+        ] | None = None
+        self._persist_busy = False
+        self._persist_thread: threading.Thread | None = None
 
     @property
     def ready(self) -> bool:
@@ -429,7 +457,10 @@ class NotificationService:
         self._closing = True
         self._stop_production_retry()
         self._clear_expire_timers()
-        self._persist_state()
+        with self._persist_lock:
+            self._persist_pending = None
+        self._join_persist_worker()
+        self._persist_state(sync=True)
         self._unregister_object()
         if self._primary_owner_id:
             Gio.bus_unown_name(self._primary_owner_id)
@@ -455,13 +486,14 @@ class NotificationService:
         return self._paused
 
     def mark_read(self, notification_id: int) -> bool:
-        item = self._store.get(notification_id)
-        if item is None or item.dismissed or item.read:
-            return False
-        self._store.mark_read(notification_id)
-        self._persist_state()
-        self._emit_changed()
-        return True
+        return self.mark_read_many((notification_id,)) > 0
+
+    def mark_read_many(self, notification_ids: Iterable[int]) -> int:
+        changed = self._store.mark_read_many(notification_ids)
+        if changed:
+            self._persist_state()
+            self._emit_changed()
+        return changed
 
     def mark_all_read(self) -> int:
         changed = self._store.mark_all_read()
@@ -471,13 +503,20 @@ class NotificationService:
         return changed
 
     def dismiss(self, notification_id: int) -> bool:
-        self._cancel_expire_timer(notification_id)
-        updated = self._store.dismiss(notification_id)
-        if updated is None:
-            return False
+        return self.dismiss_many((notification_id,)) > 0
+
+    def dismiss_many(self, notification_ids: Iterable[int]) -> int:
+        ids = tuple(int(notification_id) for notification_id in notification_ids)
+        for notification_id in ids:
+            self._cancel_expire_timer(notification_id)
+        dismissed = self._store.dismiss_many(ids)
+        if not dismissed:
+            return 0
         self._persist_state()
-        self._emit_dismissed(updated, CLOSE_REASON_CLOSE_CALL)
-        return True
+        for snapshot in dismissed:
+            self._emit_dismissed(snapshot, CLOSE_REASON_CLOSE_CALL, emit_changed=False)
+        self._emit_changed()
+        return len(dismissed)
 
     def dismiss_all(self) -> int:
         dismissed = self._store.dismiss_all()
@@ -486,7 +525,8 @@ class NotificationService:
         if dismissed:
             self._persist_state()
             for snapshot in dismissed:
-                self._emit_dismissed(snapshot, CLOSE_REASON_DISMISS)
+                self._emit_dismissed(snapshot, CLOSE_REASON_DISMISS, emit_changed=False)
+            self._emit_changed()
         return len(dismissed)
 
     def expire(self, notification_id: int) -> bool:
@@ -526,17 +566,71 @@ class NotificationService:
             self._log(f"loaded {len(trimmed)} persisted notifications")
         self._emit_changed()
 
-    def _persist_state(self) -> None:
+    def _persist_state(self, *, sync: bool = False) -> None:
         trimmed = trim_history(self._store.snapshots, NOTIFICATIONS_MAX_HISTORY)
         if trimmed != self._store.snapshots:
             self._store.replace_all(trimmed)
-        save_history(
-            self._history_path,
-            items=trimmed,
-            paused=self._paused,
-            next_id=self._store.next_id,
-            sound_muted_apps=self._sound_muted_apps,
+        pending = (
+            trimmed,
+            self._paused,
+            self._store.next_id,
+            frozenset(self._sound_muted_apps),
         )
+        if sync or self._closing:
+            with self._persist_lock:
+                self._persist_pending = None
+            save_history(
+                self._history_path,
+                items=pending[0],
+                paused=pending[1],
+                next_id=pending[2],
+                sound_muted_apps=pending[3],
+            )
+            return
+
+        with self._persist_lock:
+            self._persist_pending = pending
+            if self._persist_busy:
+                return
+            self._persist_busy = True
+        thread = threading.Thread(
+            target=self._persist_worker,
+            name="notification-persist",
+            daemon=True,
+        )
+        self._persist_thread = thread
+        thread.start()
+
+    def _join_persist_worker(self) -> None:
+        thread = self._persist_thread
+        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
+
+    def _persist_worker(self) -> None:
+        while True:
+            with self._persist_lock:
+                if self._closing:
+                    self._persist_pending = None
+                    self._persist_busy = False
+                    return
+                pending = self._persist_pending
+                self._persist_pending = None
+            if pending is None:
+                with self._persist_lock:
+                    if self._persist_pending is not None and not self._closing:
+                        continue
+                    self._persist_busy = False
+                return
+            try:
+                save_history(
+                    self._history_path,
+                    items=pending[0],
+                    paused=pending[1],
+                    next_id=pending[2],
+                    sound_muted_apps=pending[3],
+                )
+            except OSError as error:
+                print(f"shell: notifications: persist failed: {error}")
 
     def _resolve_expire_timeout_ms(self, snapshot: NotificationSnapshot) -> int:
         timeout = snapshot.expire_timeout_ms
@@ -834,13 +928,26 @@ class NotificationService:
     def _emit_changed(self) -> None:
         self._event_bus.emit(NOTIFICATIONS_CHANGED, self._store.history_snapshots)
 
-    def _emit_closed(self, snapshot: NotificationSnapshot, reason: int) -> None:
+    def _emit_closed(
+        self,
+        snapshot: NotificationSnapshot,
+        reason: int,
+        *,
+        emit_changed: bool = True,
+    ) -> None:
         self._emit_signal("NotificationClosed", GLib.Variant("(uu)", (snapshot.id, reason)))
-        self._emit_changed()
+        if emit_changed:
+            self._emit_changed()
 
-    def _emit_dismissed(self, snapshot: NotificationSnapshot, reason: int) -> None:
+    def _emit_dismissed(
+        self,
+        snapshot: NotificationSnapshot,
+        reason: int,
+        *,
+        emit_changed: bool = True,
+    ) -> None:
         self._event_bus.emit(NOTIFICATION_DISMISSED, snapshot)
-        self._emit_closed(snapshot, reason)
+        self._emit_closed(snapshot, reason, emit_changed=emit_changed)
 
     def _emit_action_invoked(self, notification_id: int, action_key: str) -> None:
         payload = (notification_id, action_key)
