@@ -12,3 +12,20 @@
 | MPRIS | Interfaz D-Bus para reproductores multimedia. |
 | GTK Layer Shell | Biblioteca que ancla ventanas GTK a bordes de Wayland. |
 | EventBus | Bus interno para publicar y suscribir eventos del shell. |
+
+
+En el proyecto las llamamos **puertas**.
+| Nivel | Nombre |
+|--------|--------|
+| Nombre de familia (docs/código) | **puertas** |
+| Clase base | `PickerOverlay` |
+| Miembros | launcher/Search, clipboard, emoji |
+| Tipo técnico (Wayland/Hyprland) | **layers** (wlr-layer-shell), no ventanas normales |
+
+Por eso no las puedes mover: no pasan por el gestor de ventanas como un float/tiled. Están ancladas a bordes del monitor (`GtkLayerShell` en capa `OVERLAY`). Hyprland las ve como layers (`hyprctl layers`), con namespaces:
+
+- `shell-app-launcher`
+- `shell-clipboard-picker`
+- `shell-emoji-picker`
+
+Las ventanas normales (incluso popups flotantes de la barra) sí tienen `windowrule` y se pueden mover; las puertas usan `layer_rule`.

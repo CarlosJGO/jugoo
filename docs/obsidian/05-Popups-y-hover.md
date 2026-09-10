@@ -16,6 +16,17 @@
 - `PopupOutsideDismiss` para cierre al salir, clicks en la barra y cambios de ventana activa.
 - `pointer_inside_widget()` para comprobar la posición real del puntero.
 
+## Puertas (pickers centrados)
+
+Search (menú/launcher), Clipboard y Emoji comparten [`PickerOverlay`](../../shell/widgets/pickers/overlay.py). Se abren y cierran con animación tipo puerta desde el centro de la tarjeta:
+
+- Eje vertical (por defecto): menú y clipboard.
+- Eje horizontal: emoji (`door_axis="horizontal"`).
+
+La lógica vive en [`shell/ui/door.py`](../../shell/ui/door.py) (`DoorClip`).
+
+Hyprland no debe animar estas layers (`layers` → `slide` las hace “caer” desde arriba). En `~/.config/hypr/config/windowrules.lua` hay `layer_rule` `jugoo-puertas-no-anim`.
+
 ## Dónde localizar cada popup
 
 | Popup | Widget | Controller o dueño |

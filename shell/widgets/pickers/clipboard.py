@@ -1,4 +1,4 @@
-"""Clipboard picker overlay, visually a Search sibling."""
+"""Clipboard picker puerta, visually a Search sibling."""
 
 from __future__ import annotations
 

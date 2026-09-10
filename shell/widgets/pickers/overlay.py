@@ -1,4 +1,8 @@
-"""Centered GtkLayerShell overlay shared by Search, Clipboard, and Emoji pickers."""
+"""Puertas: centered GtkLayerShell overlays shared by Search, Clipboard, and Emoji.
+
+Open/close with a door wipe from the card center (vertical by default,
+horizontal when requested).
+"""
 
 from __future__ import annotations
 
@@ -11,13 +15,14 @@ gi.require_version("GtkLayerShell", "0.1")
 from gi.repository import Gdk, GLib, Gtk, GtkLayerShell
 
 from ...config import LAUNCHER_MAX_HEIGHT, LAUNCHER_WIDTH
-from ...popup_handle import hide_popup, present_popup
+from ...ui.door import DoorAxis, DoorClip
+from ...ui.theme import active_theme
 from ...window_identity import configure_interactive_popup, configure_toplevel, register_shell_popup
 from .session import ACTION_CLOSE, ACTION_MOVED, ACTION_SELECT, PickerSession
 
 
 class PickerOverlay(Gtk.Window):
-    """Fullscreen exclusive overlay with the Search card chrome."""
+    """Fullscreen exclusive puerta with the Search card chrome."""
 
     def __init__(
         self,
@@ -32,20 +37,25 @@ class PickerOverlay(Gtk.Window):
         layout: str = "simple",
         card_width: int | None = None,
         card_height: int = -1,
+        door_axis: DoorAxis = "vertical",
     ) -> None:
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
         self._session = session
         self._closing = False
+        self._opening = False
+        self._present_generation = 0
         self._layout = layout
         self._focus_search_on_open = True
+        self._card_height_request = card_height
+        self._resolved_card_width = card_width if card_width is not None else LAUNCHER_WIDTH
+        self._seed_door_height = card_height if card_height > 0 else LAUNCHER_MAX_HEIGHT
 
         self.set_name(window_name)
         self.get_style_context().add_class("shell-picker")
         register_shell_popup(self, shell_window)
         configure_toplevel(self, title=title)
         configure_interactive_popup(self)
-        resolved_card_width = card_width if card_width is not None else LAUNCHER_WIDTH
-        self.set_default_size(resolved_card_width, card_height)
+        self.set_default_size(self._resolved_card_width, card_height)
         self._configure_layer_shell(namespace)
 
         backdrop = Gtk.EventBox()
@@ -58,14 +68,18 @@ class PickerOverlay(Gtk.Window):
         aligner.set_valign(Gtk.Align.CENTER)
         backdrop.add(aligner)
 
+        self._door = DoorClip(axis=door_axis)
+        aligner.pack_start(self._door, False, False, 0)
+
         card = Gtk.EventBox()
         card.get_style_context().add_class("launcher-card-host")
         card.connect("button-press-event", self._on_card_press)
-        aligner.pack_start(card, False, False, 0)
+        self._card_host = card
+        self._door.set_child(card)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         outer.get_style_context().add_class("launcher-card")
-        outer.set_size_request(resolved_card_width, card_height)
+        outer.set_size_request(self._resolved_card_width, card_height)
         card.add(outer)
 
         self._search_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -104,7 +118,7 @@ class PickerOverlay(Gtk.Window):
             )
 
             outer.get_style_context().add_class("control-center-shell")
-            outer.set_size_request(resolved_card_width, CONTROL_CENTER_HEIGHT)
+            outer.set_size_request(self._resolved_card_width, CONTROL_CENTER_HEIGHT)
 
             body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
             body.get_style_context().add_class("control-center-body")
@@ -137,6 +151,7 @@ class PickerOverlay(Gtk.Window):
         self.add_events(Gdk.EventMask.KEY_PRESS_MASK)
         self.connect("key-press-event", self._on_key_press)
         self.connect("map", self._on_map)
+        self.connect("destroy", self._on_destroy)
 
     @property
     def session(self) -> PickerSession:
@@ -162,23 +177,47 @@ class PickerOverlay(Gtk.Window):
                 self._search.set_text("")
             else:
                 self.on_query_changed("")
-        present_popup(self)
+        self._present_door()
         if focus_search:
             GLib.idle_add(self._focus_search)
 
     def close_picker(self) -> None:
         self._session.close_session()
+        self._present_generation += 1
+        self._opening = False
         if self._closing or not self.get_visible():
-            hide_popup(self)
+            self._door.cancel()
+            self.hide()
             return
         self._closing = True
-        hide_popup(self)
+        self._hide_door()
 
     def toggle_picker(self) -> None:
-        if self.get_visible():
+        if self.is_effectively_open():
             self.close_picker()
         else:
             self.open_picker()
+
+    def is_effectively_open(self) -> bool:
+        """True when the puerta is shown and not stuck on a blank first map."""
+        if not self.get_visible():
+            return False
+        if self._closing:
+            return True
+        if self._opening or self._door.animating:
+            return True
+        return self._door.progress > 0.05
+
+    def warm_up(self) -> None:
+        """Build content and realize so the first bind does not race layout."""
+        self.on_prepare_open()
+        self.on_query_changed(self._search.get_text())
+        if not self.get_realized():
+            self.realize()
+        self._card_host.set_size_request(self._resolved_card_width, self._card_height_request)
+        self._door.seed_size(self._resolved_card_width, self._seed_door_height)
+        self._door.capture_full_size()
+        self._door.apply(1.0)
 
     def set_empty_visible(self, visible: bool) -> None:
         if visible:
@@ -220,10 +259,16 @@ class PickerOverlay(Gtk.Window):
         if self._focus_search_on_open:
             self._focus_search()
 
+    def _on_destroy(self, *_args) -> None:
+        self._door.cancel()
+
     def _on_search_changed(self, *_args) -> None:
         query = self._search.get_text()
         self._session.query = query
         self.on_query_changed(query)
+        if self.get_visible() and not self._door.animating and not self._closing:
+            self._door.capture_full_size()
+            self._door.apply(1.0)
 
     def set_search_row_visible(self, visible: bool) -> None:
         if visible:
@@ -236,9 +281,120 @@ class PickerOverlay(Gtk.Window):
         if hasattr(self, "_shell_outer") and self._shell_outer is not None:
             self._shell_outer.set_size_request(width, height)
             self.queue_resize()
+            if self.get_visible() and not self._door.animating and not self._closing:
+                self._door.capture_full_size()
+                self._door.apply(1.0)
 
     def focus_search(self) -> None:
         self._focus_search()
+
+    def _animations_enabled(self) -> bool:
+        theme = active_theme()
+        return theme is None or theme.animation.enabled
+
+    def _present_door(self) -> None:
+        # Already fully open: refresh size after content changes, do not replay the door.
+        if (
+            self.get_visible()
+            and not self._closing
+            and not self._opening
+            and self._door.progress >= 1.0
+            and not self._door.animating
+        ):
+            self._door.capture_full_size()
+            self._door.apply(1.0)
+            return
+
+        reversing = (
+            self.get_visible()
+            and (self._door.animating or self._door.progress < 1.0)
+            and not self._opening
+        )
+        start = self._door.progress if reversing else 0.0
+        self._door.cancel()
+        self._closing = False
+        self._opening = True
+        self._present_generation += 1
+        generation = self._present_generation
+
+        self._card_host.set_size_request(self._resolved_card_width, self._card_height_request)
+        self._door.seed_size(self._resolved_card_width, self._seed_door_height)
+        # Stay opaque: opacity 0→1 on a fullscreen layer was the black flash.
+        self.set_opacity(1.0)
+        self._door.apply(0.0)
+        self.show_all()
+        self.present()
+
+        if reversing:
+            self._door.capture_full_size()
+            if not self._animations_enabled():
+                self._door.apply(1.0)
+                self._opening = False
+                return
+            self._door.open(from_progress=start, on_complete=self._on_door_open_complete)
+            return
+
+        # Wait for allocate/realize before measuring — first map used to get 1×1.
+        GLib.idle_add(self._begin_door_open, generation)
+
+    def _begin_door_open(self, generation: int) -> bool:
+        if generation != self._present_generation or self._closing:
+            return False
+        self._door.capture_full_size()
+        if not self._door.size_ready():
+            # Content not laid out yet; try once more on the next idle.
+            GLib.idle_add(self._begin_door_open_retry, generation)
+            return False
+        self._start_measured_open(generation)
+        return False
+
+    def _begin_door_open_retry(self, generation: int) -> bool:
+        if generation != self._present_generation or self._closing:
+            return False
+        self._door.capture_full_size()
+        self._start_measured_open(generation)
+        return False
+
+    def _start_measured_open(self, generation: int) -> None:
+        if generation != self._present_generation or self._closing:
+            return
+        self._door.apply(0.0)
+        if not self._animations_enabled():
+            self._door.apply(1.0)
+            self._opening = False
+            return
+        self._door.open(from_progress=0.0, on_complete=self._on_door_open_complete)
+
+    def _on_door_open_complete(self, _opening: bool) -> None:
+        self._opening = False
+
+    def _hide_door(self) -> None:
+        if not self.get_visible():
+            self.hide()
+            self._closing = False
+            self._opening = False
+            return
+
+        if self._door.progress >= 1.0:
+            self._door.capture_full_size()
+            self._door.apply(1.0)
+
+        if not self._animations_enabled():
+            self._door.cancel()
+            self.hide()
+            self._door.apply(1.0)
+            self._closing = False
+            self._opening = False
+            return
+
+        self._door.close(on_complete=self._on_door_close_complete)
+
+    def _on_door_close_complete(self, _opening: bool) -> None:
+        self.hide()
+        self._door.apply(1.0)
+        self._card_host.set_size_request(self._resolved_card_width, self._card_height_request)
+        self._closing = False
+        self._opening = False
 
     def _on_search_activate(self, *_args) -> None:
         self.on_activate()

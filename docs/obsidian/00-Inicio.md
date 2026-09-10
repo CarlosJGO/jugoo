@@ -2,6 +2,10 @@
 
 Esta carpeta es un vault pequeño para entender y modificar el proyecto sin depender de memoria externa. Las notas usan enlaces de Obsidian (`[[...]]`) y enlaces Markdown a archivos reales.
 
+#esto es para reinstalar el logo
+python3 -m shell --install
+
+
 ## Ruta recomendada
 
 1. [[01-Arquitectura]] para entender el arranque y las capas.

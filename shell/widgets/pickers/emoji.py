@@ -1,4 +1,4 @@
-"""Emoji picker overlay, visually a Search sibling with a glyph grid."""
+"""Emoji picker puerta, visually a Search sibling with a glyph grid."""
 
 from __future__ import annotations
 
@@ -48,6 +48,7 @@ class EmojiPickerWindow(PickerOverlay):
             placeholder="Buscar emoji...",
             empty_text="Sin resultados",
             session=PickerSession(columns=EMOJI_PICKER_COLUMNS),
+            door_axis="horizontal",
         )
         self._on_refresh = on_refresh
         self._on_copy = on_copy

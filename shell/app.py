@@ -271,6 +271,7 @@ class ShellApplication(Gtk.Window):
         GLib.timeout_add(700, self._startup_briefing.schedule)
         self.show_all()
         GLib.idle_add(self.applications_controller.warm)
+        GLib.timeout_add(120, self.pickers_controller.warm)
 
     # Public API for keybindings or external triggers
     def toggle_workspace_panel(self, workspace_id: int) -> None:

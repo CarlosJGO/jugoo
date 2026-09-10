@@ -533,6 +533,17 @@ eventbox.launcher-backdrop {
     background-color: @shell_backdrop;
 }
 
+scrolledwindow.picker-door-clip {
+    background-color: transparent;
+    border: none;
+}
+
+scrolledwindow.picker-door-clip scrollbar {
+    opacity: 0;
+    min-width: 0;
+    min-height: 0;
+}
+
 box.launcher-card {
     background-color: @shell_surface_bg_panel;
     border: 1px solid @shell_border_strong;

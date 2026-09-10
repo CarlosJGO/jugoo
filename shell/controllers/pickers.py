@@ -75,7 +75,7 @@ class PickersController:
 
     def toggle_clipboard(self) -> None:
         picker = self._clipboard_picker.get()
-        if picker.get_visible():
+        if picker.is_effectively_open():
             picker.close_picker()
             return
         self._close_launcher()
@@ -87,7 +87,7 @@ class PickersController:
 
     def toggle_emoji(self) -> None:
         picker = self._emoji_picker.get()
-        if picker.get_visible():
+        if picker.is_effectively_open():
             picker.close_picker()
             return
         self._close_launcher()
@@ -96,6 +96,15 @@ class PickersController:
         if clipboard is not None:
             clipboard.close_picker()
         picker.open_picker()
+
+    def warm(self) -> bool:
+        """Construct and realize pickers so the first bind is not a blank map."""
+        self._emoji_catalog()
+        clipboard = self._clipboard_picker.get()
+        emoji = self._emoji_picker.get()
+        clipboard.warm_up()
+        emoji.warm_up()
+        return False
 
     def _emoji_catalog(self):
         if self._emojis is None:

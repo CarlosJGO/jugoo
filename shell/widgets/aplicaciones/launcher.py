@@ -1,4 +1,4 @@
-"""Jugoo application launcher overlay."""
+"""Jugoo application launcher puerta (Search / control center)."""
 
 from __future__ import annotations
 
@@ -253,7 +253,7 @@ class AppLauncherWindow(PickerOverlay):
         self.close_picker()
 
     def toggle_launcher(self) -> None:
-        if self.get_visible():
+        if self.is_effectively_open():
             self.close_picker()
             return
         self.open_search_mode()
@@ -261,6 +261,7 @@ class AppLauncherWindow(PickerOverlay):
     def warm_up(self) -> None:
         self._snapshot = self._on_refresh()
         self._rebuild_rows()
+        super().warm_up()
 
     def open_search_mode(self) -> None:
         self._mode = SEARCH_DESTINATION

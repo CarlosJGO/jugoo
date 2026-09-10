@@ -1,1 +1,1 @@
-"""Shared picker overlays: Search, Clipboard, and Emoji."""
+"""Puertas: shared centered picker overlays (Search, Clipboard, Emoji)."""
