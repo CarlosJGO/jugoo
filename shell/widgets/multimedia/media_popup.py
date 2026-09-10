@@ -17,6 +17,7 @@ from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango
 from ...config import MEDIA_POPUP_OFFSET
 from ...models import MediaPlayerSnapshot, MediaSnapshot
 from ...popup_handle import pointer_inside_widget, present_popup, hide_popup
+from ...popup_spawn import publish_popup_spawn
 from ...servicios.multimedia.media import MEDIA_AUTO_PLAYER_ID, MediaService
 from ...window_identity import (
     TITLE_MEDIA_POPUP,
@@ -167,6 +168,12 @@ class MediaPopup(Gtk.Window):
         self._anchor = anchor
         self._fixed_popup_top = None
         self.refresh(self._service.snapshot)
+        publish_popup_spawn(
+            self,
+            anchor,
+            title=TITLE_MEDIA_POPUP,
+            offset=MEDIA_POPUP_OFFSET,
+        )
         present_popup(self)
         schedule_popup_position(self._position_after_show)
 

@@ -13,6 +13,7 @@ from gi.repository import Gdk, Gtk
 
 from ...config import WORKSPACE_POPUP_OFFSET
 from ...popup_handle import present_popup, hide_popup
+from ...popup_spawn import publish_popup_spawn
 from ...models import AudioSnapshot, WorkspaceAudioState
 from ...window_identity import (
     TITLE_WORKSPACE_PANEL,
@@ -82,6 +83,12 @@ class WorkspacePanel(Gtk.Window):
             self._output_devices = snapshot.output_devices
             self._input_devices = snapshot.input_devices
         self._render_audio_state(audio_state)
+        publish_popup_spawn(
+            self,
+            button,
+            title=TITLE_WORKSPACE_PANEL,
+            offset=WORKSPACE_POPUP_OFFSET,
+        )
         present_popup(self)
         schedule_popup_position(self._position_after_show)
 

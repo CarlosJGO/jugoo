@@ -30,6 +30,7 @@ from ...models import (
     windows_for_application,
 )
 from ...popup_handle import PopupHandle, PopupOutsideDismiss, hide_popup, present_popup
+from ...popup_spawn import publish_popup_spawn
 from ...servicios.aplicaciones.applications import (
     APP_ACTIVATE_REQUESTED,
     APP_NEW_INSTANCE_REQUESTED,
@@ -191,6 +192,12 @@ class PinnedAppsOverflowPopup(Gtk.Window):
     def open_for(self, anchor: Gtk.Widget) -> None:
         self._anchor = anchor
         self._fixed_top = None
+        publish_popup_spawn(
+            self,
+            anchor,
+            title=TITLE_PINNED_OVERFLOW,
+            offset=PINNED_OVERFLOW_OFFSET,
+        )
         present_popup(self)
         schedule_popup_position(self._position_after_show)
 

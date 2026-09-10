@@ -22,6 +22,7 @@ from ...config import (
 )
 from ...eventbus import EventBus
 from ...popup_handle import PopupHandle, PopupOutsideDismiss, hide_popup, present_popup
+from ...popup_spawn import publish_popup_spawn
 from ...servicios.sistema.system import (
     TEMPERATURE_COLD,
     TEMPERATURE_HOT,
@@ -128,6 +129,7 @@ class MemoryPopup(Gtk.Window):
         has_zram = memory.zram_data_bytes is not None
         for row in self._zram_rows:
             row.set_visible(has_zram)
+        publish_popup_spawn(self, anchor, title=TITLE_MEMORY_POPUP, offset=6)
         present_popup(self)
         schedule_popup_position(self._position)
 

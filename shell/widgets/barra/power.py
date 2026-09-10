@@ -22,6 +22,7 @@ from ...servicios.energia.power import (
     PowerService,
 )
 from ...popup_handle import PopupHandle, PopupOutsideDismiss, pointer_inside_widget, present_popup, hide_popup
+from ...popup_spawn import publish_popup_spawn
 from ...ui import ShellModule
 from ...window_identity import (
     TITLE_POWER_CONFIRM,
@@ -85,6 +86,12 @@ class PowerMenu(Gtk.Window):
 
     def open_for(self, anchor_button: Gtk.Widget) -> None:
         self._anchor_button = anchor_button
+        publish_popup_spawn(
+            self,
+            anchor_button,
+            title=TITLE_POWER_MENU,
+            offset=POWER_MENU_OFFSET,
+        )
         present_popup(self)
         schedule_popup_position(self._position_after_show)
 
@@ -189,6 +196,12 @@ class PowerConfirmDialog(Gtk.Window):
             style.add_class("power-confirm-action-destructive")
         else:
             style.remove_class("power-confirm-action-destructive")
+        publish_popup_spawn(
+            self,
+            anchor_widget,
+            title=TITLE_POWER_CONFIRM,
+            offset=POWER_MENU_OFFSET,
+        )
         present_popup(self)
         schedule_popup_position(self._position_after_show)
 

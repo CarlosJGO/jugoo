@@ -14,6 +14,7 @@ from ...config import (
     CONTROL_CENTER_POPUP_WIDTH,
 )
 from ...popup_handle import pointer_inside_widget, present_popup, hide_popup
+from ...popup_spawn import publish_popup_spawn
 from ...servicios.red.network import NetworkService, wifi_scan_allowed
 from ...window_identity import (
     TITLE_CONTROL_CENTER,
@@ -162,6 +163,12 @@ class ControlCenterPopup(Gtk.Window):
             and wifi_scan_allowed(self._service.snapshot)
         ):
             self._service.request_wifi_scan()
+        publish_popup_spawn(
+            self,
+            anchor_button,
+            title=_VIEW_TITLES[self._view],
+            offset=CONTROL_CENTER_POPUP_OFFSET,
+        )
         present_popup(self)
         schedule_popup_position(self._position_after_show)
 

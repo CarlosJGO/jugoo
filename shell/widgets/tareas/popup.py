@@ -13,6 +13,7 @@ from gi.repository import Gtk
 from ...config import TASKS_POPUP_MAX_HEIGHT, TASKS_POPUP_OFFSET, TASKS_POPUP_WIDTH
 from ...models import TASK_STATUS_COMPLETED, TaskSnapshot
 from ...popup_handle import hide_popup, pointer_inside_widget, present_popup
+from ...popup_spawn import publish_popup_spawn
 from ...servicios.tareas.logic import format_day_label
 from ...servicios.tareas.tasks import TasksService
 from ...window_identity import (
@@ -92,6 +93,12 @@ class TasksPopup(Gtk.Window):
         self._last_height = 0
         self._hide_composer()
         self.refresh()
+        publish_popup_spawn(
+            self,
+            anchor_button,
+            title=TITLE_TASKS,
+            offset=TASKS_POPUP_OFFSET,
+        )
         present_popup(self)
         schedule_popup_position(self._position_after_show)
 

@@ -15,6 +15,7 @@ from ... import config as shell_config
 from ...eventbus import EventBus
 from ...settings.manager import SETTINGS_CHANGED
 from ...popup_handle import PopupOutsideDismiss, hide_popup, present_popup
+from ...popup_spawn import publish_popup_spawn
 from ...servicios.tareas.logic import format_day_label
 from ...servicios.tareas.tasks import TASKS_CHANGED, TasksService
 from ...ui import SHELL_MODULE_STACK_SPACING, ShellModule, shell_label
@@ -98,6 +99,7 @@ class ClockCalendarPopup(Gtk.Window):
         self._select_today()
         self._refresh_marks()
         self._refresh_day_tasks()
+        publish_popup_spawn(self, anchor, title=TITLE_CLOCK_CALENDAR, offset=8)
         present_popup(self)
         schedule_popup_position(self._position_after_show)
 
