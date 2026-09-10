@@ -10,7 +10,11 @@ from gi.repository import GLib, Gtk
 
 from ..eventbus import EventBus
 from ..popup_handle import PopupHandle, PopupOutsideDismiss
-from ..servicios.multimedia.media import MEDIA_CHANGED, MediaService
+from ..servicios.multimedia.media import (
+    MEDIA_CHANGED,
+    MEDIA_DISPLAY_MODE_CHANGED,
+    MediaService,
+)
 from ..widgets.barra.active_window import MEDIA_BAR_CLICKED, ActiveWindowWidget
 from ..widgets.multimedia.media_popup import MediaPopup
 
@@ -36,6 +40,7 @@ class MediaController:
 
         self._event_bus.subscribe(MEDIA_BAR_CLICKED, self._on_media_bar_clicked)
         self._event_bus.subscribe(MEDIA_CHANGED, self._on_media_changed)
+        self._event_bus.subscribe(MEDIA_DISPLAY_MODE_CHANGED, self._on_display_mode_changed)
 
     def close_popup(self) -> None:
         self._outside_click.uninstall()
@@ -44,8 +49,6 @@ class MediaController:
             popup.close_popup()
 
     def toggle_popup(self) -> None:
-        if not self._service.snapshot.has_media:
-            return
         if self._popup.is_visible():
             self.close_popup()
             return
@@ -74,10 +77,16 @@ class MediaController:
         self._handle_media_changed(snapshot)
 
     def _handle_media_changed(self, snapshot) -> bool:
-        if not snapshot.has_media:
-            self.close_popup()
-            return False
         popup = self._popup.maybe
         if popup is not None and popup.get_visible():
             popup.refresh(snapshot)
+        return False
+
+    def _on_display_mode_changed(self, _mode: str) -> None:
+        GLib.idle_add(self._refresh_popup_mode)
+
+    def _refresh_popup_mode(self) -> bool:
+        popup = self._popup.maybe
+        if popup is not None and popup.get_visible():
+            popup.refresh(self._service.snapshot)
         return False

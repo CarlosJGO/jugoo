@@ -850,8 +850,132 @@ box.volume-osd-content {
 }
 
 box.media-popup-content {
-    padding: 16px;
-    min-width: 440px;
+    padding: 18px;
+    min-width: 288px;
+}
+
+box.media-popup-mode-switch {
+    background-color: alpha(@shell_text_primary, 0.06);
+    border-radius: 10px;
+    padding: 3px;
+}
+
+radiobutton.media-popup-mode-btn,
+button.media-popup-mode-btn {
+    min-height: 30px;
+    border-radius: 8px;
+    padding: 4px 10px;
+    background: transparent;
+    border: 0;
+    color: @shell_text_secondary;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+radiobutton.media-popup-mode-btn:checked,
+button.media-popup-mode-btn:checked,
+radiobutton.media-popup-mode-btn:active,
+button.media-popup-mode-btn:active {
+    background-color: alpha(@shell_text_primary, 0.14);
+    color: @shell_text_primary;
+}
+
+box.media-popup-source-row {
+    min-width: 0;
+}
+
+box.media-popup-window-card {
+    background-color: alpha(@shell_text_primary, 0.05);
+    border: 1px solid @shell_border_subtle;
+    border-radius: 14px;
+    padding: 10px;
+}
+
+box.media-popup-window-thumb-frame {
+    background-color: alpha(@shell_text_primary, 0.08);
+    border-radius: 12px;
+    min-width: 72px;
+    min-height: 72px;
+}
+
+label.media-popup-window-kind,
+label.media-popup-window-status {
+    color: @shell_text_secondary;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+
+label.media-popup-window-title {
+    color: @shell_text_primary;
+    font-size: 14px;
+    font-weight: 700;
+    min-width: 0;
+}
+
+label.media-popup-window-detail {
+    color: @shell_text_secondary;
+    font-size: 12px;
+    min-width: 0;
+}
+
+label.media-popup-window-hint {
+    color: @shell_text_secondary;
+    font-size: 11px;
+    opacity: 0.85;
+}
+
+progressbar.media-popup-window-progress trough {
+    background-color: @shell_border_medium;
+    border-radius: 3px;
+    min-height: 4px;
+}
+
+progressbar.media-popup-window-progress progress {
+    background-color: @shell_accent;
+    border-radius: 3px;
+    min-height: 4px;
+}
+
+button.media-popup-source-btn {
+    min-height: 32px;
+    border-radius: 10px;
+    padding: 4px 10px;
+    background-color: alpha(@shell_text_primary, 0.06);
+    border: 1px solid @shell_border_subtle;
+}
+
+button.media-popup-source-btn:hover {
+    background-color: alpha(@shell_text_primary, 0.10);
+}
+
+list.media-popup-source-list {
+    background: transparent;
+    min-width: 220px;
+}
+
+row.media-popup-source-row-item {
+    border-radius: 8px;
+    margin: 2px 4px;
+}
+
+row.media-popup-source-row-item:hover {
+    background-color: alpha(@shell_text_primary, 0.08);
+}
+
+row.media-popup-source-active {
+    background-color: alpha(@shell_accent, 0.18);
+}
+
+label.media-popup-source-title {
+    color: @shell_text_primary;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+label.media-popup-source-detail {
+    color: @shell_text_secondary;
+    font-size: 11px;
 }
 
 label.media-popup-section-label {
@@ -863,9 +987,10 @@ label.media-popup-section-label {
 box.media-popup-artwork-frame {
     background-color: alpha(@shell_text_primary, 0.06);
     border: 1px solid @shell_border_subtle;
-    border-radius: 12px;
-    min-width: 128px;
-    min-height: 128px;
+    border-radius: 16px;
+    min-width: 200px;
+    min-height: 200px;
+    box-shadow: 0 8px 20px alpha(@shell_shadow, 0.55);
 }
 
 image.media-popup-artwork {
@@ -875,19 +1000,24 @@ image.media-popup-artwork {
 
 label.media-popup-title {
     color: @shell_text_primary;
-    font-size: 15px;
-    font-weight: 600;
-    min-width: 0;
+    font-size: 16px;
+    font-weight: 700;
+    min-width: 120px;
+    min-height: 22px;
 }
 
 label.media-popup-detail {
     color: @shell_text_primary;
     font-size: 13px;
+    min-width: 120px;
+    min-height: 18px;
 }
 
 label.media-popup-detail-muted {
     color: @shell_text_secondary;
     font-size: 12px;
+    min-width: 120px;
+    min-height: 16px;
 }
 
 label.media-popup-status {
@@ -900,14 +1030,23 @@ label.media-popup-time {
     font-size: 11px;
 }
 
+box.media-popup-transport {
+    margin-top: 2px;
+}
+
+box.media-popup-extras {
+    margin-top: 2px;
+}
+
 scale.media-popup-progress {
     min-height: 18px;
+    padding: 0;
 }
 
 scale.media-popup-progress trough {
     background-color: @shell_border_medium;
     border-radius: 4px;
-    min-height: 4px;
+    min-height: 5px;
 }
 
 scale.media-popup-progress highlight {
@@ -916,23 +1055,63 @@ scale.media-popup-progress highlight {
 }
 
 scale.media-popup-progress slider {
-    min-width: 10px;
-    min-height: 10px;
+    min-width: 12px;
+    min-height: 12px;
     border-radius: 50%;
     background-color: @shell_on_accent;
 }
 
+scale.media-popup-volume {
+    min-height: 18px;
+    padding: 0;
+}
+
+scale.media-popup-volume trough {
+    background-color: @shell_border_medium;
+    border-radius: 4px;
+    min-height: 4px;
+}
+
+scale.media-popup-volume highlight {
+    background-color: @shell_text_secondary;
+    border-radius: 4px;
+}
+
+scale.media-popup-volume slider {
+    min-width: 10px;
+    min-height: 10px;
+    border-radius: 50%;
+    background-color: @shell_text_primary;
+}
+
+image.media-popup-volume-icon {
+    color: @shell_text_secondary;
+}
+
 button.media-popup-control {
-    min-width: 36px;
-    min-height: 36px;
-    border-radius: 18px;
-    padding: 6px;
+    min-width: 40px;
+    min-height: 40px;
+    border-radius: 20px;
+    padding: 8px;
     background: transparent;
     border: 0;
 }
 
+button.media-popup-control-primary {
+    min-width: 52px;
+    min-height: 52px;
+    border-radius: 26px;
+    background-color: @shell_accent;
+    color: @shell_on_accent;
+}
+
 button.media-popup-control:hover {
     background-color: alpha(@shell_text_primary, 0.08);
+}
+
+button.media-popup-control-primary:hover {
+    background-color: @shell_accent_soft;
+    color: @shell_text_primary;
 }
 
 button.media-popup-control:active {
@@ -941,6 +1120,11 @@ button.media-popup-control:active {
 
 button.media-popup-control:disabled {
     opacity: 0.42;
+}
+
+button.media-popup-loop-active {
+    color: @shell_accent;
+    background-color: alpha(@shell_accent, 0.16);
 }
 
 

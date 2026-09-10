@@ -14,6 +14,7 @@ from gi.repository import GLib
 from shell.eventbus import EventBus
 from shell.models import MediaPlayerSnapshot, MediaSnapshot
 from shell.servicios.multimedia.media import (
+    MEDIA_DISPLAY_WINDOW,
     MediaService,
     compose_media_snapshot,
     dbus_property_names,
@@ -32,6 +33,13 @@ from shell.widgets.multimedia.media_format import (
     media_status_label,
 )
 from shell.widgets.multimedia.media_popup_layout import media_popup_dimensions
+
+
+def _window_media_service() -> MediaService:
+    """Most selection tests exercise window/cava sources, not Strawberry lock."""
+    service = MediaService(EventBus())
+    service._display_mode = MEDIA_DISPLAY_WINDOW
+    return service
 
 
 def _player(
@@ -209,7 +217,7 @@ def test_compose_media_snapshot_empty_without_players() -> None:
 
 
 def test_media_service_emits_on_player_add_and_remove() -> None:
-    service = MediaService(EventBus())
+    service = _window_media_service()
     seen: list[MediaSnapshot] = []
     service._event_bus.subscribe("media_changed", seen.append)
 
@@ -244,7 +252,7 @@ def test_media_service_emits_on_player_add_and_remove() -> None:
 
 
 def test_set_active_player_sets_manual_override() -> None:
-    service = MediaService(EventBus())
+    service = _window_media_service()
     bus_name = "org.mpris.MediaPlayer2.firefox.instance_1"
     service._players[bus_name] = mock.Mock(
         bus_name=bus_name,
@@ -265,7 +273,7 @@ def test_set_active_player_sets_manual_override() -> None:
 
 
 def test_set_auto_player_selection_clears_manual_override() -> None:
-    service = MediaService(EventBus())
+    service = _window_media_service()
     bus_name = "org.mpris.MediaPlayer2.firefox.instance_1"
     service._players[bus_name] = mock.Mock(
         bus_name=bus_name,
@@ -287,7 +295,7 @@ def test_set_auto_player_selection_clears_manual_override() -> None:
 
 
 def test_manual_player_cleared_when_player_removed() -> None:
-    service = MediaService(EventBus())
+    service = _window_media_service()
     bus_name = "org.mpris.MediaPlayer2.firefox.instance_1"
     service._players[bus_name] = mock.Mock(
         bus_name=bus_name,
@@ -303,7 +311,7 @@ def test_manual_player_cleared_when_player_removed() -> None:
 
 
 def test_position_poll_emits_media_changed_when_position_moves() -> None:
-    service = MediaService(EventBus())
+    service = _window_media_service()
     seen: list[MediaSnapshot] = []
     service._event_bus.subscribe("media_changed", seen.append)
     bus_name = "org.mpris.MediaPlayer2.firefox.instance_1"
@@ -337,7 +345,7 @@ def test_position_poll_emits_media_changed_when_position_moves() -> None:
 
 
 def test_position_poll_stops_when_player_is_paused() -> None:
-    service = MediaService(EventBus())
+    service = _window_media_service()
     bus_name = "org.mpris.MediaPlayer2.firefox.instance_1"
     paused = _player(bus_name=bus_name, identity="Firefox", status="paused")
     service._snapshot = compose_media_snapshot(
@@ -351,7 +359,7 @@ def test_position_poll_stops_when_player_is_paused() -> None:
 
 
 def test_seek_to_calls_mpris_seek() -> None:
-    service = MediaService(EventBus())
+    service = _window_media_service()
     service._bus = mock.Mock()
     bus_name = "org.mpris.MediaPlayer2.firefox.instance_1"
     proxy = mock.Mock()
@@ -399,7 +407,7 @@ def test_media_controller_refreshes_visible_popup_on_media_changed() -> None:
         def maybe(self) -> FakePopup:
             return self._popup
 
-    service = MediaService(EventBus())
+    service = _window_media_service()
     popup = FakePopup()
     controller = MediaController(
         EventBus(),
@@ -419,7 +427,7 @@ def test_media_controller_refreshes_visible_popup_on_media_changed() -> None:
 
 
 def test_set_active_player_updates_preferred_bus_name() -> None:
-    service = MediaService(EventBus())
+    service = _window_media_service()
     bus_name = "org.mpris.MediaPlayer2.firefox.instance_1"
     service._players[bus_name] = mock.Mock(
         bus_name=bus_name,
@@ -464,7 +472,9 @@ def _dual_player_harness(
     strawberry_title: str = "Strawberry Track",
     manual: str | None = None,
 ) -> tuple[MediaService, list[MediaSnapshot], dict[str, MediaPlayerSnapshot]]:
-    service = MediaService(EventBus())
+    service = _window_media_service()
+    # Auto source switching is a window-mode concern; player mode locks to Strawberry.
+    service._display_mode = MEDIA_DISPLAY_WINDOW
     seen: list[MediaSnapshot] = []
     service._event_bus.subscribe("media_changed", seen.append)
     states = {
@@ -502,7 +512,7 @@ def test_dbus_property_names_from_variant_and_invalidated() -> None:
     assert dbus_property_names(changed, ["Metadata"]) == {"PlaybackStatus", "Metadata"}
 
 
-def test_auto_switches_youtube_playing_to_strawberry_playing() -> None:
+def test_window_mode_never_auto_selects_strawberry() -> None:
     service, seen, states = _dual_player_harness("playing", "paused")
     read = _read_from(states)
     with mock.patch.object(service, "_resolve_artwork"), mock.patch.object(
@@ -516,13 +526,12 @@ def test_auto_switches_youtube_playing_to_strawberry_playing() -> None:
         service._handle_property_changes(STRAWBERRY, {"PlaybackStatus"})
 
     assert service.auto_player_selection is True
-    assert service.snapshot.active_player == STRAWBERRY
+    assert service.snapshot.active_player == YOUTUBE
     assert seen[-1].active is not None
-    assert seen[-1].active.identity == "Strawberry"
-    assert seen[-1].active.status == "playing"
+    assert seen[-1].active.identity == "Firefox"
 
 
-def test_auto_switches_strawberry_playing_to_youtube_playing_and_stays() -> None:
+def test_window_mode_keeps_youtube_when_strawberry_is_only_playing() -> None:
     service, seen, states = _dual_player_harness("paused", "playing")
     read = _read_from(states)
     with mock.patch.object(service, "_resolve_artwork"), mock.patch.object(
@@ -531,7 +540,8 @@ def test_auto_switches_strawberry_playing_to_youtube_playing_and_stays() -> None
         side_effect=read,
     ):
         service._refresh_snapshot(emit=True)
-        assert service.snapshot.active_player == STRAWBERRY
+        # Strawberry is playing, but window mode only considers non-Strawberry sources.
+        assert service.snapshot.active_player == YOUTUBE
         states[YOUTUBE] = replace(states[YOUTUBE], status="playing")
         service._handle_property_changes(YOUTUBE, {"PlaybackStatus"})
         assert service.snapshot.active_player == YOUTUBE
@@ -545,8 +555,8 @@ def test_auto_switches_strawberry_playing_to_youtube_playing_and_stays() -> None
     assert strawberry.title == "Other Song"
 
 
-def test_auto_selects_other_playing_when_active_pauses() -> None:
-    service, seen, states = _dual_player_harness("playing", "paused")
+def test_window_mode_stays_on_youtube_when_strawberry_pauses() -> None:
+    service, seen, states = _dual_player_harness("playing", "playing")
     read = _read_from(states)
     with mock.patch.object(service, "_resolve_artwork"), mock.patch.object(
         service,
@@ -554,9 +564,7 @@ def test_auto_selects_other_playing_when_active_pauses() -> None:
         side_effect=read,
     ):
         service._refresh_snapshot(emit=True)
-        states[STRAWBERRY] = replace(states[STRAWBERRY], status="playing")
-        service._handle_property_changes(STRAWBERRY, {"PlaybackStatus"})
-        assert service.snapshot.active_player == STRAWBERRY
+        assert service.snapshot.active_player == YOUTUBE
         states[STRAWBERRY] = replace(states[STRAWBERRY], status="paused")
         service._handle_property_changes(STRAWBERRY, {"PlaybackStatus"})
 
@@ -566,7 +574,7 @@ def test_auto_selects_other_playing_when_active_pauses() -> None:
 
 
 def test_volume_property_does_not_steal_auto_selection() -> None:
-    service, seen, states = _dual_player_harness("paused", "playing")
+    service, seen, states = _dual_player_harness("playing", "playing")
     read = _read_from(states)
     with mock.patch.object(service, "_resolve_artwork"), mock.patch.object(
         service,
@@ -574,11 +582,11 @@ def test_volume_property_does_not_steal_auto_selection() -> None:
         side_effect=read,
     ):
         service._refresh_snapshot(emit=True)
-        assert service.snapshot.active_player == STRAWBERRY
+        assert service.snapshot.active_player == YOUTUBE
         emitted = len(seen)
-        service._handle_property_changes(YOUTUBE, {"Volume"})
+        service._handle_property_changes(STRAWBERRY, {"Volume"})
 
-    assert service.snapshot.active_player == STRAWBERRY
+    assert service.snapshot.active_player == YOUTUBE
     assert len(seen) == emitted
 
 
@@ -599,7 +607,7 @@ def test_manual_does_not_switch_when_other_player_starts() -> None:
     assert seen[-1].active_player == YOUTUBE
 
 
-def test_manual_player_removed_returns_to_auto() -> None:
+def test_manual_player_removed_returns_to_auto_without_strawberry() -> None:
     service, seen, states = _dual_player_harness("playing", "playing", manual=YOUTUBE)
     read = _read_from(states)
     with mock.patch.object(service, "_resolve_artwork"), mock.patch.object(
@@ -613,9 +621,8 @@ def test_manual_player_removed_returns_to_auto() -> None:
 
     assert service.manual_player is None
     assert service.auto_player_selection is True
-    assert service.snapshot.active_player == STRAWBERRY
-    assert seen[-1].active is not None
-    assert seen[-1].active.identity == "Strawberry"
+    assert service.snapshot.active_player is None
+    assert seen[-1].active is None
 
 
 class _FakeMediaPopup:
@@ -703,7 +710,7 @@ def test_track_change_updates_visible_popup_without_recreating() -> None:
     assert popup.refresh_calls[-1].active.duration_usec == 240_000_000
 
 
-def test_auto_player_change_refreshes_popup_without_closing() -> None:
+def test_auto_player_change_does_not_pick_strawberry_in_window_mode() -> None:
     service, _seen, states = _dual_player_harness("playing", "paused")
     _controller, popup = _controller_with_popup(service)
     read = _read_from(states)
@@ -717,12 +724,12 @@ def test_auto_player_change_refreshes_popup_without_closing() -> None:
         service._handle_property_changes(STRAWBERRY, {"PlaybackStatus"})
 
     assert popup.closed is False
-    assert popup.refresh_calls[-1].active_player == STRAWBERRY
+    assert popup.refresh_calls[-1].active_player == YOUTUBE
     assert popup.refresh_calls[-1].active is not None
-    assert popup.refresh_calls[-1].active.title == "Now Playing"
+    assert popup.refresh_calls[-1].active.identity == "Firefox"
 
 
-def test_active_window_receives_new_media_snapshot() -> None:
+def test_active_window_keeps_youtube_when_strawberry_plays() -> None:
     service, _seen, states = _dual_player_harness("playing", "paused")
     received: list[MediaSnapshot] = []
     service._event_bus.subscribe("media_changed", received.append)
@@ -737,8 +744,8 @@ def test_active_window_receives_new_media_snapshot() -> None:
         service._handle_property_changes(STRAWBERRY, {"PlaybackStatus"})
 
     assert received[-1].active is not None
-    assert received[-1].active_player == STRAWBERRY
-    assert received[-1].active.title == "Bar Title"
+    assert received[-1].active_player == YOUTUBE
+    assert received[-1].active.identity == "Firefox"
 
 
 def _run_transport_timers():
@@ -753,8 +760,9 @@ def _run_transport_timers():
     return idle, timeout
 
 
-def test_next_track_reselects_active_player_in_auto_mode() -> None:
-    service = MediaService(EventBus())
+def test_next_track_keeps_window_source_when_firefox_pauses() -> None:
+    service = _window_media_service()
+    service._display_mode = MEDIA_DISPLAY_WINDOW
     service._bus = mock.Mock()
     firefox = "org.mpris.MediaPlayer2.firefox.instance_1"
     strawberry = "org.mpris.MediaPlayer2.strawberry"
@@ -773,6 +781,7 @@ def test_next_track_reselects_active_player_in_auto_mode() -> None:
         manual=None,
         previous=firefox,
         activity_rank={},
+        display_mode=MEDIA_DISPLAY_WINDOW,
     )
     assert service.snapshot.active_player == firefox
 
@@ -790,13 +799,14 @@ def test_next_track_reselects_active_player_in_auto_mode() -> None:
     ):
         service.next_track()
 
-    assert service.snapshot.active_player == strawberry
+    assert service.snapshot.active_player == firefox
     assert service.snapshot.active is not None
-    assert service.snapshot.active.title == "New Track"
+    assert service.snapshot.active.title == "Old"
 
 
-def test_previous_track_reselects_active_player_in_auto_mode() -> None:
-    service = MediaService(EventBus())
+def test_previous_track_keeps_window_source_when_firefox_pauses() -> None:
+    service = _window_media_service()
+    service._display_mode = MEDIA_DISPLAY_WINDOW
     service._bus = mock.Mock()
     firefox = "org.mpris.MediaPlayer2.firefox.instance_1"
     strawberry = "org.mpris.MediaPlayer2.strawberry"
@@ -815,6 +825,7 @@ def test_previous_track_reselects_active_player_in_auto_mode() -> None:
         manual=None,
         previous=firefox,
         activity_rank={},
+        display_mode=MEDIA_DISPLAY_WINDOW,
     )
 
     def read_player(state, *, position_only=False):
@@ -831,13 +842,14 @@ def test_previous_track_reselects_active_player_in_auto_mode() -> None:
     ):
         service.previous_track()
 
-    assert service.snapshot.active_player == strawberry
+    assert service.snapshot.active_player == firefox
     assert service.snapshot.active is not None
-    assert service.snapshot.active.title == "Previous Track"
+    assert service.snapshot.active.title == "Current"
 
 
 def test_next_track_keeps_manual_player_selection() -> None:
-    service = MediaService(EventBus())
+    service = _window_media_service()
+    service._display_mode = MEDIA_DISPLAY_WINDOW
     service._bus = mock.Mock()
     firefox = "org.mpris.MediaPlayer2.firefox.instance_1"
     strawberry = "org.mpris.MediaPlayer2.strawberry"
@@ -857,6 +869,7 @@ def test_next_track_keeps_manual_player_selection() -> None:
         manual=firefox,
         previous=firefox,
         activity_rank={},
+        display_mode=MEDIA_DISPLAY_WINDOW,
     )
 
     def read_player(state, *, position_only=False):
@@ -879,7 +892,8 @@ def test_next_track_keeps_manual_player_selection() -> None:
 
 
 def test_previous_track_keeps_manual_player_selection() -> None:
-    service = MediaService(EventBus())
+    service = _window_media_service()
+    service._display_mode = MEDIA_DISPLAY_WINDOW
     service._bus = mock.Mock()
     firefox = "org.mpris.MediaPlayer2.firefox.instance_1"
     strawberry = "org.mpris.MediaPlayer2.strawberry"
@@ -899,6 +913,7 @@ def test_previous_track_keeps_manual_player_selection() -> None:
         manual=firefox,
         previous=firefox,
         activity_rank={},
+        display_mode=MEDIA_DISPLAY_WINDOW,
     )
 
     def read_player(state, *, position_only=False):
@@ -941,7 +956,7 @@ def test_next_track_emits_media_changed_for_visible_popup() -> None:
         def maybe(self) -> FakePopup:
             return self._popup
 
-    service = MediaService(EventBus())
+    service = _window_media_service()
     service._bus = mock.Mock()
     bus_name = "org.mpris.MediaPlayer2.firefox.instance_1"
     before = _player(bus_name=bus_name, identity="Firefox", status="playing", title="Before")
@@ -981,7 +996,7 @@ def test_next_track_emits_media_changed_for_visible_popup() -> None:
 
 
 def test_play_pause_calls_mpris_method() -> None:
-    service = MediaService(EventBus())
+    service = _window_media_service()
     bus_name = "org.mpris.MediaPlayer2.firefox.instance_1"
     proxy = mock.Mock()
     proxy.call_sync = mock.Mock()
@@ -1010,9 +1025,84 @@ def test_play_pause_calls_mpris_method() -> None:
 
 def test_media_popup_dimensions_are_standardized() -> None:
     width, max_height, artwork_size = media_popup_dimensions()
-    assert width == MEDIA_POPUP_WIDTH == 440
-    assert max_height == MEDIA_POPUP_MAX_HEIGHT == 300
-    assert artwork_size == MEDIA_ARTWORK_SIZE == 128
+    assert width == MEDIA_POPUP_WIDTH == 320
+    assert max_height == MEDIA_POPUP_MAX_HEIGHT == 520
+    assert artwork_size == MEDIA_ARTWORK_SIZE == 200
+
+
+def test_display_mode_defaults_to_player_and_toggles() -> None:
+    from shell.eventbus import EventBus
+    from shell.servicios.multimedia.media import (
+        MEDIA_DISPLAY_MODE_CHANGED,
+        MEDIA_DISPLAY_PLAYER,
+        MEDIA_DISPLAY_WINDOW,
+        MediaService,
+    )
+
+    bus = EventBus()
+    modes: list[str] = []
+    bus.subscribe(MEDIA_DISPLAY_MODE_CHANGED, lambda mode: modes.append(mode))
+    service = MediaService(bus)
+    assert service.display_mode == MEDIA_DISPLAY_PLAYER
+    service.set_display_mode(MEDIA_DISPLAY_WINDOW)
+    assert service.display_mode == MEDIA_DISPLAY_WINDOW
+    assert modes == [MEDIA_DISPLAY_WINDOW]
+    service.toggle_display_mode()
+    assert service.display_mode == MEDIA_DISPLAY_PLAYER
+    assert modes[-1] == MEDIA_DISPLAY_PLAYER
+
+
+def test_player_mode_locks_to_strawberry() -> None:
+    from shell.servicios.multimedia.media import (
+        MEDIA_DISPLAY_PLAYER,
+        MEDIA_DISPLAY_WINDOW,
+        compose_media_snapshot,
+    )
+
+    players = (
+        _player(bus_name="org.mpris.MediaPlayer2.firefox.instance_1", identity="Firefox", status="playing"),
+        _player(bus_name="org.mpris.MediaPlayer2.strawberry", identity="Strawberry", status="paused", artist="Artist Name"),
+    )
+    locked = compose_media_snapshot(
+        players,
+        manual="org.mpris.MediaPlayer2.firefox.instance_1",
+        previous=None,
+        activity_rank={},
+        display_mode=MEDIA_DISPLAY_PLAYER,
+    )
+    assert locked.active_player == "org.mpris.MediaPlayer2.strawberry"
+    assert locked.active is not None
+    assert locked.active.artist == "Artist Name"
+
+    only_firefox = (
+        _player(bus_name="org.mpris.MediaPlayer2.firefox.instance_1", identity="Firefox", status="playing"),
+    )
+    empty_player = compose_media_snapshot(
+        only_firefox,
+        manual=None,
+        previous="org.mpris.MediaPlayer2.firefox.instance_1",
+        activity_rank={},
+        display_mode=MEDIA_DISPLAY_PLAYER,
+    )
+    assert empty_player.active_player is None
+
+    windowed = compose_media_snapshot(
+        players,
+        manual="org.mpris.MediaPlayer2.firefox.instance_1",
+        previous=None,
+        activity_rank={},
+        display_mode=MEDIA_DISPLAY_WINDOW,
+    )
+    assert windowed.active_player == "org.mpris.MediaPlayer2.firefox.instance_1"
+
+    ignored = compose_media_snapshot(
+        players,
+        manual="org.mpris.MediaPlayer2.strawberry",
+        previous="org.mpris.MediaPlayer2.strawberry",
+        activity_rank={},
+        display_mode=MEDIA_DISPLAY_WINDOW,
+    )
+    assert ignored.active_player == "org.mpris.MediaPlayer2.firefox.instance_1"
 
 
 def test_format_media_time_usec() -> None:
@@ -1086,18 +1176,18 @@ if __name__ == "__main__":
     test_position_poll_stops_when_player_is_paused()
     test_seek_to_calls_mpris_seek()
     test_dbus_property_names_from_variant_and_invalidated()
-    test_auto_switches_youtube_playing_to_strawberry_playing()
-    test_auto_switches_strawberry_playing_to_youtube_playing_and_stays()
-    test_auto_selects_other_playing_when_active_pauses()
+    test_window_mode_never_auto_selects_strawberry()
+    test_window_mode_keeps_youtube_when_strawberry_is_only_playing()
+    test_window_mode_stays_on_youtube_when_strawberry_pauses()
     test_volume_property_does_not_steal_auto_selection()
     test_manual_does_not_switch_when_other_player_starts()
-    test_manual_player_removed_returns_to_auto()
+    test_manual_player_removed_returns_to_auto_without_strawberry()
     test_metadata_change_updates_visible_popup()
     test_track_change_updates_visible_popup_without_recreating()
-    test_auto_player_change_refreshes_popup_without_closing()
-    test_active_window_receives_new_media_snapshot()
-    test_next_track_reselects_active_player_in_auto_mode()
-    test_previous_track_reselects_active_player_in_auto_mode()
+    test_auto_player_change_does_not_pick_strawberry_in_window_mode()
+    test_active_window_keeps_youtube_when_strawberry_plays()
+    test_next_track_keeps_window_source_when_firefox_pauses()
+    test_previous_track_keeps_window_source_when_firefox_pauses()
     test_next_track_keeps_manual_player_selection()
     test_previous_track_keeps_manual_player_selection()
     test_next_track_emits_media_changed_for_visible_popup()
@@ -1105,6 +1195,8 @@ if __name__ == "__main__":
     test_set_active_player_updates_preferred_bus_name()
     test_play_pause_calls_mpris_method()
     test_media_popup_dimensions_are_standardized()
+    test_display_mode_defaults_to_player_and_toggles()
+    test_player_mode_locks_to_strawberry()
     test_format_media_time_usec()
     test_media_status_helpers()
     test_compact_bar_labels()

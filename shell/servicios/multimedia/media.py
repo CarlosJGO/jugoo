@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import subprocess
 import time
 from dataclasses import replace
 from typing import Any
@@ -23,8 +24,14 @@ from ...config import (
     MEDIA_PLAYER_INTERFACE,
     MEDIA_POSITION_POLL_MS,
     MEDIA_REFRESH_DEBOUNCE_MS,
-    MEDIA_TRACK_CHANGE_REFRESH_MS,
     MEDIA_ROOT_INTERFACE,
+    MEDIA_STRAWBERRY_COMMAND,
+    MEDIA_STRAWBERRY_DESKTOP_IDS,
+    MEDIA_STRAWBERRY_IDLE_KILL_SEC,
+    MEDIA_STRAWBERRY_PLAY_POLL_MAX_MS,
+    MEDIA_STRAWBERRY_PLAY_POLL_MS,
+    MEDIA_STRAWBERRY_PLAY_RETRY_MS,
+    MEDIA_TRACK_CHANGE_REFRESH_MS,
 )
 from ...eventbus import EventBus
 from ...models import MediaPlayerSnapshot, MediaSnapshot
@@ -32,6 +39,9 @@ from .media_artwork import MediaArtworkCache
 
 MEDIA_CHANGED = "media_changed"
 MEDIA_AUTO_PLAYER_ID = "__auto__"
+MEDIA_DISPLAY_MODE_CHANGED = "media_display_mode_changed"
+MEDIA_DISPLAY_WINDOW = "window"
+MEDIA_DISPLAY_PLAYER = "player"
 
 DBUS_BUS_NAME = "org.freedesktop.DBus"
 DBUS_OBJECT_PATH = "/org/freedesktop/DBus"
@@ -49,9 +59,21 @@ _CONTENT_PROPERTIES = frozenset(
         "CanGoNext",
         "CanGoPrevious",
         "CanSeek",
+        "CanControl",
+        "Volume",
+        "LoopStatus",
     },
 )
 _POSITION_PROPERTIES = frozenset({"Position"})
+
+_LOOP_CYCLE = ("None", "Track", "Playlist")
+
+
+def normalize_loop_status(raw: Any) -> str:
+    value = str(raw or "None").strip()
+    if value in _LOOP_CYCLE:
+        return value
+    return "None"
 
 
 def normalize_playback_status(raw: Any) -> str:
@@ -161,17 +183,56 @@ def select_active_player_bus_name(
     )[0].bus_name
 
 
+def find_strawberry_bus_name(players: tuple[MediaPlayerSnapshot, ...]) -> str | None:
+    """Prefer Strawberry as the dedicated music-player backend."""
+    for player in players:
+        if is_strawberry_player(player):
+            return player.bus_name
+    return None
+
+
+def is_strawberry_bus_name(bus_name: str) -> bool:
+    return "strawberry" in bus_name.casefold()
+
+
+def is_strawberry_player(player: MediaPlayerSnapshot) -> bool:
+    return (
+        is_strawberry_bus_name(player.bus_name)
+        or player.identity.casefold() == "strawberry"
+    )
+
+
+def window_mode_players(
+    players: tuple[MediaPlayerSnapshot, ...],
+) -> tuple[MediaPlayerSnapshot, ...]:
+    """Window/cava sources never include Strawberry (that belongs to player mode)."""
+    return tuple(player for player in players if not is_strawberry_player(player))
+
+
 def compose_media_snapshot(
     players: tuple[MediaPlayerSnapshot, ...],
     *,
     manual: str | None,
     previous: str | None,
     activity_rank: dict[str, float],
+    display_mode: str = MEDIA_DISPLAY_WINDOW,
 ) -> MediaSnapshot:
+    if display_mode == MEDIA_DISPLAY_PLAYER:
+        # Never fall back to Firefox/etc. — player mode is Strawberry-only.
+        return MediaSnapshot(
+            players=players,
+            active_player=find_strawberry_bus_name(players),
+        )
+
+    candidates = window_mode_players(players)
+    effective_manual = None if (manual and is_strawberry_bus_name(manual)) else manual
+    effective_previous = (
+        None if (previous and is_strawberry_bus_name(previous)) else previous
+    )
     active = select_active_player_bus_name(
-        players,
-        manual=manual,
-        previous=previous,
+        candidates,
+        manual=effective_manual,
+        previous=effective_previous,
         activity_rank=activity_rank,
     )
     return MediaSnapshot(players=players, active_player=active)
@@ -218,6 +279,7 @@ class MediaService:
         self._bus: Gio.DBusConnection | None = None
         self._players: dict[str, _PlayerState] = {}
         self._manual_player: str | None = None
+        self._display_mode = MEDIA_DISPLAY_PLAYER
         self._activity_rank: dict[str, float] = {}
         self._artwork_cache = MediaArtworkCache()
         self._artwork_paths: dict[str, str] = {}
@@ -226,6 +288,11 @@ class MediaService:
         self._position_source_id = 0
         self._track_refresh_source_id = 0
         self._name_owner_signal_id = 0
+        self._strawberry_idle_source_id = 0
+        self._pending_play_poll_id = 0
+        self._pending_play_deadline = 0.0
+        self._pending_play_retries_left = 0
+        self._shell_launched_strawberry = False
 
     @property
     def snapshot(self) -> MediaSnapshot:
@@ -238,6 +305,28 @@ class MediaService:
     @property
     def auto_player_selection(self) -> bool:
         return self._manual_player is None
+
+    @property
+    def display_mode(self) -> str:
+        """``player`` locks to Strawberry; ``window`` uses the chosen MPRIS source for cava/bar."""
+        return self._display_mode
+
+    def set_display_mode(self, mode: str) -> None:
+        next_mode = MEDIA_DISPLAY_WINDOW if mode == MEDIA_DISPLAY_WINDOW else MEDIA_DISPLAY_PLAYER
+        if next_mode == self._display_mode:
+            return
+        self._display_mode = next_mode
+        if next_mode == MEDIA_DISPLAY_WINDOW and self._manual_player:
+            if is_strawberry_bus_name(self._manual_player):
+                self._manual_player = None
+        self._event_bus.emit(MEDIA_DISPLAY_MODE_CHANGED, self._display_mode)
+        self._refresh_snapshot(emit=True)
+
+    def toggle_display_mode(self) -> None:
+        if self._display_mode == MEDIA_DISPLAY_PLAYER:
+            self.set_display_mode(MEDIA_DISPLAY_WINDOW)
+        else:
+            self.set_display_mode(MEDIA_DISPLAY_PLAYER)
 
     def start(self) -> None:
         if self._started:
@@ -266,6 +355,8 @@ class MediaService:
         self._cancel_refresh()
         self._cancel_position_poll()
         self._cancel_track_change_refresh()
+        self._cancel_pending_play_poll()
+        self._cancel_strawberry_idle_watch()
         for state in list(self._players.values()):
             self._remove_player_state(state.bus_name)
         if self._bus is not None and self._name_owner_signal_id:
@@ -275,6 +366,8 @@ class MediaService:
         self._artwork_cache.close()
 
     def set_active_player(self, bus_name: str) -> None:
+        if is_strawberry_bus_name(bus_name):
+            return
         if bus_name and bus_name not in self._players:
             return
         self._manual_player = bus_name or None
@@ -287,9 +380,13 @@ class MediaService:
         self._refresh_snapshot(emit=True)
 
     def play_pause(self) -> None:
+        if self._ensure_player_backend(want_play=True):
+            return
         self._call_active_player("PlayPause")
 
     def play(self) -> None:
+        if self._ensure_player_backend(want_play=True):
+            return
         self._call_active_player("Play")
 
     def pause(self) -> None:
@@ -299,10 +396,165 @@ class MediaService:
         self._call_active_player("Stop")
 
     def next_track(self) -> None:
+        if self._ensure_player_backend(want_play=True):
+            return
         self._transport_with_track_refresh("Next")
 
     def previous_track(self) -> None:
+        if self._ensure_player_backend(want_play=True):
+            return
         self._transport_with_track_refresh("Previous")
+
+    def ensure_strawberry_running(self, *, want_play: bool = False) -> bool:
+        """Launch Strawberry if player mode needs it and MPRIS is missing.
+
+        Returns True when a launch was requested (caller should wait for MPRIS).
+        """
+        if find_strawberry_bus_name(self._snapshot.players) is not None:
+            return False
+        if want_play:
+            self._arm_pending_play_after_launch()
+        GLib.idle_add(self._launch_strawberry_idle)
+        return True
+
+    def _ensure_player_backend(self, *, want_play: bool = False) -> bool:
+        if self._display_mode != MEDIA_DISPLAY_PLAYER:
+            return False
+        return self.ensure_strawberry_running(want_play=want_play)
+
+    def _arm_pending_play_after_launch(self) -> None:
+        self._pending_play_deadline = time.monotonic() + (
+            MEDIA_STRAWBERRY_PLAY_POLL_MAX_MS / 1000.0
+        )
+        self._pending_play_retries_left = 4
+        self._cancel_pending_play_poll()
+        self._pending_play_poll_id = GLib.timeout_add(
+            MEDIA_STRAWBERRY_PLAY_POLL_MS,
+            self._pending_play_poll_tick,
+        )
+
+    def _cancel_pending_play_poll(self) -> None:
+        if self._pending_play_poll_id:
+            GLib.source_remove(self._pending_play_poll_id)
+            self._pending_play_poll_id = 0
+
+    def _pending_play_poll_tick(self) -> bool:
+        if time.monotonic() > self._pending_play_deadline:
+            self._pending_play_poll_id = 0
+            self._pending_play_retries_left = 0
+            return False
+        bus_name = find_strawberry_bus_name(self._snapshot.players)
+        if bus_name is None:
+            return True
+        state = self._players.get(bus_name)
+        if state is None:
+            return True
+        active = self._snapshot.active
+        if active is not None and active.bus_name == bus_name and active.status == "playing":
+            self._pending_play_poll_id = 0
+            self._pending_play_retries_left = 0
+            return False
+        self._player_method_idle(state.player_proxy, "Play")
+        self._pending_play_retries_left -= 1
+        if self._pending_play_retries_left <= 0:
+            # One last delayed Play after MPRIS settles.
+            self._pending_play_poll_id = 0
+            GLib.timeout_add(
+                MEDIA_STRAWBERRY_PLAY_RETRY_MS,
+                self._final_pending_play_idle,
+                bus_name,
+            )
+            return False
+        return True
+
+    def _final_pending_play_idle(self, bus_name: str) -> bool:
+        state = self._players.get(bus_name)
+        if state is not None:
+            self._player_method_idle(state.player_proxy, "Play")
+        return False
+
+    def _launch_strawberry_idle(self) -> bool:
+        self._shell_launched_strawberry = True
+        for desktop_id in MEDIA_STRAWBERRY_DESKTOP_IDS:
+            try:
+                info = Gio.DesktopAppInfo.new(desktop_id)
+            except GLib.Error:
+                info = None
+            if info is None:
+                continue
+            try:
+                if info.launch([], None):
+                    _logger.info("Launched Strawberry via %s", desktop_id)
+                    return False
+            except GLib.Error as exc:
+                _logger.debug("Could not launch %s: %s", desktop_id, exc.message)
+        try:
+            subprocess.Popen(
+                [MEDIA_STRAWBERRY_COMMAND],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            _logger.info("Launched Strawberry via %s", MEDIA_STRAWBERRY_COMMAND)
+        except OSError as exc:
+            _logger.warning("Could not launch Strawberry: %s", exc)
+            self._shell_launched_strawberry = False
+        return False
+
+    def _sync_strawberry_idle_watch(self) -> None:
+        """Single idle timer: stop shell-launched Strawberry after paused idle."""
+        strawberry = None
+        for player in self._snapshot.players:
+            if is_strawberry_player(player):
+                strawberry = player
+                break
+        if strawberry is not None and strawberry.status == "playing":
+            self._cancel_strawberry_idle_watch()
+            return
+        if strawberry is None or not self._shell_launched_strawberry:
+            self._cancel_strawberry_idle_watch()
+            return
+        if self._strawberry_idle_source_id:
+            return
+        self._strawberry_idle_source_id = GLib.timeout_add_seconds(
+            MEDIA_STRAWBERRY_IDLE_KILL_SEC,
+            self._strawberry_idle_kill_tick,
+        )
+
+    def _cancel_strawberry_idle_watch(self) -> None:
+        if self._strawberry_idle_source_id:
+            GLib.source_remove(self._strawberry_idle_source_id)
+            self._strawberry_idle_source_id = 0
+
+    def _strawberry_idle_kill_tick(self) -> bool:
+        self._strawberry_idle_source_id = 0
+        strawberry = None
+        for player in self._snapshot.players:
+            if is_strawberry_player(player):
+                strawberry = player
+                break
+        if strawberry is not None and strawberry.status == "playing":
+            return False
+        self._kill_strawberry_process()
+        return False
+
+    def _kill_strawberry_process(self) -> None:
+        self._cancel_pending_play_poll()
+        self._cancel_strawberry_idle_watch()
+        self._shell_launched_strawberry = False
+        try:
+            subprocess.run(
+                ["pkill", "-x", MEDIA_STRAWBERRY_COMMAND],
+                check=False,
+                capture_output=True,
+                timeout=2.0,
+            )
+            _logger.info(
+                "Stopped idle Strawberry after %ss",
+                MEDIA_STRAWBERRY_IDLE_KILL_SEC,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            _logger.debug("Could not stop Strawberry: %s", exc)
 
     def _transport_with_track_refresh(self, method: str) -> None:
         active = self.snapshot.active_player
@@ -337,6 +589,68 @@ class MediaService:
         delta = int(position_usec) - int(active.position_usec)
         if delta != 0:
             self.seek(delta)
+
+    def set_volume(self, volume: float) -> None:
+        active = self.snapshot.active
+        if active is None or not active.can_control:
+            return
+        clamped = max(0.0, min(1.0, float(volume)))
+        state = self._players.get(active.bus_name)
+        if state is None:
+            return
+        GLib.idle_add(
+            self._set_player_property_idle,
+            state.player_proxy,
+            "Volume",
+            GLib.Variant("d", clamped),
+        )
+
+    def cycle_loop(self) -> None:
+        active = self.snapshot.active
+        if active is None or not active.can_control:
+            return
+        try:
+            index = _LOOP_CYCLE.index(active.loop_status)
+        except ValueError:
+            index = 0
+        next_status = _LOOP_CYCLE[(index + 1) % len(_LOOP_CYCLE)]
+        state = self._players.get(active.bus_name)
+        if state is None:
+            return
+        GLib.idle_add(
+            self._set_player_property_idle,
+            state.player_proxy,
+            "LoopStatus",
+            GLib.Variant("s", next_status),
+        )
+
+    @staticmethod
+    def _set_player_property_idle(
+        proxy: Gio.DBusProxy,
+        name: str,
+        value: GLib.Variant,
+    ) -> bool:
+        connection = proxy.get_connection()
+        if connection is None:
+            return False
+        try:
+            connection.call_sync(
+                proxy.get_name(),
+                proxy.get_object_path(),
+                MEDIA_DBUS_PROPERTIES,
+                "Set",
+                GLib.Variant(
+                    "(ssv)",
+                    (MEDIA_PLAYER_INTERFACE, name, value),
+                ),
+                None,
+                Gio.DBusCallFlags.NONE,
+                _DBUS_TIMEOUT_MS,
+                None,
+            )
+        except GLib.Error as exc:
+            _logger.debug("MPRIS Set %s failed: %s", name, exc.message)
+        return False
 
     def _call_active_player(self, method: str) -> None:
         active = self.snapshot.active_player
@@ -676,6 +990,7 @@ class MediaService:
             manual=self._manual_player,
             previous=previous_active,
             activity_rank=self._activity_rank,
+            display_mode=self._display_mode,
         )
 
         changed = next_snapshot != self._snapshot
@@ -688,6 +1003,7 @@ class MediaService:
             )
         self._snapshot = next_snapshot
         self._sync_position_poll()
+        self._sync_strawberry_idle_watch()
         if emit and changed:
             active = next_snapshot.active
             _logger.debug(
@@ -751,6 +1067,12 @@ class MediaService:
             position = _fresh_player_property_int(player, "Position", 0)
             artwork_path = self._artwork_paths.get(art_url, state.artwork_path)
             state.artwork_path = artwork_path
+            try:
+                volume = float(_cached_property(player, "Volume", 1.0) or 0.0)
+            except (TypeError, ValueError):
+                volume = 1.0
+            volume = max(0.0, min(1.0, volume))
+            loop_status = normalize_loop_status(_cached_property(player, "LoopStatus", "None"))
             return MediaPlayerSnapshot(
                 bus_name=state.bus_name,
                 identity=identity,
@@ -767,6 +1089,9 @@ class MediaService:
                 can_go_next=bool(_cached_property(player, "CanGoNext", False)),
                 can_go_previous=bool(_cached_property(player, "CanGoPrevious", False)),
                 can_seek=bool(_cached_property(player, "CanSeek", False)),
+                volume=volume,
+                loop_status=loop_status,
+                can_control=bool(_cached_property(player, "CanControl", True)),
             )
         except GLib.Error as exc:
             _logger.debug("Failed to read MPRIS player %s: %s", state.bus_name, exc.message)

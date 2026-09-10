@@ -160,6 +160,9 @@ class MediaPlayerSnapshot:
     can_go_next: bool
     can_go_previous: bool
     can_seek: bool
+    volume: float = 1.0
+    loop_status: str = "None"  # None | Track | Playlist
+    can_control: bool = True
 
     @property
     def is_playing(self) -> bool:

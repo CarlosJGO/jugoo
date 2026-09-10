@@ -33,6 +33,12 @@ Hyprland no debe animar estas layers (`layers` → `slide` las hace “caer” d
 | --- | --- | --- |
 | Centro de control | [`shell/widgets/centro_control/popup.py`](../../shell/widgets/centro_control/popup.py) | `control_center.py` |
 | Multimedia | [`shell/widgets/multimedia/media_popup.py`](../../shell/widgets/multimedia/media_popup.py) | `media.py` |
+
+El popup multimedia es un reproductor vertical (portada, transporte, loop, volumen).
+
+- **Reproductor**: siempre Strawberry (sin fallback a otras fuentes). Si no corre, la barra/popup muestran estado vacío y play lo lanza.
+- **Ventana**: fuentes no musicales (nunca Strawberry) + tarjeta con play/pausa; el cava sigue esa fuente.
+- El bloque de la barra siempre abre el popup (también sin fuentes MPRIS).
 | Audio por workspace | [`shell/widgets/espacios_trabajo/workspace_audio_popup.py`](../../shell/widgets/espacios_trabajo/workspace_audio_popup.py) | `workspace_interaction.py` |
 | Panel de workspace | [`shell/widgets/espacios_trabajo/workspace_panel.py`](../../shell/widgets/espacios_trabajo/workspace_panel.py) | `workspace_interaction.py` |
 | Notificaciones | [`shell/widgets/notificaciones/notification_popup.py`](../../shell/widgets/notificaciones/notification_popup.py) | `notifications.py` |

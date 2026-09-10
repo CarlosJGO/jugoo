@@ -19,7 +19,13 @@ from ...config import (
 from ...eventbus import EventBus
 from ...models import ActiveWindow, AudioVisualizerSnapshot, MediaSnapshot
 from ...servicios.audio.audio_visualizer import AUDIO_VISUALIZER_CHANGED
-from ...servicios.multimedia.media import MEDIA_CHANGED, MediaService
+from ...servicios.multimedia.media import (
+    MEDIA_CHANGED,
+    MEDIA_DISPLAY_MODE_CHANGED,
+    MEDIA_DISPLAY_PLAYER,
+    MediaService,
+    is_strawberry_player,
+)
 from ..multimedia.audio_spectrum import paint_spectrum
 from ..multimedia.media_format import (
     compact_bar_primary,
@@ -95,6 +101,7 @@ class ActiveWindowWidget(Gtk.EventBox):
 
         self._event_bus.subscribe(ACTIVE_WINDOW_CHANGED, self._on_active_window_changed)
         self._event_bus.subscribe(MEDIA_CHANGED, self._on_media_changed)
+        self._event_bus.subscribe(MEDIA_DISPLAY_MODE_CHANGED, self._on_display_mode_changed)
         self._event_bus.subscribe(AUDIO_VISUALIZER_CHANGED, self._on_visualizer_changed)
         self.connect("destroy", self._on_destroy)
         GLib.idle_add(self._render)
@@ -128,6 +135,15 @@ class ActiveWindowWidget(Gtk.EventBox):
         self._render()
         return False
 
+    def _on_display_mode_changed(self, _mode: str) -> None:
+        GLib.idle_add(self._render)
+
+    def _showing_media(self) -> bool:
+        if self._media_service.display_mode == MEDIA_DISPLAY_PLAYER:
+            active = self._media_snapshot.active
+            return active is not None and is_strawberry_player(active)
+        return self._media_snapshot.has_media and self._media_snapshot.active is not None
+
     def _on_visualizer_changed(self, snapshot: AudioVisualizerSnapshot) -> None:
         GLib.idle_add(self._store_visualizer_snapshot, snapshot)
 
@@ -137,15 +153,20 @@ class ActiveWindowWidget(Gtk.EventBox):
         return False
 
     def _render(self) -> bool:
-        showing_media = self._media_snapshot.has_media and self._media_snapshot.active is not None
         style = self.get_style_context()
-        if showing_media:
+        if self._media_service.display_mode == MEDIA_DISPLAY_PLAYER:
+            active = self._media_snapshot.active
+            if active is not None and is_strawberry_player(active):
+                style.add_class("active-window-media")
+                self._render_media(active)
+            else:
+                style.add_class("active-window-media")
+                self._render_player_idle()
+        elif self._showing_media():
             style.add_class("active-window-media")
-        else:
-            style.remove_class("active-window-media")
-        if showing_media:
             self._render_media(self._media_snapshot.active)  # type: ignore[arg-type]
         else:
+            style.remove_class("active-window-media")
             self._render_window(self._active_window)
         self.queue_draw()
         self.show_all()
@@ -161,8 +182,7 @@ class ActiveWindowWidget(Gtk.EventBox):
         Gtk.render_frame(style, cr, 0, 0, width, height)
 
         snapshot = self._visualizer_snapshot
-        showing_media = self._media_snapshot.has_media and self._media_snapshot.active is not None
-        if showing_media and snapshot.visible and any(snapshot.bars):
+        if self._showing_media() and snapshot.visible and any(snapshot.bars):
             paint_spectrum(
                 cr,
                 width=width,
@@ -189,6 +209,15 @@ class ActiveWindowWidget(Gtk.EventBox):
         self._secondary.set_text(secondary)
         self._secondary.set_no_show_all(not bool(secondary.strip()))
 
+    def _render_player_idle(self) -> None:
+        self._icon.set_from_icon_name("audio-x-generic-symbolic", Gtk.IconSize.MENU)
+        self._icon.set_pixel_size(ACTIVE_WINDOW_ICON_SIZE)
+        self._primary.set_text("Strawberry")
+        self._status.set_text("")
+        self._status.set_tooltip_text("Abre el reproductor")
+        self._secondary.set_text("Sin reproducción")
+        self._secondary.set_no_show_all(False)
+
     def _render_window(self, active_window: ActiveWindow) -> None:
         self._icon.set_from_icon_name(active_window.icon, Gtk.IconSize.MENU)
         self._icon.set_pixel_size(ACTIVE_WINDOW_ICON_SIZE)
@@ -201,12 +230,12 @@ class ActiveWindowWidget(Gtk.EventBox):
     def _on_button_press(self, _widget: Gtk.EventBox, event: Gdk.EventButton) -> bool:
         if event.button != Gdk.BUTTON_PRIMARY:
             return False
-        if self._media_snapshot.has_media:
-            self._event_bus.emit(MEDIA_BAR_CLICKED, self)
-            return True
-        return False
+        # Always open media popup (mode switch / player), even with no MPRIS source.
+        self._event_bus.emit(MEDIA_BAR_CLICKED, self)
+        return True
 
     def _on_destroy(self, *_args) -> None:
         self._event_bus.unsubscribe(ACTIVE_WINDOW_CHANGED, self._on_active_window_changed)
         self._event_bus.unsubscribe(MEDIA_CHANGED, self._on_media_changed)
+        self._event_bus.unsubscribe(MEDIA_DISPLAY_MODE_CHANGED, self._on_display_mode_changed)
         self._event_bus.unsubscribe(AUDIO_VISUALIZER_CHANGED, self._on_visualizer_changed)

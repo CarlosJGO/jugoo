@@ -17,16 +17,21 @@ def media_popup_dimensions() -> tuple[int, int, int]:
 
 
 def scale_artwork_pixbuf(pixbuf: GdkPixbuf.Pixbuf, size: int) -> GdkPixbuf.Pixbuf:
-    """Scale artwork to fit inside a square while preserving aspect ratio."""
+    """Scale artwork to cover a square (crop overflow) for player chrome."""
     width = int(pixbuf.get_width())
     height = int(pixbuf.get_height())
     if width <= 0 or height <= 0:
         return pixbuf
-    scale = min(size / width, size / height)
+    scale = max(size / width, size / height)
     target_w = max(1, int(width * scale))
     target_h = max(1, int(height * scale))
-    return pixbuf.scale_simple(
+    scaled = pixbuf.scale_simple(
         target_w,
         target_h,
         GdkPixbuf.InterpType.BILINEAR,
     )
+    if scaled is None:
+        return pixbuf
+    x = max(0, (target_w - size) // 2)
+    y = max(0, (target_h - size) // 2)
+    return scaled.new_subpixbuf(x, y, size, size)
