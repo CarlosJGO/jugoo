@@ -30,7 +30,14 @@ from ...config import (
     NOTIFICATIONS_PRODUCTION_RETRY_SEC,
 )
 from ...eventbus import EventBus
-from ...models import NotificationAction, NotificationSnapshot
+from ...models import (
+    ASSISTANT_SOURCE_FALLBACK,
+    NOTIFICATION_KIND_ASSISTANT,
+    NOTIFICATION_KIND_NORMAL,
+    NotificationAction,
+    NotificationSnapshot,
+    normalize_assistant_source,
+)
 from ...runtime_paths import (
     migrate_legacy_file,
     notification_icons_dir,
@@ -189,6 +196,9 @@ class NotificationStore:
         read: bool = False,
         dismissed: bool = False,
         expired: bool = False,
+        kind: str = NOTIFICATION_KIND_NORMAL,
+        meta: str = "",
+        source: str = "",
     ) -> NotificationSnapshot:
         notification_id = (
             replaces_id if replaces_id and replaces_id in self._items else self._next_id
@@ -214,6 +224,9 @@ class NotificationStore:
             read=read,
             dismissed=dismissed,
             expired=expired,
+            kind=kind or NOTIFICATION_KIND_NORMAL,
+            meta=meta or "",
+            source=source or "",
         )
         self._items[notification_id] = snapshot
         return snapshot
@@ -433,6 +446,7 @@ class NotificationService:
             actions=actions,
             urgency=max(0, min(int(urgency), 2)),
             expire_timeout_ms=int(expire_timeout_ms),
+            kind=NOTIFICATION_KIND_NORMAL,
         )
         self._persist_state()
         self._schedule_expiration(snapshot)
@@ -440,17 +454,48 @@ class NotificationService:
             f"Notify id={snapshot.id} app={snapshot.app_name!r} "
             f"summary={snapshot.summary!r}",
         )
-        if snapshot.summary == "Jugoo Tasks":
-            try:
-                from datetime import datetime, timezone
-                from pathlib import Path as _P
-                line = (
-                    f"[Notify {datetime.now(timezone.utc).strftime('%H:%M:%S.%f')[:-3]}] "
-                    f"Jugoo Tasks body={snapshot.body!r} id={snapshot.id}\n"
-                )
-                _P("/tmp/jugoo-briefing-diag.log").open("a", encoding="utf-8").write(line)
-            except Exception:
-                pass
+        self._event_bus.emit(NOTIFICATION_RECEIVED, snapshot)
+        self._emit_changed()
+        return snapshot
+
+    def post_assistant(
+        self,
+        *,
+        body: str,
+        app_name: str = "Jugoo",
+        app_icon: str = "com.jugoo.Shell",
+        meta: str = "",
+        source: str = ASSISTANT_SOURCE_FALLBACK,
+        urgency: int = 1,
+        expire_timeout_ms: int = -1,
+    ) -> NotificationSnapshot | None:
+        """Post a Jugoo assistant message (briefing). Same store; distinct presentation."""
+        if self._closing:
+            return None
+        text = (body or "").strip()
+        origin = normalize_assistant_source(source)
+        snapshot = self._store.add(
+            app_name=app_name or "Jugoo",
+            replaces_id=0,
+            app_icon=app_icon,
+            icon_name=app_icon,
+            image_path="",
+            desktop_entry="com.jugoo.Shell",
+            summary=app_name or "Jugoo",
+            body=text,
+            actions=(),
+            urgency=max(0, min(int(urgency), 2)),
+            expire_timeout_ms=int(expire_timeout_ms),
+            kind=NOTIFICATION_KIND_ASSISTANT,
+            meta=(meta or "").strip(),
+            source=origin,
+        )
+        self._persist_state()
+        self._schedule_expiration(snapshot)
+        self._log(
+            f"Assistant id={snapshot.id} app={snapshot.app_name!r} "
+            f"source={origin!r} body_len={len(snapshot.body)}",
+        )
         self._event_bus.emit(NOTIFICATION_RECEIVED, snapshot)
         self._emit_changed()
         return snapshot

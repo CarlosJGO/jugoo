@@ -127,7 +127,11 @@ def describe_briefing_changes(
     still_open = previous_ids & current_ids
     if still_open:
         count = len(still_open)
-        label = "tarea sigue pendiente" if count == 1 else "tareas siguen pendientes"
+        label = (
+            "tarea sigue en la lista abierta"
+            if count == 1
+            else "tareas siguen en la lista abierta"
+        )
         lines.append(f"- {count} {label}.")
         relevant = True
 

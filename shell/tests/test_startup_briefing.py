@@ -647,9 +647,71 @@ def test_daily_recurrence_hint_is_included() -> None:
         )
     )
     prompt = build_briefing_prompt(facts)
-    assert "hoy (cada día)" in prompt
+    assert "hoy · diaria" in prompt
     assert "Beber un vaso" in prompt
     assert "water" not in prompt
+
+
+def test_rejects_invented_user_actions() -> None:
+    today = date.today()
+    facts = collect_briefing_facts(
+        TasksSnapshot(
+            today=today.isoformat(),
+            tasks=(
+                TaskSnapshot(
+                    id="task",
+                    title="Entregar informe",
+                    notes="",
+                    repeat="none",
+                    due_date=today.isoformat(),
+                    month_day=today.day,
+                    status=TASK_STATUS_OVERDUE,
+                    period_key=today.isoformat(),
+                    missed_count=1,
+                    created_at="",
+                    occurrence_date=today.isoformat(),
+                ),
+            ),
+            overdue_count=1,
+            pending_today_count=0,
+        )
+    )
+    assert validate_briefing_output(
+        "Ese informe ya viene con retraso. Yo empezaría por ese.",
+        facts,
+    )
+    assert validate_briefing_output(
+        "Pues vuelvo y te repito: NumPy sigue esperando su momento.",
+        facts,
+    )
+    assert (
+        validate_briefing_output(
+            "No has comenzado a trabajar desde mi último mensaje.",
+            facts,
+        )
+        is None
+    )
+    assert (
+        validate_briefing_output(
+            "Parece que no has podido arreglar esa noti aún.",
+            facts,
+        )
+        is None
+    )
+    assert (
+        validate_briefing_output(
+            "Recuerda también hacerlo cada día al respecto.",
+            facts,
+        )
+        is None
+    )
+    assert (
+        validate_briefing_output(
+            "Como todavía no has empezado el informe…",
+            facts,
+        )
+        is None
+    )
 
 
 def test_briefing_prompt_does_not_format_task_as_title_and_date() -> None:
@@ -715,7 +777,7 @@ def test_briefing_memory_round_trip_and_corrupt_safe(tmp_path: Path) -> None:
     )
     assert "Salieron 1 tarea" in changes
     assert "Se agregó 1 tarea nueva" in changes
-    assert "1 tarea sigue pendiente" in changes
+    assert "1 tarea sigue en la lista abierta" in changes
 
 
 def test_briefing_passes_previous_message_and_replaces_memory(tmp_path: Path) -> None:
@@ -749,7 +811,7 @@ def test_briefing_passes_previous_message_and_replaces_memory(tmp_path: Path) ->
     prompt = generator.prompts[0]
     assert "Ese informe sigue ahí esperándote." in prompt
     assert "MENSAJE ANTERIOR DEL ASISTENTE" in prompt
-    assert "sigue pendiente" in prompt or "No hubo cambios relevantes" in prompt
+    assert "lista abierta" in prompt or "No hubo cambios relevantes" in prompt
     saved = load_briefing_memory(memory_path)
     assert saved is not None
     assert "informe vencido" in saved.last_message.casefold()

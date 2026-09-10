@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from typing import Callable, Sequence
 
 PowerExecutor = Callable[[Sequence[str]], None]
@@ -37,6 +38,9 @@ _NOCTALIA_SESSION_ACTION = {
     ACTION_SHUTDOWN: "shutdown",
 }
 
+# Brief pause so the locker can paint before the machine sleeps.
+_LOCK_BEFORE_SUSPEND_DELAY_S = 0.5
+
 
 class PowerError(RuntimeError):
     """Raised when a power action cannot be dispatched."""
@@ -60,6 +64,25 @@ class PowerService:
         self._dispatch(ACTION_LOCK)
 
     def suspend(self) -> None:
+        """Lock first, then suspend, so wake returns to the login/lock screen."""
+        # Run both lock backends best-effort: Noctalia may report success without
+        # engaging the session locker that asks for a password on resume.
+        if self._dry_run:
+            self.last_action = ACTION_LOCK
+            self.last_commands = [
+                ["noctalia", "msg", "session", "lock"],
+                ["loginctl", "lock-session"],
+            ]
+        else:
+            for command in (
+                ("noctalia", "msg", "session", "lock"),
+                ("loginctl", "lock-session"),
+            ):
+                try:
+                    self._executor(command)
+                except PowerError:
+                    pass
+            time.sleep(_LOCK_BEFORE_SUSPEND_DELAY_S)
         self._dispatch(ACTION_SUSPEND)
 
     def logout(self) -> None:

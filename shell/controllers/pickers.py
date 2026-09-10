@@ -18,6 +18,7 @@ from ..servicios.escritorio.hyprland import HyprlandService
 from ..servicios.portapapeles.servicio import (
     CLIPBOARD_CHANGED,
     ClipboardService,
+    copy_image_bytes,
     copy_text,
     paste_text_to_window,
 )
@@ -48,6 +49,7 @@ class PickersController:
                 shell_window,
                 on_refresh=lambda: self._clipboard.entries,
                 on_copy=self._select_clipboard,
+                resolve_image=self._clipboard.image_absolute_path,
             )
         )
         self._emoji_picker = PopupHandle(
@@ -108,6 +110,9 @@ class PickersController:
         entry = self._clipboard.entry_by_id(entry_id)
         if entry is None:
             return
+        if entry.is_image:
+            self._copy_and_paste_image(entry)
+            return
         self._copy_and_paste(entry.text, lambda: self._clipboard.remember_text(entry.text))
 
     def _select_emoji(self, text: str) -> None:
@@ -124,6 +129,25 @@ class PickersController:
             paste_text_to_window(target)
 
         threading.Thread(target=worker, name="picker-copy-paste", daemon=True).start()
+
+    def _copy_and_paste_image(self, entry) -> None:
+        target = self._paste_target
+        absolute = self._clipboard.image_absolute_path(entry)
+        if absolute is None or not absolute.is_file():
+            return
+        mime = entry.mime or "image/png"
+
+        def worker() -> None:
+            try:
+                payload = absolute.read_bytes()
+            except OSError:
+                return
+            if not copy_image_bytes(payload, mime=mime):
+                return
+            self._clipboard.remember_image(payload, mime=mime)
+            paste_text_to_window(target)
+
+        threading.Thread(target=worker, name="picker-copy-paste-image", daemon=True).start()
 
     def _on_clipboard_changed(self, entries: object) -> None:
         picker = self._clipboard_picker.maybe

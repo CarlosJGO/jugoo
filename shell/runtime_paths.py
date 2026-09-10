@@ -6,7 +6,7 @@ import os
 import shutil
 from pathlib import Path
 
-from .config import CLIPBOARD_HISTORY_PATH, PINNED_APPS_PATH, TASKS_PATH
+from .config import CLIPBOARD_HISTORY_PATH, CLIPBOARD_IMAGES_DIR, PINNED_APPS_PATH, TASKS_PATH
 
 _APP_DIRECTORY = "waybar-shell"
 
@@ -45,6 +45,11 @@ def briefing_path() -> Path:
 
 def clipboard_history_path() -> Path:
     return xdg_data_dir() / CLIPBOARD_HISTORY_PATH
+
+
+def clipboard_images_dir() -> Path:
+    """Binary clipboard image store (relative paths live under this tree)."""
+    return xdg_data_dir() / CLIPBOARD_IMAGES_DIR
 
 
 def settings_path() -> Path:

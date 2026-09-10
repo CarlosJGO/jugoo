@@ -355,6 +355,27 @@ class NotificationAction:
     label: str
 
 
+NOTIFICATION_KIND_NORMAL = "normal"
+NOTIFICATION_KIND_ASSISTANT = "assistant"
+
+ASSISTANT_SOURCE_AI = "ai"
+ASSISTANT_SOURCE_FALLBACK = "fallback"
+
+
+def normalize_assistant_source(value: str | None) -> str:
+    """Map unknown/missing values to a safe UI source."""
+    if (value or "").strip().casefold() == ASSISTANT_SOURCE_AI:
+        return ASSISTANT_SOURCE_AI
+    return ASSISTANT_SOURCE_FALLBACK
+
+
+def assistant_source_label(source: str | None) -> str:
+    """User-facing origin label (never technical error text)."""
+    if normalize_assistant_source(source) == ASSISTANT_SOURCE_AI:
+        return "Llama · IA local"
+    return "Respaldo de Jugoo"
+
+
 @dataclass(frozen=True)
 class NotificationSnapshot:
     """Immutable view of one stored notification for widgets and tests."""
@@ -374,6 +395,9 @@ class NotificationSnapshot:
     icon_name: str = ""
     image_path: str = ""
     desktop_entry: str = ""
+    kind: str = NOTIFICATION_KIND_NORMAL
+    meta: str = ""
+    source: str = ""
 
 
 def reorder_workspace_order(

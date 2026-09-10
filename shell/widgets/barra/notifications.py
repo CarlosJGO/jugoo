@@ -19,7 +19,7 @@ from ...config import (
 from ... import config as shell_config
 from ...eventbus import EventBus
 from ...identity import assets_dir
-from ...models import NotificationSnapshot
+from ...models import NOTIFICATION_KIND_ASSISTANT, NotificationSnapshot
 from ...popup_handle import (
     PopupHandle,
     PopupOutsideDismiss,
@@ -36,6 +36,7 @@ from ...servicios.notificaciones.notifications import (
 )
 from ...settings.manager import SETTINGS_CHANGED
 from ...ui import ShellModule
+from ..notificaciones.assistant_presenter import AssistantPresenter
 from ..notificaciones.bell_icon import BellIcon
 from ..notificaciones.notification_popup import NotificationPopup
 from ..notificaciones.notification_toast_manager import NotificationToastManager
@@ -94,6 +95,11 @@ class NotificationsWidget(ShellModule):
             on_invoke_action=self._invoke_action,
             on_mark_read=self._mark_read,
         )
+        self._assistant = AssistantPresenter(
+            shell_window,
+            notification_service,
+            on_mark_read=self._mark_read,
+        )
         self._outside_click = PopupOutsideDismiss()
         self._group_window: Gtk.Window | None = None
         self._refresh_source_id = 0
@@ -145,6 +151,7 @@ class NotificationsWidget(ShellModule):
         self.close_popup()
         self._close_group_window()
         self._toast_manager.destroy()
+        self._assistant.destroy()
 
     def _on_notifications_changed(self, _snapshots: object) -> None:
         if self._refresh_source_id:
@@ -197,7 +204,12 @@ class NotificationsWidget(ShellModule):
             self._animate_bell()
             if shell_config.NOTIFICATIONS_SOUND_ENABLED and self._service.should_play_sound(snapshot):
                 play_notification_sound(self._sound_path, enabled=True)
-            if shell_config.NOTIFICATIONS_TOAST_ENABLED:
+            if snapshot.kind == NOTIFICATION_KIND_ASSISTANT:
+                try:
+                    self._assistant.present(snapshot)
+                except Exception as error:
+                    print(f"shell: assistant toast failed: {error}", flush=True)
+            elif shell_config.NOTIFICATIONS_TOAST_ENABLED:
                 self._toast_manager.enqueue(snapshot)
         return False
 
@@ -208,6 +220,7 @@ class NotificationsWidget(ShellModule):
             popup.refresh()
         if self._service.paused:
             self._toast_manager.clear_presentations()
+            self._assistant.clear()
         return False
 
     def _sync_badge(self) -> bool:
@@ -242,6 +255,7 @@ class NotificationsWidget(ShellModule):
             return
 
         self._toast_manager.clear_presentations()
+        self._assistant.clear()
         self._ensure_shell_press_handler()
         popup = self._popup.get()
         popup.open_for(self._button)

@@ -1,23 +1,57 @@
-"""In-memory clipboard history with local JSON persistence. Never logs payload text."""
+"""In-memory clipboard history with local JSON + image-file persistence.
+
+Never logs payload text or image bytes. Limits only affect Jugoo history,
+never the system clipboard.
+"""
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
-HISTORY_VERSION = 1
+HISTORY_VERSION = 2
+ENTRY_TEXT = "text"
+ENTRY_IMAGE = "image"
+
 DEFAULT_LIMIT = 200
-DEFAULT_MAX_ITEM_BYTES = 512 * 1024
+DEFAULT_MAX_TEXT_BYTES = 1 * 1024 * 1024
+DEFAULT_MAX_HISTORY_BYTES = 25 * 1024 * 1024
+DEFAULT_MAX_ITEM_BYTES = DEFAULT_MAX_TEXT_BYTES  # alias
 DEFAULT_PREVIEW_CHARS = 96
 DEFAULT_PREVIEW_LINES = 2
+
+IMAGE_REL_PREFIX = "clipboard/images"
 
 
 @dataclass(frozen=True)
 class ClipboardEntry:
     id: str
-    text: str
-    copied_at: float
+    text: str = ""
+    copied_at: float = 0.0
+    kind: str = ENTRY_TEXT
+    mime: str = ""
+    path: str = ""  # relative to XDG data dir, images only
+    content_hash: str = ""
+
+    @property
+    def is_image(self) -> bool:
+        return self.kind == ENTRY_IMAGE
+
+    @property
+    def is_text(self) -> bool:
+        return self.kind != ENTRY_IMAGE
+
+
+@dataclass(frozen=True)
+class HistoryLoadResult:
+    """Load outcome. ``trusted`` is False for corrupt JSON (skip orphan wipe)."""
+
+    entries: tuple[ClipboardEntry, ...]
+    trusted: bool
+    version: int = 1
 
 
 def preview_text(
@@ -66,29 +100,84 @@ def search_entries(entries: tuple[ClipboardEntry, ...], query: str) -> tuple[Cli
     tokens = needle.split()
     matches: list[ClipboardEntry] = []
     for entry in entries:
-        haystack = entry.text.casefold()
+        if entry.is_image:
+            haystack = f"imagen image {entry.mime}".casefold()
+        else:
+            haystack = entry.text.casefold()
         if needle in haystack or all(token in haystack for token in tokens):
             matches.append(entry)
     return tuple(matches)
 
 
+def entry_storage_bytes(entry: ClipboardEntry, *, data_dir: Path) -> int:
+    if entry.is_image:
+        absolute = resolve_image_path(entry.path, data_dir=data_dir)
+        if absolute is None:
+            return 0
+        try:
+            return int(absolute.stat().st_size)
+        except OSError:
+            return 0
+    return len(entry.text.encode("utf-8"))
+
+
+def resolve_image_path(relative: str, *, data_dir: Path) -> Path | None:
+    cleaned = (relative or "").strip().replace("\\", "/")
+    if not cleaned or cleaned.startswith("/") or ".." in cleaned.split("/"):
+        return None
+    if not cleaned.startswith(f"{IMAGE_REL_PREFIX}/"):
+        return None
+    absolute = (data_dir / cleaned).resolve()
+    try:
+        absolute.relative_to(data_dir.resolve())
+    except ValueError:
+        return None
+    return absolute
+
+
+def hash_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def image_relative_path(content_hash: str) -> str:
+    return f"{IMAGE_REL_PREFIX}/{content_hash}.png"
+
+
 class ClipboardHistory:
-    """Newest-first history. Consecutive duplicates are ignored; older copies are promoted."""
+    """Newest-first history. Consecutive duplicates ignored; older copies promoted."""
 
     def __init__(
         self,
         *,
         limit: int = DEFAULT_LIMIT,
-        max_item_bytes: int = DEFAULT_MAX_ITEM_BYTES,
+        max_item_bytes: int | None = None,
+        max_text_bytes: int | None = None,
+        max_history_bytes: int = DEFAULT_MAX_HISTORY_BYTES,
+        data_dir: Path | None = None,
+        images_dir: Path | None = None,
     ) -> None:
+        text_limit = (
+            max_text_bytes
+            if max_text_bytes is not None
+            else (max_item_bytes if max_item_bytes is not None else DEFAULT_MAX_TEXT_BYTES)
+        )
         self._limit = max(1, int(limit))
-        self._max_item_bytes = max(1, int(max_item_bytes))
+        self._max_text_bytes = max(1, int(text_limit))
+        self._max_history_bytes = max(self._max_text_bytes, int(max_history_bytes))
+        self._data_dir = data_dir if data_dir is not None else Path(".")
+        self._images_dir = (
+            images_dir if images_dir is not None else self._data_dir / IMAGE_REL_PREFIX
+        )
         self._items: list[ClipboardEntry] = []
         self._next_serial = 1
 
     @property
     def entries(self) -> tuple[ClipboardEntry, ...]:
         return tuple(self._items)
+
+    @property
+    def data_dir(self) -> Path:
+        return self._data_dir
 
     def entry_by_id(self, entry_id: str) -> ClipboardEntry | None:
         for entry in self._items:
@@ -97,24 +186,107 @@ class ClipboardHistory:
         return None
 
     def remember(self, text: str, *, now: float) -> bool:
-        """Return True when the visible history changed."""
+        """Backward-compatible text ingest. Return True when history changed."""
+        return self.remember_text(text, now=now)
+
+    def remember_text(self, text: str, *, now: float) -> bool:
         if not text:
             return False
-        if len(text.encode("utf-8")) > self._max_item_bytes:
+        if len(text.encode("utf-8")) > self._max_text_bytes:
+            # Discard from history only; system clipboard is untouched.
             return False
-        if self._items and self._items[0].text == text:
+        if self._items and self._items[0].is_text and self._items[0].text == text:
             return False
-        self._items = [item for item in self._items if item.text != text]
-        entry = ClipboardEntry(id=self._new_id(now), text=text, copied_at=now)
+        removed = [item for item in self._items if item.is_text and item.text == text]
+        self._items = [item for item in self._items if not (item.is_text and item.text == text)]
+        entry = ClipboardEntry(
+            id=self._new_id(now),
+            text=text,
+            copied_at=now,
+            kind=ENTRY_TEXT,
+        )
         self._items.insert(0, entry)
-        del self._items[self._limit :]
+        dropped = self._enforce_limits()
+        self._delete_image_files(removed + dropped)
+        return True
+
+    def remember_image(
+        self,
+        payload: bytes,
+        *,
+        mime: str,
+        now: float,
+        content_hash: str | None = None,
+    ) -> bool:
+        """Store PNG bytes on disk and index them. ``payload`` must already be PNG."""
+        if not payload:
+            return False
+        digest = content_hash or hash_bytes(payload)
+        if (
+            self._items
+            and self._items[0].is_image
+            and self._items[0].content_hash == digest
+        ):
+            return False
+
+        relative = image_relative_path(digest)
+        absolute = self._data_dir / relative
+        existing = next(
+            (item for item in self._items if item.is_image and item.content_hash == digest),
+            None,
+        )
+        removed = [
+            item
+            for item in self._items
+            if item.is_image and item.content_hash == digest
+        ]
+        self._items = [
+            item
+            for item in self._items
+            if not (item.is_image and item.content_hash == digest)
+        ]
+
+        if existing is None:
+            try:
+                absolute.parent.mkdir(parents=True, exist_ok=True)
+                tmp = absolute.with_suffix(absolute.suffix + ".tmp")
+                tmp.write_bytes(payload)
+                tmp.replace(absolute)
+                os.chmod(absolute, 0o600)
+            except OSError:
+                return False
+        else:
+            relative = existing.path or relative
+
+        entry = ClipboardEntry(
+            id=self._new_id(now),
+            text="",
+            copied_at=now,
+            kind=ENTRY_IMAGE,
+            mime=(mime or "image/png").strip() or "image/png",
+            path=relative,
+            content_hash=digest,
+        )
+        self._items.insert(0, entry)
+        dropped = self._enforce_limits()
+        # Keep the file we just referenced; only delete truly unused paths.
+        self._delete_image_files(removed + dropped)
+        return True
+
+    def remove_entry(self, entry_id: str) -> bool:
+        target = self.entry_by_id(entry_id)
+        if target is None:
+            return False
+        self._items = [item for item in self._items if item.id != entry_id]
+        self._delete_image_files([target])
         return True
 
     def replace_entries(self, entries: tuple[ClipboardEntry, ...]) -> None:
-        trimmed = list(entries[: self._limit])
-        self._items = trimmed
+        self._items = list(entries)
+        dropped = self._enforce_limits()
+        self._delete_image_files(dropped)
         serials: list[int] = []
-        for entry in trimmed:
+        for entry in self._items:
             _, _, serial = entry.id.partition("-")
             try:
                 serials.append(int(serial))
@@ -123,24 +295,111 @@ class ClipboardHistory:
         if serials:
             self._next_serial = max(serials) + 1
 
+    def total_bytes(self) -> int:
+        return sum(entry_storage_bytes(item, data_dir=self._data_dir) for item in self._items)
+
+    def cleanup_orphans(self) -> int:
+        """Delete image files under images_dir that no entry references."""
+        return cleanup_orphan_images(
+            self._images_dir,
+            self._items,
+            data_dir=self._data_dir,
+        )
+
+    def _enforce_limits(self) -> list[ClipboardEntry]:
+        dropped: list[ClipboardEntry] = []
+        if len(self._items) > self._limit:
+            dropped.extend(self._items[self._limit :])
+            del self._items[self._limit :]
+        while self._items and self.total_bytes() > self._max_history_bytes:
+            dropped.append(self._items.pop())
+        return dropped
+
+    def _delete_image_files(self, entries: list[ClipboardEntry]) -> None:
+        live_paths = {
+            item.path
+            for item in self._items
+            if item.is_image and item.path
+        }
+        for entry in entries:
+            if not entry.is_image or not entry.path or entry.path in live_paths:
+                continue
+            absolute = resolve_image_path(entry.path, data_dir=self._data_dir)
+            if absolute is None or not absolute.is_file():
+                continue
+            try:
+                absolute.unlink()
+            except OSError:
+                pass
+
     def _new_id(self, now: float) -> str:
         ident = f"{int(now * 1000)}-{self._next_serial}"
         self._next_serial += 1
         return ident
 
 
+def cleanup_orphan_images(
+    images_dir: Path,
+    entries: tuple[ClipboardEntry, ...] | list[ClipboardEntry],
+    *,
+    data_dir: Path,
+) -> int:
+    if not images_dir.is_dir():
+        return 0
+    referenced: set[Path] = set()
+    for entry in entries:
+        if not entry.is_image:
+            continue
+        absolute = resolve_image_path(entry.path, data_dir=data_dir)
+        if absolute is not None:
+            referenced.add(absolute.resolve())
+    removed = 0
+    try:
+        candidates = list(images_dir.iterdir())
+    except OSError:
+        return 0
+    for path in candidates:
+        if not path.is_file():
+            continue
+        if path.suffix.lower() == ".tmp":
+            try:
+                path.unlink()
+                removed += 1
+            except OSError:
+                pass
+            continue
+        if path.resolve() in referenced:
+            continue
+        try:
+            path.unlink()
+            removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 def load_history(path: Path) -> tuple[ClipboardEntry, ...]:
+    """Compatibility wrapper — returns entries only."""
+    return load_history_result(path).entries
+
+
+def load_history_result(path: Path) -> HistoryLoadResult:
     if not path.is_file():
-        return ()
+        return HistoryLoadResult(entries=(), trusted=True, version=HISTORY_VERSION)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return ()
+        # Corrupt: keep working with empty history but do NOT wipe image files.
+        return HistoryLoadResult(entries=(), trusted=False, version=0)
     if not isinstance(payload, dict):
-        return ()
+        return HistoryLoadResult(entries=(), trusted=False, version=0)
+    try:
+        version = int(payload.get("version", 1) or 1)
+    except (TypeError, ValueError):
+        version = 1
     raw_items = payload.get("items", [])
     if not isinstance(raw_items, list):
-        return ()
+        return HistoryLoadResult(entries=(), trusted=False, version=version)
     items: list[ClipboardEntry] = []
     seen_ids: set[str] = set()
     for entry in raw_items:
@@ -149,7 +408,7 @@ def load_history(path: Path) -> tuple[ClipboardEntry, ...]:
             continue
         seen_ids.add(parsed.id)
         items.append(parsed)
-    return tuple(items)
+    return HistoryLoadResult(entries=tuple(items), trusted=True, version=version)
 
 
 def save_history(path: Path, entries: tuple[ClipboardEntry, ...]) -> None:
@@ -178,15 +437,58 @@ def _entry_from_dict(entry: object) -> ClipboardEntry | None:
     if not isinstance(entry, dict):
         return None
     ident = str(entry.get("id", "")).strip()
-    text = entry.get("text")
-    if not ident or not isinstance(text, str) or text == "":
+    if not ident:
         return None
     try:
         copied_at = float(entry.get("copied_at", 0) or 0)
     except (TypeError, ValueError):
         copied_at = 0.0
-    return ClipboardEntry(id=ident, text=text, copied_at=copied_at)
+
+    kind = str(entry.get("type") or entry.get("kind") or "").strip().casefold()
+    if not kind:
+        # v1 entries are text-only.
+        kind = ENTRY_IMAGE if entry.get("path") else ENTRY_TEXT
+
+    if kind == ENTRY_IMAGE:
+        relative = str(entry.get("path", "")).strip().replace("\\", "/")
+        if not relative or ".." in relative.split("/"):
+            return None
+        mime = str(entry.get("mime", "image/png") or "image/png").strip() or "image/png"
+        digest = str(entry.get("content_hash", "") or "").strip()
+        if not digest:
+            name = Path(relative).stem
+            digest = name if len(name) >= 16 else ""
+        return ClipboardEntry(
+            id=ident,
+            text="",
+            copied_at=copied_at,
+            kind=ENTRY_IMAGE,
+            mime=mime,
+            path=relative,
+            content_hash=digest,
+        )
+
+    text = entry.get("text")
+    if not isinstance(text, str) or text == "":
+        return None
+    return ClipboardEntry(
+        id=ident,
+        text=text,
+        copied_at=copied_at,
+        kind=ENTRY_TEXT,
+    )
 
 
 def _entry_to_dict(entry: ClipboardEntry) -> dict[str, object]:
+    if entry.is_image:
+        payload: dict[str, object] = {
+            "id": entry.id,
+            "type": ENTRY_IMAGE,
+            "mime": entry.mime or "image/png",
+            "path": entry.path,
+            "copied_at": entry.copied_at,
+        }
+        if entry.content_hash:
+            payload["content_hash"] = entry.content_hash
+        return payload
     return {"id": entry.id, "text": entry.text, "copied_at": entry.copied_at}

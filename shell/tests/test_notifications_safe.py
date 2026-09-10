@@ -337,10 +337,103 @@ def test_persistence_roundtrip() -> None:
         assert loaded[0].icon_name == "icon"
         assert loaded[0].actions[0].key == "default"
         assert loaded[0].expired is False
+        assert loaded[0].kind == "normal"
+        assert loaded[0].meta == ""
 
         payload = json.loads(path.read_text(encoding="utf-8"))
         assert payload["version"] == 1
         assert payload["sound_muted_apps"] == ["strawberry"]
+
+
+def test_post_assistant_sets_kind_and_skips_normal_fields() -> None:
+    from shell.models import (
+        ASSISTANT_SOURCE_AI,
+        ASSISTANT_SOURCE_FALLBACK,
+        NOTIFICATION_KIND_ASSISTANT,
+        NOTIFICATION_KIND_NORMAL,
+        assistant_source_label,
+    )
+
+    event_bus = EventBus()
+    received: list[NotificationSnapshot] = []
+    event_bus.subscribe("notification_received", lambda snap: received.append(snap))
+    service = NotificationService(event_bus)
+
+    assistant = service.post_assistant(
+        body="Hoy toca enfocarte en lo urgente.",
+        meta="2 pendientes",
+        source=ASSISTANT_SOURCE_AI,
+        expire_timeout_ms=12000,
+    )
+    fallback = service.post_assistant(
+        body="Tienes 1 tarea pendiente para hoy.",
+        source="broken-value",
+        expire_timeout_ms=12000,
+    )
+    normal = service.post(app_name="Other", summary="Ping", body="hola")
+
+    assert assistant is not None
+    assert assistant.kind == NOTIFICATION_KIND_ASSISTANT
+    assert assistant.source == ASSISTANT_SOURCE_AI
+    assert assistant_source_label(assistant.source) == "Llama · IA local"
+    assert assistant.body == "Hoy toca enfocarte en lo urgente."
+    assert assistant.meta == "2 pendientes"
+    assert assistant.summary == "Jugoo"
+    assert fallback is not None
+    assert fallback.source == ASSISTANT_SOURCE_FALLBACK
+    assert assistant_source_label(fallback.source) == "Respaldo de Jugoo"
+    assert normal is not None
+    assert normal.kind == NOTIFICATION_KIND_NORMAL
+    assert [item.kind for item in received] == [
+        NOTIFICATION_KIND_ASSISTANT,
+        NOTIFICATION_KIND_ASSISTANT,
+        NOTIFICATION_KIND_NORMAL,
+    ]
+    service.close()
+
+
+def test_assistant_kind_persists_in_history() -> None:
+    from shell.models import ASSISTANT_SOURCE_AI, NOTIFICATION_KIND_ASSISTANT
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "notifications.json"
+        snapshot = NotificationSnapshot(
+            id=9,
+            app_name="Jugoo",
+            app_icon="com.jugoo.Shell",
+            summary="Jugoo",
+            body="Mensaje del asistente",
+            actions=(),
+            urgency=1,
+            timestamp=1.0,
+            expire_timeout_ms=12000,
+            kind=NOTIFICATION_KIND_ASSISTANT,
+            meta="1 pendiente",
+            source=ASSISTANT_SOURCE_AI,
+        )
+        save_history(path, items=(snapshot,), paused=False, next_id=10)
+        loaded, _, _, _ = load_history(path)
+        assert loaded[0].kind == NOTIFICATION_KIND_ASSISTANT
+        assert loaded[0].meta == "1 pendiente"
+        assert loaded[0].source == ASSISTANT_SOURCE_AI
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert payload["items"][0]["kind"] == "assistant"
+        assert payload["items"][0]["source"] == "ai"
+
+
+def test_assistant_geometry_differs_from_toast() -> None:
+    from shell.config import (
+        ASSISTANT_CARD_MAX_HEIGHT,
+        ASSISTANT_CARD_WIDTH,
+        NOTIFICATIONS_TOAST_MAX_HEIGHT,
+        NOTIFICATIONS_TOAST_WIDTH,
+    )
+
+    assert ASSISTANT_CARD_WIDTH == 360
+    assert ASSISTANT_CARD_MAX_HEIGHT == 240
+    assert ASSISTANT_CARD_WIDTH != NOTIFICATIONS_TOAST_WIDTH
+    assert ASSISTANT_CARD_MAX_HEIGHT != NOTIFICATIONS_TOAST_MAX_HEIGHT
+    assert ASSISTANT_CARD_MAX_HEIGHT > NOTIFICATIONS_TOAST_MAX_HEIGHT
 
 
 def _pump_context(max_iterations: int = 200) -> None:
@@ -766,6 +859,9 @@ if __name__ == "__main__":
     test_store_invoke_action_tracking()
     test_trim_history_prefers_active_items()
     test_persistence_roundtrip()
+    test_post_assistant_sets_kind_and_skips_normal_fields()
+    test_assistant_kind_persists_in_history()
+    test_assistant_geometry_differs_from_toast()
     test_dbus_notify_dismiss_and_action()
     test_service_timeout_expires_but_keeps_history()
     test_toast_timeout_flow_expires_without_mark_read()

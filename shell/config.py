@@ -187,6 +187,13 @@ NOTIFICATIONS_TOAST_WIDTH = 400
 NOTIFICATIONS_TOAST_MAX_HEIGHT = 120
 NOTIFICATIONS_TOAST_TIMEOUT_MS = 5000
 
+# Assistant card (startup briefing / Jugoo speaking). Separate from toasts.
+ASSISTANT_CARD_WIDTH = 360
+ASSISTANT_CARD_MAX_HEIGHT = 240
+ASSISTANT_ICON_SIZE = 32
+ASSISTANT_TOP_MARGIN = 56
+ASSISTANT_SLIDE_PX = 10
+
 # History grouping: "summary" = by contacto/título (WhatsApp-style);
 # "app" = todas las de una app juntas. EXCEPTIONS flips the default per app key.
 NOTIFICATIONS_GROUPING_MODE = "summary"
@@ -230,11 +237,17 @@ LAUNCHER_ROW_ICON_SIZE = 28
 LAUNCHER_LIST_SPACING = 2
 
 # Clipboard picker (Super+V). History is local-only and never logged.
+# Limits apply only to Jugoo persistence — never to the system clipboard.
 CLIPBOARD_HISTORY_PATH = "clipboard-history.json"
+CLIPBOARD_IMAGES_DIR = "clipboard/images"
 CLIPBOARD_HISTORY_LIMIT = 200
-CLIPBOARD_MAX_ITEM_BYTES = 512 * 1024
+CLIPBOARD_MAX_TEXT_BYTES = 1 * 1024 * 1024
+CLIPBOARD_MAX_HISTORY_BYTES = 25 * 1024 * 1024
+# Backward-compatible alias used by older imports/tests.
+CLIPBOARD_MAX_ITEM_BYTES = CLIPBOARD_MAX_TEXT_BYTES
 CLIPBOARD_PREVIEW_CHARS = 96
 CLIPBOARD_PREVIEW_LINES = 2
+CLIPBOARD_THUMBNAIL_SIZE = 56
 
 # Emoji picker (Super+period).
 EMOJI_PICKER_COLUMNS = 9

@@ -49,7 +49,7 @@ WhichFn = Callable[[str], str | None]
 _MAX_RELEVANT = 6
 _MAX_NOTES_CHARS = 120
 _REPEAT_HINTS = {
-    TASK_REPEAT_DAILY: "cada día",
+    TASK_REPEAT_DAILY: "diaria",
     TASK_REPEAT_MONTHLY: "cada mes",
 }
 _DIAG_LOG_PATH = Path("/tmp/jugoo-briefing-diag.log")
@@ -137,7 +137,8 @@ def collect_briefing_facts(
         pending_today=int(snapshot.pending_today_count),
         upcoming=upcoming_count,
     )
-    previous = None if memory is None else memory.last_message.strip() or None
+    raw_previous = None if memory is None else memory.last_message.strip() or None
+    previous = _safe_previous_message(raw_previous)
 
     return TaskBriefingFacts(
         pending_today=int(snapshot.pending_today_count),
@@ -217,10 +218,27 @@ def build_briefing_prompt(facts: TaskBriefingFacts) -> str:
         "TAREA MÁS URGENTE:\n"
         f"{urgent_block}\n\n"
         f"{changes}\n\n"
-        "MENSAJE ANTERIOR DEL ASISTENTE:\n"
+        "MENSAJE ANTERIOR DEL ASISTENTE "
+        "(solo continuidad; no implica qué hizo el usuario después):\n"
         f"{previous_block}\n\n"
         "Escribe ahora el mensaje breve que verá el usuario."
     )
+
+
+def _assistant_meta(facts: TaskBriefingFacts) -> str:
+    """Discrete footer for the assistant card (not a task list)."""
+    if facts.empty:
+        return ""
+    parts: list[str] = []
+    if facts.overdue == 1:
+        parts.append("1 vencida")
+    elif facts.overdue > 1:
+        parts.append(f"{facts.overdue} vencidas")
+    if facts.pending_today == 1:
+        parts.append("1 pendiente")
+    elif facts.pending_today > 1:
+        parts.append(f"{facts.pending_today} pendientes")
+    return " · ".join(parts)
 
 
 def fallback_briefing_text(facts: TaskBriefingFacts) -> str:
@@ -264,7 +282,8 @@ def _status_label(snapshot: TaskSnapshot, today: date) -> str:
     if snapshot.status == TASK_STATUS_OVERDUE:
         return "vencida"
     if snapshot.repeat == TASK_REPEAT_DAILY:
-        return "hoy (cada día)"
+        # Avoid the literal "cada día" — Llama tended to turn it into an order.
+        return "hoy · diaria"
     occurrence = _parse_date(snapshot.occurrence_date) or _parse_date(snapshot.due_date)
     if occurrence is None:
         return "pendiente"
@@ -299,6 +318,46 @@ def _repeat_hint(repeat: str) -> str | None:
 
 def _normalized_text(value: str) -> str:
     return " ".join(value.casefold().split())
+
+
+# Phrases that invent user behavior or give unverified orders.
+_INVENTED_USER_ACTION_PATTERNS = (
+    r"\bno has(?:\s+\w+){0,3}\s+"
+    r"(?:comenzado|empezado|trabajado|hecho|terminado|arreglado|"
+    r"dejado|avanzado|cumplido|podido)\b",
+    r"\bparece que no has\b",
+    r"\btodav[ií]a no has\b",
+    r"\bdesde mi [uú]ltimo mensaje\b",
+    r"\bcomo (?:todav[ií]a )?no (?:has|hiciste|empezaste)\b",
+    r"\brecuerda(?:\s+tambi[eé]n)?(?:\s+hacer(?:lo)?|\s+que)\b",
+    r"\bno te olvides\b",
+    r"\bno olvides\b",
+    r"\bacu[eé]rdate(?:\s+tambi[eé]n)?(?:\s+de)?\b",
+    r"\bdeber[ií]as\b",
+    r"\bdebiste\b",
+    r"\bnecesitas (?:hacer|arreglar|empezar|trabajar)\b",
+    r"\bhazlo cada d[ií]a\b",
+    r"\bhacer(?:lo)? cada d[ií]a\b",
+)
+
+
+def _invented_user_action_hit(normalized: str) -> str | None:
+    for pattern in _INVENTED_USER_ACTION_PATTERNS:
+        if re.search(pattern, normalized):
+            return pattern
+    return None
+
+
+def _safe_previous_message(previous: str | None) -> str | None:
+    """Drop prior assistant text that would poison continuity with false claims."""
+    if not previous:
+        return None
+    if _invented_user_action_hit(_normalized_text(previous)) is None:
+        return previous
+    return (
+        "Había un briefing previo sobre las mismas tareas abiertas "
+        "(el texto anterior no era fiable)."
+    )
 
 
 def _title_is_echoed(text: str, title: str) -> bool:
@@ -370,6 +429,10 @@ def validate_briefing_output_with_reason(
         )
         if any(phrase in normalized for phrase in no_pending_claims):
             return None, "contradicts_pending"
+
+    invent_hit = _invented_user_action_hit(normalized)
+    if invent_hit is not None:
+        return None, f"invented_user_action:{invent_hit}"
 
     if facts.overdue > 0:
         no_overdue_claims = (
@@ -521,19 +584,27 @@ class StartupTaskBriefing:
         fallback = fallback_briefing_text(facts)
         _briefing_diag(f"fallback_candidate: {fallback!r}")
         use_ai, reason = self._ai_is_viable()
+        _briefing_diag(f"ai_viability={'YES' if use_ai else 'NO'}")
+        _briefing_diag(f"viability_reason={reason}")
         if not use_ai:
+            _briefing_diag("llama_start: SKIPPED")
             _briefing_diag("llama_command: (not executed)")
             _briefing_diag("llama_returncode: (n/a)")
             _briefing_diag("llama_stdout: (n/a)")
             _briefing_diag("llama_stderr: (n/a)")
-            _briefing_diag("parsed_output: (n/a)")
-            _briefing_diag("validation_result: SKIPPED")
+            _briefing_diag("llama_parsed: (n/a)")
+            _briefing_diag("validation: SKIPPED")
             _briefing_diag(f"rejection_reason: ai_unavailable:{reason}")
+            _briefing_diag("selected_source=fallback")
             _briefing_diag("fallback_used: YES")
             _briefing_diag(f"fallback_reason: ai_unavailable:{reason}")
-            _briefing_diag(f"final_message: {fallback!r}")
+            _briefing_diag(f"final_body: {fallback!r}")
             _briefing_diag("END")
-            self._deliver(fallback)
+            self._deliver(
+                fallback,
+                meta=_assistant_meta(facts),
+                source="fallback",
+            )
             self._persist(fallback, facts)
             return "fallback"
 
@@ -551,52 +622,83 @@ class StartupTaskBriefing:
         ):
             _briefing_diag(f"prompt_has[{marker}]={marker in prompt}")
 
-        _briefing_diag("llama START")
-        body, source = generate_briefing_text(
-            prompt,
-            config=self._config,
-            generator=self._generator,
-            use_ai=True,
-            fallback=fallback,
-        )
-        _briefing_diag("llama END")
+        try:
+            body = fallback
+            source = "fallback"
+            last_reject = ""
+            for attempt in (1, 2):
+                _briefing_diag(f"llama_start attempt={attempt}")
+                body, source = generate_briefing_text(
+                    prompt,
+                    config=self._config,
+                    generator=self._generator,
+                    use_ai=True,
+                    fallback=fallback,
+                )
+                _briefing_diag(f"llama_end attempt={attempt}")
 
-        gen = self._generator
-        _briefing_diag(f"llama_command: {_safe_command_preview(getattr(gen, 'last_argv', None))}")
-        _briefing_diag(f"llama_returncode: {getattr(gen, 'last_returncode', None)}")
-        _briefing_diag("llama_stdout:")
-        print(_clip_diag(getattr(gen, "last_stdout", None)), flush=True)
-        _briefing_diag("llama_stderr:")
-        print(_clip_diag(getattr(gen, "last_stderr", None), limit=1500), flush=True)
+                gen = self._generator
+                _briefing_diag(
+                    f"llama_command: {_safe_command_preview(getattr(gen, 'last_argv', None))}"
+                )
+                _briefing_diag(
+                    f"llama_returncode: {getattr(gen, 'last_returncode', None)}"
+                )
+                _briefing_diag("llama_stdout:")
+                print(_clip_diag(getattr(gen, "last_stdout", None)), flush=True)
+                _briefing_diag("llama_stderr:")
+                print(
+                    _clip_diag(getattr(gen, "last_stderr", None), limit=1500),
+                    flush=True,
+                )
 
-        if source == "ai":
-            _briefing_diag(f"parsed_output: {body!r}")
-            validated_body, reject_reason = validate_briefing_output_with_reason(body, facts)
-            if validated_body is None:
-                _briefing_diag("validation_result: REJECTED")
-                _briefing_diag(f"rejection_reason: {reject_reason}")
-                _briefing_diag("fallback_used: YES")
-                _briefing_diag(f"fallback_reason: semantic_reject:{reject_reason}")
-                body = fallback
-                source = "fallback"
-            else:
+                if source != "ai":
+                    ai_reason = getattr(gen, "last_error", None) or "invalid"
+                    _briefing_diag(f"llama_parsed: (none) parser_error={ai_reason!r}")
+                    _briefing_diag(f"validation=SKIPPED reason=parser:{ai_reason}")
+                    last_reject = f"parser:{ai_reason}"
+                    body = fallback
+                    source = "fallback"
+                    break
+
+                _briefing_diag(f"llama_parsed: {body!r}")
+                validated_body, reject_reason = validate_briefing_output_with_reason(
+                    body, facts
+                )
+                if validated_body is None:
+                    _briefing_diag(
+                        f"validation=REJECTED attempt={attempt} reason={reject_reason}"
+                    )
+                    last_reject = f"semantic_reject:{reject_reason}"
+                    if attempt == 1:
+                        _briefing_diag("retry_after_semantic_reject=YES")
+                        continue
+                    _briefing_diag("selected_source=fallback")
+                    _briefing_diag("fallback_used: YES")
+                    _briefing_diag(f"fallback_reason: {last_reject}")
+                    body = fallback
+                    source = "fallback"
+                    break
+
                 body = validated_body
-                _briefing_diag("validation_result: ACCEPTED")
-                _briefing_diag("rejection_reason: (none)")
+                _briefing_diag("validation=ACCEPTED")
+                _briefing_diag("selected_source=ai")
                 _briefing_diag("fallback_used: NO")
                 _briefing_diag("fallback_reason: (none)")
-        else:
-            ai_reason = getattr(gen, "last_error", None) or "invalid"
-            _briefing_diag(f"parsed_output: (none) parser_error={ai_reason!r}")
-            _briefing_diag("validation_result: SKIPPED")
-            _briefing_diag(f"rejection_reason: parser:{ai_reason}")
+                source = "ai"
+                break
+        except Exception as error:
+            _briefing_diag("selected_source=fallback")
             _briefing_diag("fallback_used: YES")
-            _briefing_diag(f"fallback_reason: parser:{ai_reason}")
+            _briefing_diag(f"fallback_reason: exception:{error!r}")
+            print(f"Task startup briefing: generation failed: {error}", flush=True)
             body = fallback
+            source = "fallback"
 
-        _briefing_diag(f"final_message: {body!r}")
+        _briefing_diag(f"final_body: {body!r}")
+        _briefing_diag(f"message_source: {source}")
         _briefing_diag("END")
-        self._deliver(body)
+        self._deliver(body, meta=_assistant_meta(facts), source=source)
         self._persist(body, facts)
         return source
 
@@ -637,43 +739,44 @@ class StartupTaskBriefing:
         if self._which(self._config.ai_binary) is None:
             return False, "binary_missing"
         viability = self._resources.viability(self._config)
-        if not viability.viable:
-            # Startup briefing: if VRAM fails only because of the safety margin
-            # (estimate still fits in free VRAM), attempt llama anyway. Instant
-            # fallback on a ~10 MiB margin miss is worse than a timed attempt.
-            if (
-                viability.reason == "vram"
-                and viability.estimated_vram_bytes is not None
-                and viability.available_vram_bytes is not None
-                and viability.estimated_vram_bytes < viability.available_vram_bytes
-            ):
-                _briefing_diag(
-                    "ai_viable: soft-pass vram margin "
-                    f"(est={viability.estimated_vram_bytes // (1024 * 1024)} MiB "
-                    f"< free={viability.available_vram_bytes // (1024 * 1024)} MiB)"
-                )
-                return True, "ok_vram_margin_soft"
-            details = []
-            if viability.available_vram_bytes is not None:
-                details.append(
-                    f"VRAM libre {viability.available_vram_bytes // (1024 * 1024)} MiB"
-                )
-            if viability.estimated_vram_bytes is not None:
-                details.append(
-                    f"estimada {viability.estimated_vram_bytes // (1024 * 1024)} MiB"
-                )
-            suffix = f" ({', '.join(details)})" if details else ""
-            return False, f"{viability.reason}{suffix}"
-        return True, "ok"
+        if viability.viable:
+            return True, "ok"
 
-    def _deliver(self, body: str) -> None:
+        details = []
+        if viability.available_vram_bytes is not None:
+            details.append(
+                f"VRAM libre {viability.available_vram_bytes // (1024 * 1024)} MiB"
+            )
+        if viability.estimated_vram_bytes is not None:
+            details.append(
+                f"estimada {viability.estimated_vram_bytes // (1024 * 1024)} MiB"
+            )
+        suffix = f" ({', '.join(details)})" if details else ""
+
+        # Startup briefing: the VRAM gate uses a conservative full-model estimate
+        # on an 8 GiB card that often sits a few hundred MiB below the estimate
+        # while llama-cli still runs fine. Soft-pass any pure `vram` reject and
+        # let the real llama call (timeout / empty / error) decide fallback.
+        if viability.reason == "vram":
+            free = viability.available_vram_bytes
+            est = viability.estimated_vram_bytes
+            _briefing_diag(
+                "ai_viable: soft-pass vram attempt "
+                f"(est={None if est is None else est // (1024 * 1024)} MiB, "
+                f"free={None if free is None else free // (1024 * 1024)} MiB)"
+            )
+            return True, "ok_vram_soft_attempt"
+
+        return False, f"{viability.reason}{suffix}"
+
+    def _deliver(self, body: str, *, meta: str = "", source: str = "fallback") -> None:
         if self._closed:
             return
         run_id = _run_id()
 
         def _emit_with_id() -> bool:
             _thread_run_id.value = run_id
-            return self._emit_notification(body)
+            return self._emit_notification(body, meta=meta, source=source)
 
         if self._notify_fn is not None:
             _emit_with_id()
@@ -683,27 +786,48 @@ class StartupTaskBriefing:
             return
         _emit_with_id()
 
-    def _emit_notification(self, body: str) -> bool:
+    def _emit_notification(
+        self,
+        body: str,
+        *,
+        meta: str = "",
+        source: str = "fallback",
+    ) -> bool:
         if self._closed:
             return False
-        _briefing_diag(f"notification EMIT body={body!r}")
+        _briefing_diag(f"notification EMIT body={body!r} source={source!r}")
         if self._notify_fn is not None:
             self._notify_fn(body)
             _briefing_diag("notification ROUTE=notify_fn")
         elif self._notifications is not None:
-            poster = getattr(self._notifications, "post", None)
+            poster = getattr(self._notifications, "post_assistant", None)
             if callable(poster):
-                poster(
-                    app_name="Jugoo",
-                    summary="Jugoo Tasks",
-                    body=body,
-                    app_icon="com.jugoo.Shell",
-                    urgency=1,
-                    expire_timeout_ms=self._config.notification_timeout_ms,
-                )
-                _briefing_diag(
-                    "notification ROUTE=NotificationService.post summary=Jugoo Tasks"
-                )
+                try:
+                    snapshot = poster(
+                        body=body,
+                        app_name="Jugoo",
+                        app_icon="com.jugoo.Shell",
+                        meta=meta,
+                        source=source,
+                        urgency=1,
+                        expire_timeout_ms=self._config.notification_timeout_ms,
+                    )
+                    snap_id = getattr(snapshot, "id", None)
+                    snap_source = getattr(snapshot, "source", None)
+                    _briefing_diag(
+                        f"post_assistant source={snap_source!r} notification_id={snap_id}"
+                    )
+                    _briefing_diag(
+                        "notification ROUTE=NotificationService.post_assistant"
+                    )
+                except Exception as error:
+                    _briefing_diag(f"notification ROUTE=failed:{error!r}")
+                    print(
+                        f"Task startup briefing: assistant notify failed: {error}",
+                        flush=True,
+                    )
+            else:
+                _briefing_diag("notification ROUTE=none (no post_assistant)")
         else:
             _briefing_diag("notification ROUTE=none (no target)")
         _briefing_diag("notification SENT")

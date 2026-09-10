@@ -6,7 +6,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ...models import NotificationAction, NotificationSnapshot
+from ...models import (
+    NOTIFICATION_KIND_NORMAL,
+    NotificationAction,
+    NotificationSnapshot,
+)
 
 HISTORY_VERSION = 1
 
@@ -130,6 +134,9 @@ def _snapshot_to_dict(snapshot: NotificationSnapshot) -> dict[str, Any]:
         "read": snapshot.read,
         "dismissed": snapshot.dismissed,
         "expired": snapshot.expired,
+        "kind": snapshot.kind or NOTIFICATION_KIND_NORMAL,
+        "meta": snapshot.meta or "",
+        "source": snapshot.source or "",
     }
 
 
@@ -167,6 +174,9 @@ def _snapshot_from_dict(raw: Any) -> NotificationSnapshot | None:
             read=bool(raw.get("read", False)),
             dismissed=bool(raw.get("dismissed", False)),
             expired=bool(raw.get("expired", False)),
+            kind=str(raw.get("kind", NOTIFICATION_KIND_NORMAL) or NOTIFICATION_KIND_NORMAL),
+            meta=str(raw.get("meta", "") or ""),
+            source=str(raw.get("source", "") or ""),
         )
     except (KeyError, TypeError, ValueError):
         return None

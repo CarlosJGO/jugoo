@@ -46,7 +46,24 @@ def verify_mock_executor() -> None:
     assert service.last_action == ACTION_REBOOT
 
 
+def verify_suspend_locks_before_sleep() -> None:
+    executed: list[list[str]] = []
+
+    def mock_executor(command) -> None:
+        executed.append(list(command))
+
+    service = PowerService(executor=mock_executor)
+    service.suspend()
+    assert executed == [
+        ["noctalia", "msg", "session", "lock"],
+        ["loginctl", "lock-session"],
+        ["noctalia", "msg", "session", "suspend"],
+    ]
+    assert service.last_action == ACTION_SUSPEND
+
+
 if __name__ == "__main__":
     verify_power_service_dry_run()
     verify_mock_executor()
+    verify_suspend_locks_before_sleep()
     print("power verification OK (no destructive actions executed)")

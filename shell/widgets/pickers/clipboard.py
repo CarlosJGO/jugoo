@@ -3,16 +3,23 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 import time
 
 import gi
 
 gi.require_version("Gtk", "3.0")
+gi.require_version("GdkPixbuf", "2.0")
 gi.require_version("Pango", "1.0")
 
-from gi.repository import GLib, Gtk, Pango
+from gi.repository import GdkPixbuf, GLib, Gtk, Pango
 
-from ...config import CLIPBOARD_PREVIEW_CHARS, CLIPBOARD_PREVIEW_LINES, LAUNCHER_ROW_ICON_SIZE
+from ...config import (
+    CLIPBOARD_PREVIEW_CHARS,
+    CLIPBOARD_PREVIEW_LINES,
+    CLIPBOARD_THUMBNAIL_SIZE,
+    LAUNCHER_ROW_ICON_SIZE,
+)
 from ...identity import TITLE_CLIPBOARD_PICKER
 from ...servicios.portapapeles.historia import (
     ClipboardEntry,
@@ -24,29 +31,56 @@ from .overlay import PickerOverlay
 from .session import PickerSession
 
 
+def _load_thumbnail(path: Path, size: int) -> GdkPixbuf.Pixbuf | None:
+    try:
+        return GdkPixbuf.Pixbuf.new_from_file_at_size(str(path), size, size)
+    except GLib.Error:
+        return None
+
+
 class ClipboardRow(Gtk.ListBoxRow):
-    def __init__(self, entry: ClipboardEntry, *, now: float) -> None:
+    def __init__(
+        self,
+        entry: ClipboardEntry,
+        *,
+        now: float,
+        image_path: Path | None = None,
+    ) -> None:
         super().__init__()
         self.entry = entry
         self.get_style_context().add_class("launcher-row")
+        if entry.is_image:
+            self.get_style_context().add_class("clipboard-row-image")
 
         content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         content.get_style_context().add_class("launcher-row-content")
         self.add(content)
 
-        icon = Gtk.Image.new_from_icon_name("edit-copy-symbolic", Gtk.IconSize.DIALOG)
-        icon.set_pixel_size(LAUNCHER_ROW_ICON_SIZE)
-        content.pack_start(icon, False, False, 0)
-
-        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        name = Gtk.Label(
-            label=preview_text(
+        if entry.is_image:
+            thumb = Gtk.Image()
+            thumb.get_style_context().add_class("clipboard-row-thumb")
+            pixbuf = None if image_path is None else _load_thumbnail(
+                image_path, CLIPBOARD_THUMBNAIL_SIZE
+            )
+            if pixbuf is not None:
+                thumb.set_from_pixbuf(pixbuf)
+            else:
+                thumb.set_from_icon_name("image-x-generic-symbolic", Gtk.IconSize.DIALOG)
+                thumb.set_pixel_size(CLIPBOARD_THUMBNAIL_SIZE)
+            content.pack_start(thumb, False, False, 0)
+            title = "Imagen"
+        else:
+            icon = Gtk.Image.new_from_icon_name("edit-copy-symbolic", Gtk.IconSize.DIALOG)
+            icon.set_pixel_size(LAUNCHER_ROW_ICON_SIZE)
+            content.pack_start(icon, False, False, 0)
+            title = preview_text(
                 entry.text,
                 max_chars=CLIPBOARD_PREVIEW_CHARS,
                 max_lines=CLIPBOARD_PREVIEW_LINES,
-            ),
-            xalign=0,
-        )
+            )
+
+        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        name = Gtk.Label(label=title, xalign=0)
         name.get_style_context().add_class("launcher-row-name")
         name.set_ellipsize(Pango.EllipsizeMode.END)
         labels.pack_start(name, False, False, 0)
@@ -65,6 +99,7 @@ class ClipboardPickerWindow(PickerOverlay):
         *,
         on_refresh: Callable[[], tuple[ClipboardEntry, ...]],
         on_copy: Callable[[str], None],
+        resolve_image: Callable[[ClipboardEntry], Path | None] | None = None,
     ) -> None:
         super().__init__(
             shell_window,
@@ -77,6 +112,7 @@ class ClipboardPickerWindow(PickerOverlay):
         )
         self._on_refresh = on_refresh
         self._on_copy = on_copy
+        self._resolve_image = resolve_image or (lambda _entry: None)
         self._entries: tuple[ClipboardEntry, ...] = ()
         self._rows: tuple[ClipboardRow, ...] = ()
 
@@ -123,7 +159,8 @@ class ClipboardPickerWindow(PickerOverlay):
         now = time.time()
         rows: list[ClipboardRow] = []
         for entry in matches:
-            row = ClipboardRow(entry, now=now)
+            image_path = self._resolve_image(entry) if entry.is_image else None
+            row = ClipboardRow(entry, now=now, image_path=image_path)
             self._list.add(row)
             rows.append(row)
         self._rows = tuple(rows)
@@ -133,7 +170,10 @@ class ClipboardPickerWindow(PickerOverlay):
         if rows:
             self.set_empty_visible(False)
             self._list.show()
-            chosen = next((row for row in rows if row.entry.id == selected_id), rows[self.session.selected_index])
+            chosen = next(
+                (row for row in rows if row.entry.id == selected_id),
+                rows[self.session.selected_index],
+            )
             self.session.select_index(rows.index(chosen))
             self._list.select_row(chosen)
         else:
