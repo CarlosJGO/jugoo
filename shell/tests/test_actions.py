@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from shell.actions import (
     UNSUPPORTED,
+    dispatch_action,
     format_actions_help,
     known_action_names,
     resolve_actions_from_argv,
@@ -24,6 +25,27 @@ def test_resolve_legacy_flags() -> None:
     assert resolve_actions_from_argv(["--toggle-notifications"]) == ("notifications",)
     assert resolve_actions_from_argv(["--toggle-session"]) == ("session",)
     assert resolve_actions_from_argv(["--open-tasks"]) == ("tasks",)
+
+
+def test_resolve_music_action() -> None:
+    assert resolve_actions_from_argv(["action", "playStopMusic"]) == ("playStopMusic",)
+
+
+def test_dispatch_music_action_uses_strawberry_transport() -> None:
+    calls: list[str] = []
+
+    class MediaService:
+        def play_pause_player(self) -> None:
+            calls.append("play_pause_player")
+
+    class Shell:
+        media_service = MediaService()
+
+        def __getattr__(self, name: str):
+            return lambda: calls.append(name)
+
+    assert dispatch_action("playStopMusic", Shell()) is None
+    assert calls == ["play_pause_player"]
 
 
 def test_resolve_dedupes_and_preserves_order() -> None:

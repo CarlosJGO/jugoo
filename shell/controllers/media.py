@@ -13,6 +13,8 @@ from ..popup_handle import PopupHandle, PopupOutsideDismiss
 from ..servicios.multimedia.media import (
     MEDIA_CHANGED,
     MEDIA_DISPLAY_MODE_CHANGED,
+    MEDIA_DISPLAY_PLAYER,
+    MEDIA_DISPLAY_WINDOW,
     MediaService,
 )
 from ..widgets.barra.active_window import MEDIA_BAR_CLICKED, ActiveWindowWidget
@@ -54,6 +56,21 @@ class MediaController:
             return
         self._open_popup()
 
+    def open_popup_for_mode(self, mode: str) -> None:
+        """Set Ventana/Reproductor then open (or refresh) the media popup."""
+        target = (
+            MEDIA_DISPLAY_PLAYER
+            if mode == MEDIA_DISPLAY_PLAYER
+            else MEDIA_DISPLAY_WINDOW
+        )
+        self._service.set_display_mode(target)
+        if self._popup.is_visible():
+            popup = self._popup.maybe
+            if popup is not None:
+                popup.refresh(self._service.snapshot)
+            return
+        self._open_popup()
+
     def _open_popup(self) -> None:
         popup = self._popup.get()
         anchor = self._active_window_widget.get_anchor_widget()
@@ -66,11 +83,11 @@ class MediaController:
             self._event_bus,
         )
 
-    def _on_media_bar_clicked(self, _widget: ActiveWindowWidget) -> None:
-        GLib.idle_add(self._handle_media_bar_clicked)
+    def _on_media_bar_clicked(self, mode: object) -> None:
+        GLib.idle_add(self._handle_media_bar_clicked, str(mode))
 
-    def _handle_media_bar_clicked(self) -> bool:
-        self.toggle_popup()
+    def _handle_media_bar_clicked(self, mode: str) -> bool:
+        self.open_popup_for_mode(mode)
         return False
 
     def _on_media_changed(self, snapshot) -> None:

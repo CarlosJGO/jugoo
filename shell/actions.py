@@ -48,6 +48,10 @@ ACTIONS: tuple[ShellAction, ...] = (
         legacy_flags=("--toggle-emoji",),
     ),
     ShellAction(
+        "playStopMusic",
+        "Play or pause music in Strawberry",
+    ),
+    ShellAction(
         "settings",
         "Open Settings (also reachable from Search / Control Center)",
         legacy_flags=("--toggle-settings",),
@@ -173,6 +177,7 @@ def dispatch_action(name: str, shell) -> str | None:
         "launcher": shell.toggle_launcher,
         "clipboard": shell.toggle_clipboard_picker,
         "emoji": shell.toggle_emoji_picker,
+        "playStopMusic": shell.media_service.play_pause_player,
         "settings": shell.toggle_settings,
         "control-center": shell.toggle_control_center,
         "notifications": shell.toggle_notifications,

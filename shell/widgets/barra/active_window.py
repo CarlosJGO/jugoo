@@ -23,6 +23,7 @@ from ...servicios.multimedia.media import (
     MEDIA_CHANGED,
     MEDIA_DISPLAY_MODE_CHANGED,
     MEDIA_DISPLAY_PLAYER,
+    MEDIA_DISPLAY_WINDOW,
     MediaService,
     is_strawberry_player,
 )
@@ -76,6 +77,9 @@ class ActiveWindowWidget(Gtk.EventBox):
         self._open_zone.get_style_context().add_class("active-window-open-zone")
         self._open_zone.set_hexpand(True)
         self._open_zone.set_above_child(False)
+        self._open_zone.set_tooltip_text(
+            "Clic izquierdo: modo Ventana · Clic derecho: modo Reproductor"
+        )
         self._open_zone.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
         self._open_zone.connect("button-press-event", self._on_open_zone_press)
 
@@ -300,10 +304,14 @@ class ActiveWindowWidget(Gtk.EventBox):
         self._secondary.set_no_show_all(False)
 
     def _on_open_zone_press(self, _widget: Gtk.EventBox, event: Gdk.EventButton) -> bool:
-        if event.button != Gdk.BUTTON_PRIMARY:
-            return False
-        self._event_bus.emit(MEDIA_BAR_CLICKED, self)
-        return True
+        """Left → Ventana popup; right → Reproductor popup. Transport stays separate."""
+        if event.button == Gdk.BUTTON_PRIMARY:
+            self._event_bus.emit(MEDIA_BAR_CLICKED, MEDIA_DISPLAY_WINDOW)
+            return True
+        if event.button == Gdk.BUTTON_SECONDARY:
+            self._event_bus.emit(MEDIA_BAR_CLICKED, MEDIA_DISPLAY_PLAYER)
+            return True
+        return False
 
     def _on_destroy(self, *_args) -> None:
         self._event_bus.unsubscribe(ACTIVE_WINDOW_CHANGED, self._on_active_window_changed)
