@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -50,21 +51,28 @@ _URGENCY_LABELS = {
 
 
 def open_notification_app(snapshot: NotificationSnapshot) -> None:
+    """Launch or activate the app that sent the notification."""
+    candidates: list[str] = []
     desktop = snapshot.desktop_entry.strip() if snapshot else ""
     if desktop:
         stem = Path(desktop).stem
         if stem:
+            candidates.append(stem)
+    app_name = snapshot.app_name.strip() if snapshot else ""
+    if app_name and app_name not in candidates:
+        candidates.append(app_name)
+
+    for ident in candidates:
+        commands: list[tuple[str, ...]] = []
+        if shutil.which("uwsm"):
+            commands.append(("uwsm", "app", "--", "gtk-launch", ident))
+        commands.append(("gtk-launch", ident))
+        for command in commands:
             try:
-                subprocess.Popen(["gtk-launch", stem])
+                subprocess.Popen(command)
                 return
             except (OSError, subprocess.SubprocessError):
-                pass
-    app_name = snapshot.app_name.strip() if snapshot else ""
-    if app_name:
-        try:
-            subprocess.Popen(["gtk-launch", app_name])
-        except (OSError, subprocess.SubprocessError):
-            pass
+                continue
 
 
 class NotificationItemRow(Gtk.EventBox):
@@ -681,8 +689,6 @@ class NotificationGroupRow(Gtk.EventBox):
         snapshot = self._representative
         if self._default_action is not None:
             self._on_invoke_action(snapshot.id, self._default_action)
-        elif len(self._group_snapshots) > 1:
-            pass
         else:
             self._on_open_app(snapshot)
         return True

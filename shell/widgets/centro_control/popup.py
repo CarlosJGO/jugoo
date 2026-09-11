@@ -16,6 +16,7 @@ from ...config import (
 from ...popup_handle import pointer_inside_widget, present_popup, hide_popup
 from ...popup_spawn import publish_popup_spawn
 from ...servicios.red.network import NetworkService, wifi_scan_allowed
+from ...ui.starfield import install_starfield, resolve_event_bus
 from ...window_identity import (
     TITLE_CONTROL_CENTER,
     TITLE_NETWORK_PANEL,
@@ -78,7 +79,12 @@ class ControlCenterPopup(Gtk.Window):
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         outer.get_style_context().add_class("control-center-popup-content")
-        self.add(outer)
+        install_starfield(
+            self,
+            outer,
+            resolve_event_bus(shell_window),
+            corner_radius=16.0,
+        )
 
         header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         header.get_style_context().add_class("control-center-popup-header")

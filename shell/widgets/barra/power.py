@@ -23,6 +23,7 @@ from ...servicios.energia.power import (
 )
 from ...popup_handle import PopupHandle, PopupOutsideDismiss, pointer_inside_widget, present_popup, hide_popup
 from ...popup_spawn import publish_popup_spawn
+from ...ui.starfield import install_starfield, resolve_event_bus
 from ...ui import ShellModule
 from ...window_identity import (
     TITLE_POWER_CONFIRM,
@@ -74,7 +75,12 @@ class PowerMenu(Gtk.Window):
 
         self._box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self._box.get_style_context().add_class("power-menu-content")
-        self.add(self._box)
+        install_starfield(
+            self,
+            self._box,
+            resolve_event_bus(shell_window),
+            corner_radius=16.0,
+        )
 
         for action, label, icon_name, destructive in POWER_MENU_ENTRIES:
             self._box.pack_start(
@@ -159,7 +165,12 @@ class PowerConfirmDialog(Gtk.Window):
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         outer.get_style_context().add_class("power-confirm-content")
-        self.add(outer)
+        install_starfield(
+            self,
+            outer,
+            resolve_event_bus(shell_window),
+            corner_radius=16.0,
+        )
 
         self._message = Gtk.Label(xalign=0.5)
         self._message.get_style_context().add_class("power-confirm-message")
@@ -313,6 +324,10 @@ class PowerWidget(ShellModule):
             self.close_menu,
             self._shell_window.event_bus,
         )
+
+    def toggle_menu(self) -> None:
+        """External/CLI entry: same behavior as left-clicking the power button."""
+        self._toggle_power_menu()
 
     def _on_menu_action_selected(self, action: str) -> None:
         if action in _CONFIRM_COPY:

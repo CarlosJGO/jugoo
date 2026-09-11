@@ -15,6 +15,7 @@ from ...config import WORKSPACE_POPUP_OFFSET
 from ...popup_handle import present_popup, hide_popup
 from ...popup_spawn import publish_popup_spawn
 from ...models import AudioSnapshot, WorkspaceAudioState
+from ...ui.starfield import install_starfield, resolve_event_bus
 from ...window_identity import (
     TITLE_WORKSPACE_PANEL,
     configure_interactive_popup,
@@ -66,7 +67,12 @@ class WorkspacePanel(Gtk.Window):
         self._streams_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self._box.pack_start(self._streams_container, True, True, 0)
 
-        self.add(self._box)
+        install_starfield(
+            self,
+            self._box,
+            resolve_event_bus(shell_window),
+            corner_radius=16.0,
+        )
 
     def open_for(
         self,

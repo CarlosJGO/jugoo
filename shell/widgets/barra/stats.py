@@ -31,6 +31,7 @@ from ...servicios.sistema.system import (
     SystemStats,
     SystemStatsService,
 )
+from ...ui.starfield import install_starfield, resolve_event_bus
 from ...ui import SHELL_MODULE_STACK_SPACING, ShellModule, shell_label
 from ...window_identity import (
     TITLE_MEMORY_POPUP,
@@ -109,7 +110,12 @@ class MemoryPopup(Gtk.Window):
             self._rows[key] = value
             if key.startswith("zram_"):
                 self._zram_rows.append(row)
-        self.add(content)
+        install_starfield(
+            self,
+            content,
+            resolve_event_bus(shell_window),
+            corner_radius=10.0,
+        )
 
     def open_for(self, anchor: Gtk.Widget, stats: SystemStats) -> None:
         self._anchor = anchor

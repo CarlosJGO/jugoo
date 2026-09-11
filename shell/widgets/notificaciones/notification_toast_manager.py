@@ -29,6 +29,7 @@ class NotificationToastManager:
         *,
         on_invoke_action: Callable[[int, str], None],
         on_mark_read: Callable[[int], None],
+        on_open_app: Callable[[NotificationSnapshot], None] | None = None,
         max_visible: int = NOTIFICATIONS_MAX_VISIBLE_TOASTS,
     ) -> None:
         self._shell_window = shell_window
@@ -36,6 +37,7 @@ class NotificationToastManager:
         self._anchor_button = anchor_button
         self._on_invoke_action = on_invoke_action
         self._on_mark_read = on_mark_read
+        self._on_open_app = on_open_app
         self._queue = ToastPresentationQueue(max_visible)
         self._toasts: dict[int, NotificationToast] = {}
         self._snapshots: dict[int, NotificationSnapshot] = {}
@@ -94,6 +96,7 @@ class NotificationToastManager:
                     self._service,
                     on_invoke_action=self._on_invoke_action,
                     on_dismiss=self._handle_toast_dismiss,
+                    on_open_app=self._on_open_app,
                 )
                 self._toasts[notification_id] = toast
                 self._layer.add_toast(toast)

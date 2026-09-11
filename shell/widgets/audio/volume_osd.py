@@ -13,6 +13,7 @@ gi.require_version("GtkLayerShell", "0.1")
 from gi.repository import Gtk, GtkLayerShell, Pango
 
 from ...models import SystemVolumeState
+from ...ui.starfield import install_starfield, resolve_event_bus
 from ...window_identity import (
     TITLE_VOLUME_OSD,
     configure_osd_window,
@@ -73,7 +74,12 @@ class VolumeOsd(Gtk.Window):
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         card.get_style_context().add_class("volume-osd-content")
         card.set_halign(Gtk.Align.CENTER)
-        outer.pack_start(card, False, False, 0)
+        install_starfield(
+            outer,
+            card,
+            resolve_event_bus(shell_window),
+            corner_radius=16.0,
+        )
 
         self._headline = Gtk.Label(xalign=0.5)
         self._headline.get_style_context().add_class("volume-osd-headline")

@@ -16,6 +16,7 @@ from ...popup_handle import hide_popup, pointer_inside_widget, present_popup
 from ...popup_spawn import publish_popup_spawn
 from ...servicios.tareas.logic import format_day_label
 from ...servicios.tareas.tasks import TasksService
+from ...ui.starfield import install_starfield, resolve_event_bus
 from ...window_identity import (
     TITLE_TASKS,
     configure_interactive_popup,
@@ -48,7 +49,12 @@ class TasksPopup(Gtk.Window):
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         outer.get_style_context().add_class("tasks-popup-content")
         outer.set_size_request(TASKS_POPUP_WIDTH, -1)
-        self.add(outer)
+        install_starfield(
+            self,
+            outer,
+            resolve_event_bus(shell_window),
+            corner_radius=16.0,
+        )
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         header.get_style_context().add_class("tasks-popup-header")

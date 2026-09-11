@@ -40,6 +40,17 @@ def dress_window(window: Gtk.Window, role: WindowRole, content: Gtk.Widget) -> N
     """Attach disguised content; shaped disguises get a true RGBA silhouette host."""
     disguise = resolve(disguise_for(role))
     disguise.style_widget(window)
+    wrapped = disguise.wrap(content)
     if disguise.id is not DisguiseId.NORMAL:
         prepare_transparent_toplevel(window)
-    window.add(disguise.wrap(content))
+        window.add(wrapped)
+        return
+    # Rectangular surfaces share the bar's animated void + stars.
+    from ..starfield import install_starfield, resolve_event_bus
+
+    install_starfield(
+        window,
+        wrapped,
+        resolve_event_bus(window),
+        corner_radius=16.0,
+    )

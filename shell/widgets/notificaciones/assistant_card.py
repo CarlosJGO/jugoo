@@ -22,6 +22,7 @@ from ...models import NotificationSnapshot, assistant_source_label
 from ...popup_handle import is_pointer_leaving_surface, pointer_inside_widget
 from ...servicios.notificaciones.notifications import NotificationService
 from ...ui.notification_icon import apply_notification_icon
+from ...ui.starfield import install_starfield, resolve_event_bus
 
 AssistantDismissReason = Literal["timeout", "click", "cancel"]
 
@@ -59,7 +60,7 @@ class AssistantCard(Gtk.EventBox):
         self._card.set_size_request(ASSISTANT_CARD_WIDTH, -1)
         self._card.get_style_context().add_class("assistant-card")
         self._card.get_style_context().add_class("assistant-card-content")
-        self.add(self._card)
+        install_starfield(self, self._card, resolve_event_bus(self), corner_radius=16.0)
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         header.get_style_context().add_class("assistant-card-header")

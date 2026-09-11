@@ -46,6 +46,7 @@ from ...servicios.escritorio.hyprland import (
     WORKSPACE_CHANGED,
 )
 from ...ui import ShellModule
+from ...ui.starfield import install_starfield, resolve_event_bus
 from ...widgets.aplicaciones.context_menu import popup_application_menu
 from ...window_identity import (
     TITLE_PINNED_OVERFLOW,
@@ -187,7 +188,12 @@ class PinnedAppsOverflowPopup(Gtk.Window):
         self._content.set_column_spacing(PINNED_APP_SPACING)
         self._content.set_row_spacing(PINNED_APP_SPACING)
         self._content.set_homogeneous(True)
-        self.add(self._content)
+        install_starfield(
+            self,
+            self._content,
+            resolve_event_bus(shell_window),
+            corner_radius=(0.0, 0.0, 14.0, 14.0),
+        )
 
     def open_for(self, anchor: Gtk.Widget) -> None:
         self._anchor = anchor

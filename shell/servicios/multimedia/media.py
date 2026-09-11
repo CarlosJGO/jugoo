@@ -405,6 +405,57 @@ class MediaService:
             return
         self._transport_with_track_refresh("Previous")
 
+    def play_pause_player(self) -> None:
+        """Bar cava transport: always Strawberry, regardless of Ventana/Reproductor UI mode."""
+        if self.ensure_strawberry_running(want_play=True):
+            return
+        self._call_strawberry_player("PlayPause")
+
+    def previous_track_player(self) -> None:
+        """Bar cava transport: previous track on Strawberry only."""
+        if self.ensure_strawberry_running(want_play=True):
+            return
+        bus_name = find_strawberry_bus_name(self._snapshot.players)
+        if bus_name is None:
+            return
+        state = self._players.get(bus_name)
+        if state is None:
+            return
+
+        def run_transport() -> bool:
+            self._player_method_idle(state.player_proxy, "Previous")
+            self._schedule_track_change_refresh()
+            return False
+
+        GLib.idle_add(run_transport)
+
+    def next_track_player(self) -> None:
+        """Bar cava transport: next track on Strawberry only."""
+        if self.ensure_strawberry_running(want_play=True):
+            return
+        bus_name = find_strawberry_bus_name(self._snapshot.players)
+        if bus_name is None:
+            return
+        state = self._players.get(bus_name)
+        if state is None:
+            return
+
+        def run_transport() -> bool:
+            self._player_method_idle(state.player_proxy, "Next")
+            self._schedule_track_change_refresh()
+            return False
+
+        GLib.idle_add(run_transport)
+
+    def _call_strawberry_player(self, method: str) -> None:
+        bus_name = find_strawberry_bus_name(self._snapshot.players)
+        if bus_name is None:
+            return
+        state = self._players.get(bus_name)
+        if state is None:
+            return
+        GLib.idle_add(self._player_method_idle, state.player_proxy, method)
+
     def ensure_strawberry_running(self, *, want_play: bool = False) -> bool:
         """Launch Strawberry if player mode needs it and MPRIS is missing.
 

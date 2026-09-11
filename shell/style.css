@@ -32,6 +32,7 @@ box.shell-bar {
 }
 
 eventbox.shell-starfield,
+eventbox.shell-starfield-host,
 eventbox.shell-bar-host {
     background-color: transparent;
 }
@@ -94,6 +95,13 @@ window#shell.compact eventbox.active-window-widget {
 
 window#shell.compact box.active-window-header {
     min-height: 20px;
+}
+
+window#shell.compact button.active-window-transport-btn {
+    min-width: 16px;
+    min-height: 16px;
+    padding: 0 2px;
+    font-size: 10px;
 }
 
 window#shell.compact image.active-window-icon {
@@ -394,6 +402,19 @@ box.active-window-header {
     min-height: 24px;
 }
 
+box.active-window-body {
+    min-width: 0;
+}
+
+eventbox.active-window-open-zone {
+    background-color: transparent;
+    min-width: 0;
+}
+
+box.active-window-meta {
+    min-width: 0;
+}
+
 image.active-window-icon {
     min-width: 24px;
     min-height: 24px;
@@ -418,6 +439,45 @@ label.active-window-status {
     font-size: 11px;
     min-width: 12px;
     text-shadow: 0 1px 3px @shell_shadow_strong;
+}
+
+/* Reproductor companion — always inside the cava block, glyph-style (not chip buttons). */
+box.active-window-transport {
+    margin: 0;
+    padding: 0 2px 0 6px;
+    background-color: transparent;
+    border: none;
+    box-shadow: none;
+}
+
+button.active-window-transport-btn {
+    min-width: 18px;
+    min-height: 18px;
+    padding: 0 3px;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    outline: none;
+    color: @shell_text_secondary;
+    font-size: 11px;
+    text-shadow: 0 1px 3px @shell_shadow_strong;
+    opacity: 0.72;
+}
+
+button.active-window-transport-btn:hover {
+    background-color: transparent;
+    background-image: none;
+    color: @shell_text_primary;
+    opacity: 1.0;
+}
+
+button.active-window-transport-btn:active {
+    background-color: transparent;
+    background-image: none;
+    opacity: 0.85;
 }
 
 drawingarea.active-window-spectrum {
@@ -2677,3 +2737,10 @@ drawingarea.settings-black-hole {
    Shaped asteroid/meteor CSS lives with the costume code; all roles use
    DisguiseId.NORMAL for now so notification panels keep their stock look.
    ========================================================================== */
+
+/* Translucent glass so StarfieldBackground shows through popup/layer cards. */
+box.shell-starfield-glass,
+flowbox.shell-starfield-glass {
+    background-image: none;
+    background-color: alpha(@shell_surface_bg_elevated, 0.55);
+}

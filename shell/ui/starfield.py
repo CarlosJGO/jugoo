@@ -1,10 +1,11 @@
-"""Deep-space starfield painted behind the bar."""
+"""Deep-space starfield painted behind shell surfaces (bar, popups, layers)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 import math
 import random
+from typing import Sequence
 
 import cairo
 import gi
@@ -20,6 +21,8 @@ from .theme import THEME_CHANGED, Theme, active_theme, color_to_rgb
 _TICK_MS = 48
 _BASE_DENSITY = 0.045
 
+CornerRadii = float | tuple[float, float, float, float]
+
 
 @dataclass(frozen=True)
 class _Star:
@@ -33,19 +36,73 @@ class _Star:
     cool: float
 
 
-class StarfieldBackground(Gtk.EventBox):
-    """Cold void + twinkling stars; hosts the bar layout as its child."""
+def resolve_event_bus(widget: Gtk.Widget | None) -> EventBus | None:
+    """Find the shell EventBus from a window or nested widget."""
+    current: Gtk.Widget | None = widget
+    while current is not None:
+        bus = getattr(current, "event_bus", None)
+        if isinstance(bus, EventBus):
+            return bus
+        bus = getattr(current, "_event_bus", None)
+        if isinstance(bus, EventBus):
+            return bus
+        shell = getattr(current, "_shell_window", None)
+        if shell is not None and shell is not current:
+            nested = resolve_event_bus(shell)
+            if nested is not None:
+                return nested
+        parent = current.get_parent()
+        if parent is None and isinstance(current, Gtk.Window):
+            break
+        current = parent
+    return None
 
-    def __init__(self, event_bus: EventBus | None = None) -> None:
+
+def install_starfield(
+    parent: Gtk.Container,
+    child: Gtk.Widget,
+    event_bus: EventBus | None = None,
+    *,
+    corner_radius: CornerRadii = 16.0,
+    draw_rim: bool = False,
+    glass: bool = True,
+) -> "StarfieldBackground":
+    """Wrap ``child`` in a starfield host and attach it to ``parent``."""
+    host = StarfieldBackground(
+        event_bus if event_bus is not None else resolve_event_bus(parent),
+        corner_radius=corner_radius,
+        draw_rim=draw_rim,
+    )
+    host.get_style_context().add_class("shell-starfield-host")
+    if glass:
+        child.get_style_context().add_class("shell-starfield-glass")
+    host.add(child)
+    if isinstance(parent, Gtk.Box):
+        parent.pack_start(host, False, False, 0)
+    else:
+        parent.add(host)
+    return host
+
+
+class StarfieldBackground(Gtk.EventBox):
+    """Cold void + twinkling stars; hosts layout/content as its child."""
+
+    def __init__(
+        self,
+        event_bus: EventBus | None = None,
+        *,
+        corner_radius: CornerRadii = 0.0,
+        draw_rim: bool = True,
+    ) -> None:
         super().__init__()
         self._event_bus = event_bus
+        self._corner_radii = _normalize_radii(corner_radius)
+        self._draw_rim = draw_rim
         self._stars: tuple[_Star, ...] = ()
         self._layout_key = (0, 0)
         self._elapsed_ms = 0
         self._tick_id = 0
         self.set_app_paintable(True)
-        self.set_hexpand(True)
-        self.set_halign(Gtk.Align.FILL)
         self.set_above_child(False)
         self.set_visible_window(True)
         self.get_style_context().add_class("shell-starfield")
@@ -112,8 +169,7 @@ class StarfieldBackground(Gtk.EventBox):
         theme = active_theme()
         void_rgb, mist_rgb = _space_palette(theme)
 
-        # Square silhouette (matches ``box.shell-bar`` border-radius: 0).
-        cr.rectangle(0, 0, width, height)
+        _path_rounded_rect(cr, 0.0, 0.0, width, height, self._corner_radii)
         cr.clip()
 
         cr.set_source_rgb(*void_rgb)
@@ -149,17 +205,65 @@ class StarfieldBackground(Gtk.EventBox):
             cr.arc(star.x, star.y, star.radius, 0, 2 * math.pi)
             cr.fill()
 
-        # Hard edge on free sides (bottom + right) so the void doesn't look cropped.
-        rim_r, rim_g, rim_b = _rim_rgb(theme)
-        cr.set_line_width(2.0)
-        cr.set_source_rgba(rim_r, rim_g, rim_b, 0.9)
-        cr.move_to(0.0, height - 1.0)
-        cr.line_to(width - 1.0, height - 1.0)
-        cr.line_to(width - 1.0, 0.0)
-        cr.stroke()
+        if self._draw_rim:
+            # Hard edge on free sides (bottom + right) so the void doesn't look cropped.
+            rim_r, rim_g, rim_b = _rim_rgb(theme)
+            cr.set_line_width(2.0)
+            cr.set_source_rgba(rim_r, rim_g, rim_b, 0.9)
+            cr.move_to(0.0, height - 1.0)
+            cr.line_to(width - 1.0, height - 1.0)
+            cr.line_to(width - 1.0, 0.0)
+            cr.stroke()
 
-        # Return False so the child layout (modules) still paints above.
+        # Return False so the child layout still paints above.
         return False
+
+
+def _normalize_radii(value: CornerRadii) -> tuple[float, float, float, float]:
+    if isinstance(value, (int, float)):
+        radius = max(0.0, float(value))
+        return (radius, radius, radius, radius)
+    if len(value) != 4:
+        raise ValueError("corner_radius tuple must be (tl, tr, br, bl)")
+    return tuple(max(0.0, float(part)) for part in value)  # type: ignore[return-value]
+
+
+def _path_rounded_rect(
+    cr: cairo.Context,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    radii: Sequence[float],
+) -> None:
+    tl, tr, br, bl = radii
+    if tl <= 0 and tr <= 0 and br <= 0 and bl <= 0:
+        cr.rectangle(x, y, width, height)
+        return
+
+    max_tl = min(tl, width / 2.0, height / 2.0)
+    max_tr = min(tr, width / 2.0, height / 2.0)
+    max_br = min(br, width / 2.0, height / 2.0)
+    max_bl = min(bl, width / 2.0, height / 2.0)
+
+    cr.new_sub_path()
+    if max_tr > 0:
+        cr.arc(x + width - max_tr, y + max_tr, max_tr, -math.pi / 2.0, 0.0)
+    else:
+        cr.move_to(x + width, y)
+    if max_br > 0:
+        cr.arc(x + width - max_br, y + height - max_br, max_br, 0.0, math.pi / 2.0)
+    else:
+        cr.line_to(x + width, y + height)
+    if max_bl > 0:
+        cr.arc(x + max_bl, y + height - max_bl, max_bl, math.pi / 2.0, math.pi)
+    else:
+        cr.line_to(x, y + height)
+    if max_tl > 0:
+        cr.arc(x + max_tl, y + max_tl, max_tl, math.pi, 3.0 * math.pi / 2.0)
+    else:
+        cr.line_to(x, y)
+    cr.close_path()
 
 
 def _space_palette(
@@ -185,7 +289,7 @@ def _rim_rgb(theme: Theme | None) -> tuple[float, float, float]:
 
 def _generate_stars(width: int, height: int) -> tuple[_Star, ...]:
     count = max(18, int(width * _BASE_DENSITY * max(1.0, height / 28.0)))
-    count = min(count, 160)
+    count = min(count, 280)
     rng = random.Random(0x5A1FE1D ^ (width * 73856093) ^ (height * 19349663))
     margin_x = 2.0
     margin_y = 1.5

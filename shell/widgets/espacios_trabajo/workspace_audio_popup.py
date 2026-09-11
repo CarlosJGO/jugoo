@@ -15,6 +15,7 @@ from ...config import WORKSPACE_POPUP_OFFSET
 from ...popup_handle import present_popup, hide_popup as fade_hide_popup
 from ...popup_spawn import publish_popup_spawn
 from ...models import AudioDevice, AudioSnapshot, WorkspaceAudioState
+from ...ui.starfield import install_starfield, resolve_event_bus
 from ...window_identity import (
     TITLE_WORKSPACE_AUDIO,
     configure_interactive_popup,
@@ -68,7 +69,12 @@ class WorkspaceAudioPopup(Gtk.Window):
 
         self._container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self._container.get_style_context().add_class("workspace-audio-popup-content")
-        self.add(self._container)
+        install_starfield(
+            self,
+            self._container,
+            resolve_event_bus(shell_window),
+            corner_radius=16.0,
+        )
 
     def show_for(
         self,

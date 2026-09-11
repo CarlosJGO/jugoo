@@ -30,8 +30,6 @@ from ..multimedia.audio_spectrum import paint_spectrum
 from ..multimedia.media_format import (
     compact_bar_primary,
     compact_bar_secondary,
-    media_status_glyph,
-    media_status_label,
     window_bar_primary,
     window_bar_secondary,
 )
@@ -41,7 +39,7 @@ MEDIA_BAR_CLICKED = "media_bar_clicked"
 
 
 class ActiveWindowWidget(Gtk.EventBox):
-    """Draws active-window or compact MPRIS metadata; left click opens the media popup."""
+    """Bar cava block: left opens the modes popup; right transport always drives Reproductor."""
 
     def __init__(
         self,
@@ -64,11 +62,26 @@ class ActiveWindowWidget(Gtk.EventBox):
         self.get_style_context().add_class("active-window-widget")
         self.set_size_request(ACTIVE_WINDOW_WIDTH, -1)
         self.set_app_paintable(True)
-        self.connect("button-press-event", self._on_button_press)
+        self.set_above_child(False)
+        self.set_visible_window(True)
         self.connect("draw", self._on_draw_spectrum)
 
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        content.set_hexpand(True)
+        # Same cava chrome, two non-overlapping hit targets:
+        #   [ open_zone → popup ] [ transport → Strawberry only ]
+        body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        body.set_hexpand(True)
+        body.get_style_context().add_class("active-window-body")
+
+        self._open_zone = Gtk.EventBox()
+        self._open_zone.get_style_context().add_class("active-window-open-zone")
+        self._open_zone.set_hexpand(True)
+        self._open_zone.set_above_child(False)
+        self._open_zone.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+        self._open_zone.connect("button-press-event", self._on_open_zone_press)
+
+        meta = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        meta.set_hexpand(True)
+        meta.get_style_context().add_class("active-window-meta")
 
         header = Gtk.Box(spacing=ACTIVE_WINDOW_CONTENT_SPACING)
         header.get_style_context().add_class("active-window-header")
@@ -80,8 +93,11 @@ class ActiveWindowWidget(Gtk.EventBox):
         self._primary.get_style_context().add_class("active-window-application")
         self._configure_stable_label(self._primary)
 
+        # Ventana-only playback glyph (hidden while transport is present).
         self._status = Gtk.Label()
         self._status.get_style_context().add_class("active-window-status")
+        self._status.set_no_show_all(True)
+        self._status.hide()
         self._status.set_xalign(1.0)
         self._status.set_halign(Gtk.Align.END)
         self._status.set_ellipsize(Pango.EllipsizeMode.NONE)
@@ -95,9 +111,29 @@ class ActiveWindowWidget(Gtk.EventBox):
         self._configure_stable_label(self._secondary)
         self._secondary.get_style_context().add_class("active-window-title")
 
-        content.pack_start(header, False, False, 0)
-        content.pack_start(self._secondary, False, False, 0)
-        self.add(content)
+        meta.pack_start(header, False, False, 0)
+        meta.pack_start(self._secondary, False, False, 0)
+        self._open_zone.add(meta)
+
+        # Always packed inside the bar block; always visible; always Strawberry APIs.
+        self._transport = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self._transport.get_style_context().add_class("active-window-transport")
+        self._transport.set_valign(Gtk.Align.CENTER)
+        self._transport.set_halign(Gtk.Align.END)
+
+        self._prev_button = self._make_transport_button("⏮", "Anterior (Reproductor)")
+        self._play_button = self._make_transport_button("▶", "Reproducir / pausar (Reproductor)")
+        self._next_button = self._make_transport_button("⏭", "Siguiente (Reproductor)")
+        self._prev_button.connect("clicked", self._on_previous_clicked)
+        self._play_button.connect("clicked", self._on_play_pause_clicked)
+        self._next_button.connect("clicked", self._on_next_clicked)
+        self._transport.pack_start(self._prev_button, False, False, 0)
+        self._transport.pack_start(self._play_button, False, False, 0)
+        self._transport.pack_start(self._next_button, False, False, 0)
+
+        body.pack_start(self._open_zone, True, True, 0)
+        body.pack_end(self._transport, False, False, 0)
+        self.add(body)
 
         self._event_bus.subscribe(ACTIVE_WINDOW_CHANGED, self._on_active_window_changed)
         self._event_bus.subscribe(MEDIA_CHANGED, self._on_media_changed)
@@ -109,9 +145,26 @@ class ActiveWindowWidget(Gtk.EventBox):
     def get_anchor_widget(self) -> Gtk.Widget:
         return self
 
+    def _make_transport_button(self, label: str, tooltip: str) -> Gtk.Button:
+        """Text glyphs match the old status style so controls blend into the cava chrome."""
+        button = Gtk.Button(label=label, relief=Gtk.ReliefStyle.NONE)
+        button.get_style_context().add_class("active-window-transport-btn")
+        button.set_tooltip_text(tooltip)
+        button.set_can_focus(False)
+        button.set_focus_on_click(False)
+        return button
+
+    def _on_previous_clicked(self, _button: Gtk.Button) -> None:
+        self._media_service.previous_track_player()
+
+    def _on_play_pause_clicked(self, _button: Gtk.Button) -> None:
+        self._media_service.play_pause_player()
+
+    def _on_next_clicked(self, _button: Gtk.Button) -> None:
+        self._media_service.next_track_player()
+
     @staticmethod
     def _configure_stable_label(label: Gtk.Label) -> None:
-        """Keep label text left-aligned and ellipsized inside the fixed-width block."""
         label.set_xalign(0.0)
         label.set_halign(Gtk.Align.FILL)
         label.set_hexpand(True)
@@ -152,9 +205,27 @@ class ActiveWindowWidget(Gtk.EventBox):
         self.queue_draw()
         return False
 
+    def _sync_play_glyph(self) -> None:
+        """Play glyph follows Strawberry status when present; otherwise idle ▶."""
+        active = self._media_snapshot.active
+        playing = (
+            active is not None
+            and is_strawberry_player(active)
+            and active.status == "playing"
+        )
+        self._play_button.set_label("⏸" if playing else "▶")
+        self._play_button.set_tooltip_text(
+            "Pausar (Reproductor)" if playing else "Reproducir (Reproductor)"
+        )
+
     def _render(self) -> bool:
         style = self.get_style_context()
+        # Transport is always shown inside this bar object.
+        self._transport.show_all()
+        self._status.hide()
+
         if self._media_service.display_mode == MEDIA_DISPLAY_PLAYER:
+            style.add_class("active-window-player-mode")
             active = self._media_snapshot.active
             if active is not None and is_strawberry_player(active):
                 style.add_class("active-window-media")
@@ -162,18 +233,23 @@ class ActiveWindowWidget(Gtk.EventBox):
             else:
                 style.add_class("active-window-media")
                 self._render_player_idle()
-        elif self._showing_media():
-            style.add_class("active-window-media")
-            self._render_media(self._media_snapshot.active)  # type: ignore[arg-type]
         else:
-            style.remove_class("active-window-media")
-            self._render_window(self._active_window)
+            style.remove_class("active-window-player-mode")
+            if self._showing_media():
+                style.add_class("active-window-media")
+                self._render_media(self._media_snapshot.active)  # type: ignore[arg-type]
+            else:
+                style.remove_class("active-window-media")
+                self._render_window(self._active_window)
+
+        self._sync_play_glyph()
         self.queue_draw()
         self.show_all()
+        self._transport.show_all()
+        self._status.hide()
         return False
 
     def _on_draw_spectrum(self, widget: Gtk.EventBox, cr) -> bool:
-        """Paint CSS background + spectrum under the text child."""
         allocation = widget.get_allocation()
         width = max(1, allocation.width)
         height = max(1, allocation.height)
@@ -202,9 +278,7 @@ class ActiveWindowWidget(Gtk.EventBox):
         self._icon.set_from_icon_name(icon_name, Gtk.IconSize.MENU)
         self._icon.set_pixel_size(ACTIVE_WINDOW_ICON_SIZE)
         self._primary.set_text(compact_bar_primary(player))
-        glyph = media_status_glyph(player.status)
-        self._status.set_text(glyph)
-        self._status.set_tooltip_text(media_status_label(player.status))
+        self._status.set_text("")
         secondary = compact_bar_secondary(player)
         self._secondary.set_text(secondary)
         self._secondary.set_no_show_all(not bool(secondary.strip()))
@@ -214,7 +288,6 @@ class ActiveWindowWidget(Gtk.EventBox):
         self._icon.set_pixel_size(ACTIVE_WINDOW_ICON_SIZE)
         self._primary.set_text("Strawberry")
         self._status.set_text("")
-        self._status.set_tooltip_text("Abre el reproductor")
         self._secondary.set_text("Sin reproducción")
         self._secondary.set_no_show_all(False)
 
@@ -223,14 +296,12 @@ class ActiveWindowWidget(Gtk.EventBox):
         self._icon.set_pixel_size(ACTIVE_WINDOW_ICON_SIZE)
         self._primary.set_text(window_bar_primary(active_window))
         self._status.set_text("")
-        self._status.set_tooltip_text(None)
         self._secondary.set_text(window_bar_secondary(active_window))
         self._secondary.set_no_show_all(False)
 
-    def _on_button_press(self, _widget: Gtk.EventBox, event: Gdk.EventButton) -> bool:
+    def _on_open_zone_press(self, _widget: Gtk.EventBox, event: Gdk.EventButton) -> bool:
         if event.button != Gdk.BUTTON_PRIMARY:
             return False
-        # Always open media popup (mode switch / player), even with no MPRIS source.
         self._event_bus.emit(MEDIA_BAR_CLICKED, self)
         return True
 

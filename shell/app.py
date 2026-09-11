@@ -138,7 +138,11 @@ class ShellApplication(Gtk.Window):
             self.layout.set_size_request(monitor.get_geometry().width, -1)
 
         # Starfield paints the void; layout modules sit as its child above the stars.
-        self._bar_host = StarfieldBackground(self.event_bus)
+        self._bar_host = StarfieldBackground(
+            self.event_bus,
+            corner_radius=0.0,
+            draw_rim=True,
+        )
         self._bar_host.get_style_context().add_class("shell-bar-host")
         self._bar_host.set_hexpand(True)
         self._bar_host.set_halign(Gtk.Align.FILL)
@@ -283,6 +287,15 @@ class ShellApplication(Gtk.Window):
     def close_control_center(self) -> None:
         self.control_center_controller.close_popup()
 
+    def toggle_control_center(self) -> None:
+        self.control_center_controller.toggle_full_control_center()
+
+    def toggle_notifications(self) -> None:
+        self.notifications_widget.toggle_popup()
+
+    def toggle_session(self) -> None:
+        self.power_widget.toggle_menu()
+
     def toggle_launcher(self) -> None:
         self.pickers_controller.close_pickers()
         self.applications_controller.toggle_launcher()
@@ -363,93 +376,77 @@ class ShellGtkApplication(Gtk.Application):
 
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)
-        action = Gio.SimpleAction.new("toggle-launcher", None)
-        action.connect("activate", self._on_toggle_launcher_action)
-        self.add_action(action)
-        clipboard = Gio.SimpleAction.new("toggle-clipboard", None)
-        clipboard.connect("activate", self._on_toggle_clipboard_action)
-        self.add_action(clipboard)
-        emoji = Gio.SimpleAction.new("toggle-emoji", None)
-        emoji.connect("activate", self._on_toggle_emoji_action)
-        self.add_action(emoji)
-        open_tasks = Gio.SimpleAction.new("open-tasks", None)
-        open_tasks.connect("activate", self._on_open_tasks_action)
-        self.add_action(open_tasks)
-        reload_theme = Gio.SimpleAction.new("reload-theme", None)
-        reload_theme.connect("activate", self._on_reload_theme_action)
-        self.add_action(reload_theme)
-        settings = Gio.SimpleAction.new("toggle-settings", None)
-        settings.connect("activate", self._on_toggle_settings_action)
-        self.add_action(settings)
+        from .actions import ACTIONS
+
+        for action in ACTIONS:
+            gio_action = Gio.SimpleAction.new(action.name, None)
+            gio_action.connect("activate", self._on_named_action, action.name)
+            self.add_action(gio_action)
+            # Legacy action ids used by older callers (task watcher, scripts).
+            for flag in action.legacy_flags:
+                legacy_name = flag.lstrip("-")
+                if legacy_name == action.name:
+                    continue
+                legacy = Gio.SimpleAction.new(legacy_name, None)
+                legacy.connect("activate", self._on_named_action, action.name)
+                self.add_action(legacy)
 
     def do_activate(self) -> None:
         if self._shell_window is None:
             self._shell_window = ShellApplication(self)
 
     def do_command_line(self, command_line: Gio.ApplicationCommandLine) -> int:
-        arguments = command_line.get_arguments()
+        from .actions import (
+            UNSUPPORTED,
+            dispatch_action,
+            format_actions_help,
+            resolve_actions_from_argv,
+        )
+
+        arguments = [str(item) for item in command_line.get_arguments()[1:]]
+        if "--list-actions" in arguments or (
+            arguments[:1] == ["action"]
+            and (len(arguments) == 1 or arguments[1:2] == ["list"])
+        ):
+            print(format_actions_help())
+            return 0
+
+        names = resolve_actions_from_argv(arguments)
+        if not names:
+            self.activate()
+            return 0
+
         self.activate()
-        if "--toggle-launcher" in arguments[1:]:
-            self._toggle_launcher()
-        if "--toggle-clipboard" in arguments[1:]:
-            self._toggle_clipboard()
-        if "--toggle-emoji" in arguments[1:]:
-            self._toggle_emoji()
-        if "--open-tasks" in arguments[1:]:
-            self._open_tasks_panel()
-        if "--reload-theme" in arguments[1:]:
-            self._reload_theme()
-        if "--toggle-settings" in arguments[1:]:
-            self._toggle_settings()
-        return 0
+        shell = self._shell_window
+        if shell is None:
+            print("jugoo: shell window is not ready", file=sys.stderr)
+            return 1
 
-    def _on_toggle_launcher_action(self, *_args) -> None:
+        status = 0
+        for name in names:
+            if name in UNSUPPORTED:
+                print(f"jugoo: {UNSUPPORTED[name]}", file=sys.stderr)
+                status = 2
+                continue
+            error = dispatch_action(name, shell)
+            if error:
+                print(f"jugoo: {error}", file=sys.stderr)
+                status = 2
+        return status
+
+    def _on_named_action(self, _action: Gio.SimpleAction, _param, name: str) -> None:
+        from .actions import UNSUPPORTED, dispatch_action
+
         self.activate()
-        self._toggle_launcher()
-
-    def _on_toggle_clipboard_action(self, *_args) -> None:
-        self.activate()
-        self._toggle_clipboard()
-
-    def _on_toggle_emoji_action(self, *_args) -> None:
-        self.activate()
-        self._toggle_emoji()
-
-    def _on_open_tasks_action(self, *_args) -> None:
-        self.activate()
-        self._open_tasks_panel()
-
-    def _on_reload_theme_action(self, *_args) -> None:
-        self.activate()
-        self._reload_theme()
-
-    def _on_toggle_settings_action(self, *_args) -> None:
-        self.activate()
-        self._toggle_settings()
-
-    def _toggle_launcher(self) -> None:
-        if self._shell_window is not None:
-            self._shell_window.toggle_launcher()
-
-    def _toggle_clipboard(self) -> None:
-        if self._shell_window is not None:
-            self._shell_window.toggle_clipboard_picker()
-
-    def _toggle_emoji(self) -> None:
-        if self._shell_window is not None:
-            self._shell_window.toggle_emoji_picker()
-
-    def _open_tasks_panel(self) -> None:
-        if self._shell_window is not None:
-            self._shell_window.open_tasks_panel()
-
-    def _reload_theme(self) -> None:
-        if self._shell_window is not None:
-            self._shell_window.reload_theme()
-
-    def _toggle_settings(self) -> None:
-        if self._shell_window is not None:
-            self._shell_window.toggle_settings()
+        shell = self._shell_window
+        if shell is None:
+            return
+        if name in UNSUPPORTED:
+            print(f"jugoo: {UNSUPPORTED[name]}", file=sys.stderr)
+            return
+        error = dispatch_action(name, shell)
+        if error:
+            print(f"jugoo: {error}", file=sys.stderr)
 
 
 def main() -> None:
@@ -465,9 +462,16 @@ def main() -> None:
         from .servicios.tareas.vigilancia import run_task_watcher
 
         raise SystemExit(run_task_watcher())
+    if "--list-actions" in sys.argv[1:] or (
+        sys.argv[1:2] == ["action"]
+        and (len(sys.argv) == 2 or sys.argv[2:3] == ["list"])
+    ):
+        # Allow listing without bringing up the full shell / claiming the bus.
+        from .actions import format_actions_help
+
+        print(format_actions_help())
+        raise SystemExit(0)
 
     init_window_identity()
     app = ShellGtkApplication()
-    print("APP CREADA")
-    status = app.run(sys.argv)
-    print("APP TERMINÓ:", status)
+    raise SystemExit(app.run(sys.argv))

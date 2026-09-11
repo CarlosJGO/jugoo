@@ -22,6 +22,7 @@ from ...popup_handle import is_pointer_leaving_surface, pointer_inside_widget
 from ...servicios.notificaciones.notifications import NotificationService
 from ...ui.disfraces import WindowRole, dress_content
 from ...ui.notification_icon import apply_notification_icon
+from ...ui.starfield import install_starfield, resolve_event_bus
 
 ToastDismissReason = Literal["timeout", "click", "cancel"]
 
@@ -37,12 +38,14 @@ class NotificationToast(Gtk.EventBox):
         *,
         on_invoke_action: Callable[[int, str], None],
         on_dismiss: Callable[[NotificationSnapshot, ToastDismissReason], None],
+        on_open_app: Callable[[NotificationSnapshot], None] | None = None,
     ) -> None:
         super().__init__()
 
         self._service = notification_service
         self._on_invoke_action = on_invoke_action
         self._on_dismiss = on_dismiss
+        self._on_open_app = on_open_app
         self._snapshot: NotificationSnapshot | None = None
         self._hide_source_id = 0
 
@@ -66,7 +69,22 @@ class NotificationToast(Gtk.EventBox):
         card_style = self._card.get_style_context()
         card_style.add_class("notification-toast-content")
         card_style.add_class("notification-toast-card")
-        self.add(dress_content(WindowRole.NOTIFICATION_TOAST, self._card))
+        # Starfield host owns the GdkWindow above the card; wire input there too
+        # so clicks/hover reach the toast handlers.
+        host = install_starfield(
+            self,
+            dress_content(WindowRole.NOTIFICATION_TOAST, self._card),
+            resolve_event_bus(self),
+            corner_radius=14.0,
+        )
+        host.add_events(
+            Gdk.EventMask.ENTER_NOTIFY_MASK
+            | Gdk.EventMask.LEAVE_NOTIFY_MASK
+            | Gdk.EventMask.BUTTON_PRESS_MASK
+        )
+        host.connect("button-press-event", self._on_card_clicked)
+        host.connect("enter-notify-event", self._on_enter_notify)
+        host.connect("leave-notify-event", self._on_leave_notify)
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         header.get_style_context().add_class("notification-toast-header")
@@ -266,7 +284,7 @@ class NotificationToast(Gtk.EventBox):
         if event.button != 1 or self._snapshot is None:
             return False
 
-        target = event.widget
+        target = Gtk.get_event_widget(event)
         while target is not None and target != self:
             if isinstance(target, Gtk.Button):
                 return False
@@ -281,5 +299,8 @@ class NotificationToast(Gtk.EventBox):
             default = snapshot.actions[0].key
         if default is not None:
             self._on_invoke_action(snapshot.id, default)
+        if self._on_open_app is not None:
+            # Always try to bring the sender forward; ActionInvoked alone is often a no-op.
+            self._on_open_app(snapshot)
         self.dismiss("click")
         return True

@@ -26,6 +26,7 @@ from ...servicios.multimedia.media import (
     is_strawberry_player,
     window_mode_players,
 )
+from ...ui.starfield import install_starfield, resolve_event_bus
 from ...window_identity import (
     TITLE_MEDIA_POPUP,
     configure_interactive_popup,
@@ -77,7 +78,12 @@ class MediaPopup(Gtk.Window):
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         outer.get_style_context().add_class("media-popup-content")
         outer.set_size_request(popup_width, -1)
-        self.add(outer)
+        install_starfield(
+            self,
+            outer,
+            resolve_event_bus(shell_window),
+            corner_radius=16.0,
+        )
 
         mode_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         mode_row.get_style_context().add_class("media-popup-mode-switch")

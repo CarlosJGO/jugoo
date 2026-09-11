@@ -94,6 +94,7 @@ class NotificationsWidget(ShellModule):
             self._button,
             on_invoke_action=self._invoke_action,
             on_mark_read=self._mark_read,
+            on_open_app=self._open_app,
         )
         self._assistant = AssistantPresenter(
             shell_window,
@@ -270,6 +271,10 @@ class NotificationsWidget(ShellModule):
             self._event_bus,
             extra_windows=extra_windows,
         )
+
+    def toggle_popup(self) -> None:
+        """External/CLI entry: same behavior as clicking the bell."""
+        self._on_button_clicked()
 
     def close_popup(self) -> None:
         self._outside_click.uninstall()

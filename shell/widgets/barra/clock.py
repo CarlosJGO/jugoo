@@ -18,6 +18,7 @@ from ...popup_handle import PopupOutsideDismiss, hide_popup, present_popup
 from ...popup_spawn import publish_popup_spawn
 from ...servicios.tareas.logic import format_day_label
 from ...servicios.tareas.tasks import TASKS_CHANGED, TasksService
+from ...ui.starfield import install_starfield, resolve_event_bus
 from ...ui import SHELL_MODULE_STACK_SPACING, ShellModule, shell_label
 from ...window_identity import (
     TITLE_CLOCK_CALENDAR,
@@ -57,7 +58,10 @@ class ClockCalendarPopup(Gtk.Window):
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         outer.get_style_context().add_class("clock-calendar-content")
-        self.add(outer)
+        bus = event_bus
+        if bus is None and isinstance(parent, Gtk.Window):
+            bus = resolve_event_bus(parent)
+        install_starfield(self, outer, bus, corner_radius=16.0)
 
         self._calendar = Gtk.Calendar()
         self._calendar.set_display_options(

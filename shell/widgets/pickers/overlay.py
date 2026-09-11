@@ -16,6 +16,7 @@ from gi.repository import Gdk, GLib, Gtk, GtkLayerShell
 
 from ...config import LAUNCHER_MAX_HEIGHT, LAUNCHER_WIDTH
 from ...ui.door import DoorAxis, DoorClip
+from ...ui.starfield import install_starfield, resolve_event_bus
 from ...ui.theme import active_theme
 from ...window_identity import configure_interactive_popup, configure_toplevel, register_shell_popup
 from .session import ACTION_CLOSE, ACTION_MOVED, ACTION_SELECT, PickerSession
@@ -80,7 +81,12 @@ class PickerOverlay(Gtk.Window):
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         outer.get_style_context().add_class("launcher-card")
         outer.set_size_request(self._resolved_card_width, card_height)
-        card.add(outer)
+        install_starfield(
+            card,
+            outer,
+            resolve_event_bus(shell_window),
+            corner_radius=16.0,
+        )
 
         self._search_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self._search_row.get_style_context().add_class("launcher-search-row")

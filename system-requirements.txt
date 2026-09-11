@@ -1,0 +1,7 @@
+##aqui van las cosas que no trae el sistema operativo y que son necesarias para que funcione jugoo o extras necesarios para que funcione mejor
+
+# Arch / CachyOS
+sudo pacman -S python-gobject python-cairo wtype
+
+# Optional: visual workspace overview / Super+Tab
+yay -S quickshell-overview-git

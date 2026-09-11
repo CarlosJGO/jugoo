@@ -15,6 +15,7 @@ from ...identity import TITLE_SETTINGS
 from ...popup_handle import hide_popup, present_popup
 from ...settings.manager import SettingsManager
 from ...settings.schema import CATEGORY_META, CategoryId
+from ...ui.starfield import install_starfield, resolve_event_bus
 from ...window_identity import configure_interactive_popup, configure_toplevel, register_shell_popup
 from .pages import build_category_page
 
@@ -58,7 +59,12 @@ class SettingsOverlay(Gtk.Window):
         outer.get_style_context().add_class("launcher-card")
         outer.get_style_context().add_class("settings-card")
         outer.set_size_request(SETTINGS_CARD_WIDTH, SETTINGS_CARD_HEIGHT)
-        card.add(outer)
+        install_starfield(
+            card,
+            outer,
+            resolve_event_bus(shell_window),
+            corner_radius=16.0,
+        )
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         header.get_style_context().add_class("settings-header")
