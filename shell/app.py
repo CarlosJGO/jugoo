@@ -59,9 +59,10 @@ from .widgets.barra.pinned_apps import PinnedAppsWidget
 from .widgets.barra.power import PowerWidget
 from .widgets.barra.settings import SettingsWidget
 from .widgets.barra.stats import StatsWidget
-from .widgets.barra.tasks import TasksWidget
+from .widgets.barra.tasks import TasksWidget, build_tasks_island
 from .widgets.barra.tray import SystemTrayWidget
 from .widgets.barra.workspace import WorkspaceWidget
+from .ui.islands import IslandController, IslandStage
 from .ui.starfield import StarfieldBackground
 from .ui.theme import ThemeManager
 from .window_identity import APPLICATION_ID, TITLE_BAR, configure_toplevel, init_window_identity
@@ -154,12 +155,17 @@ class ShellApplication(Gtk.Window):
         self._overlay = Gtk.Overlay()
         self._overlay.set_hexpand(True)
         self._overlay.set_halign(Gtk.Align.FILL)
+        self._bar_width = monitor.get_geometry().width if monitor is not None else -1
+        self._island_surface_active = False
         if monitor is not None:
-            self._overlay.set_size_request(monitor.get_geometry().width, -1)
+            self._overlay.set_size_request(self._bar_width, -1)
         self._overlay.add(self._bar_host)
+        self._island_stage = IslandStage()
+        self._island_stage.mount_on(self._overlay)
+        self.island_controller = IslandController(self._island_stage)
         self.add(self._overlay)
         if monitor is not None:
-            self.set_size_request(monitor.get_geometry().width, -1)
+            self.set_size_request(self._bar_width, -1)
 
         self.workspace_widget = WorkspaceWidget(self.event_bus)
         self.layout.center.add(self.workspace_widget)
@@ -185,8 +191,19 @@ class ShellApplication(Gtk.Window):
         self.layout.right.add(self.ethernet_widget)
         self.stats_widget = StatsWidget(self.system_stats, self, self.event_bus)
         self.layout.right.add(self.stats_widget)
-        self.tasks_widget = TasksWidget(self.event_bus, self.tasks_service, self)
-        self.layout.right.add(self.tasks_widget)
+        self.tasks_widget = TasksWidget(
+            self.event_bus,
+            self.tasks_service,
+            self,
+            island_controller=self.island_controller,
+        )
+        self.tasks_island = build_tasks_island(
+            tasks_widget=self.tasks_widget,
+            island_controller=self.island_controller,
+            on_surface_expand=self.expand_island_surface,
+            on_surface_restore=self.restore_island_surface,
+        )
+        self.layout.right.add(self.tasks_island)
         self.clock_widget = ClockWidget(self.event_bus, self.tasks_service)
         self.layout.right.add(self.clock_widget)
         self.settings_widget = SettingsWidget(self.toggle_settings)
@@ -322,7 +339,30 @@ class ShellApplication(Gtk.Window):
         self.settings_controller.toggle()
 
     def open_tasks_panel(self) -> None:
-        self.tasks_service.request_panel()
+        self.island_controller.open("tasks")
+
+    def expand_island_surface(self, exclusive_height: int, surface_height: int) -> None:
+        """Grow the LayerShell surface downward while freezing exclusive zone."""
+        GtkLayerShell.set_exclusive_zone(self, max(1, int(exclusive_height)))
+        height = max(int(exclusive_height), int(surface_height))
+        if self._bar_width > 0:
+            self.set_size_request(self._bar_width, height)
+        else:
+            self.set_size_request(-1, height)
+        GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.ON_DEMAND)
+        self._island_surface_active = True
+        self.queue_resize()
+
+    def restore_island_surface(self) -> None:
+        """Return the bar surface to its natural exclusive height."""
+        GtkLayerShell.auto_exclusive_zone_enable(self)
+        if self._bar_width > 0:
+            self.set_size_request(self._bar_width, -1)
+        else:
+            self.set_size_request(-1, -1)
+        GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.NONE)
+        self._island_surface_active = False
+        self.queue_resize()
 
     def reload_theme(self) -> None:
         self.theme_manager.reload_current()
@@ -353,6 +393,13 @@ class ShellApplication(Gtk.Window):
 
     def _on_destroy(self, *_args) -> None:
         # No service may enqueue UI work once destruction starts.
+        if self._island_surface_active:
+            self.restore_island_surface()
+        active = self.island_controller.active_id
+        if active is not None:
+            host = self.island_controller.get(active)
+            if host is not None:
+                host.shutdown()
         self.theme_manager.close()
         self.settings_manager.close()
         self.event_bus.close()

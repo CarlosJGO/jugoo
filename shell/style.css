@@ -1285,6 +1285,39 @@ label.clock-date {
 
 
 /* ==========================================================================
+   6a. Organic Islands
+   ========================================================================== */
+
+box.organic-island {
+    background-color: transparent;
+    border: 0;
+    padding: 0;
+}
+
+box.organic-island.detached box.organic-island-card,
+box.organic-island.active box.organic-island-card {
+    background-color: @shell_surface_bg_panel;
+    border: 1px solid @shell_border_strong;
+    border-radius: 16px;
+    box-shadow: 0 8px 22px @shell_shadow;
+    padding: 4px;
+}
+
+eventbox.island-placeholder {
+    background-color: alpha(@shell_accent, 0.10);
+    border: 1px dashed alpha(@shell_accent, 0.35);
+    border-radius: 12px;
+    opacity: 0.85;
+}
+
+box.island-placeholder-inner {
+    background-color: transparent;
+    min-width: 8px;
+    min-height: 8px;
+}
+
+
+/* ==========================================================================
    6b. Widgets — Tasks
    ========================================================================== */
 

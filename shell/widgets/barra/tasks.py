@@ -1,4 +1,4 @@
-"""Bar button that opens the tasks panel and shows today's pending count."""
+"""Bar button that opens the tasks Organic Island and shows today's pending count."""
 
 from __future__ import annotations
 
@@ -13,13 +13,14 @@ from gi.repository import GLib, Gtk
 from ...config import (
     TASKS_COMPACT_ICON_SIZE,
     TASKS_ICON_SIZE,
+    TASKS_POPUP_MAX_HEIGHT,
+    TASKS_POPUP_WIDTH,
     TASK_WATCHER_POLL_INTERVAL_SEC,
     TASK_WATCHER_QUIET_AFTER_INTERVALS,
     TASK_WATCHER_STALE_AFTER_INTERVALS,
 )
 from ...eventbus import EventBus
 from ...models import TasksSnapshot
-from ...popup_handle import PopupHandle, PopupOutsideDismiss
 from ...servicios.tareas.presencia import WatcherPresence
 from ...servicios.tareas.tasks import TASKS_CHANGED, TASKS_PANEL_REQUESTED, TasksService
 from ...servicios.tareas.vigilancia.eventos import (
@@ -29,7 +30,8 @@ from ...servicios.tareas.vigilancia.eventos import (
     TASK_WATCHER_REMINDER,
 )
 from ...ui import ShellModule
-from ..tareas.popup import TasksPopup
+from ...ui.islands import IslandController, OrganicIslandHost
+from ..tareas.panel import TasksPanel
 from ..tareas.tasks_icon import TasksPulseIcon
 
 _PRESENCE_CLASSES = (
@@ -39,20 +41,26 @@ _PRESENCE_CLASSES = (
     "tasks-watcher-inactive",
 )
 
+TASKS_ISLAND_ID = "tasks"
+
 
 class TasksWidget(ShellModule):
-    """Bar control for the personal task list."""
+    """Compact bar chrome for the personal task list."""
 
     def __init__(
         self,
         event_bus: EventBus,
         tasks_service: TasksService,
         shell_window: Gtk.Window,
+        *,
+        island_controller: IslandController | None = None,
     ) -> None:
         super().__init__("tasks-widget", spacing=0)
         self._event_bus = event_bus
         self._service = tasks_service
         self._shell_window = shell_window
+        self._island_controller = island_controller
+        self._island: OrganicIslandHost | None = None
         self._compact = False
         self._presence = WatcherPresence()
         self._stale_quiet_id = 0
@@ -79,8 +87,7 @@ class TasksWidget(ShellModule):
         self._overlay.add_overlay(self._badge)
         self.pack_start(self._overlay, False, False, 0)
 
-        self._popup = PopupHandle(self._create_popup)
-        self._outside_click = PopupOutsideDismiss()
+        self._panel = TasksPanel(tasks_service)
         self._event_bus.subscribe(TASKS_CHANGED, self._on_tasks_changed)
         self._event_bus.subscribe(TASKS_PANEL_REQUESTED, self._on_panel_requested)
         self._event_bus.subscribe(TASK_WATCHER_HEARTBEAT, self._on_watcher_pulse)
@@ -88,6 +95,13 @@ class TasksWidget(ShellModule):
         self._event_bus.subscribe(TASK_WATCHER_AI_REMINDER, self._on_watcher_pulse)
         self.connect("destroy", self._on_destroy)
         GLib.idle_add(self._sync_badge)
+
+    def bind_island(self, island: OrganicIslandHost) -> None:
+        self._island = island
+
+    @property
+    def panel(self) -> TasksPanel:
+        return self._panel
 
     @property
     def last_heartbeat_at(self) -> float | None:
@@ -108,8 +122,32 @@ class TasksWidget(ShellModule):
     def get_anchor_button(self) -> Gtk.Widget:
         return self._button
 
-    def _create_popup(self) -> TasksPopup:
-        return TasksPopup(self._shell_window, self._service)
+    def is_panel_open(self) -> bool:
+        return self._island is not None and self._island.is_open
+
+    def open_panel(self) -> None:
+        if self._island_controller is not None:
+            self._island_controller.open(TASKS_ISLAND_ID)
+            return
+        if self._island is not None:
+            self._island.open()
+
+    def close_panel(self) -> None:
+        if self._island_controller is not None:
+            self._island_controller.close(TASKS_ISLAND_ID)
+            return
+        if self._island is not None:
+            self._island.close()
+
+    def toggle_panel(self) -> None:
+        if self.is_panel_open():
+            self.close_panel()
+            return
+        self.open_panel()
+
+    def close_popup(self) -> None:
+        """Compatibility alias for shell compact / destroy paths."""
+        self.close_panel()
 
     def _on_destroy(self, *_args) -> None:
         self._event_bus.unsubscribe(TASKS_CHANGED, self._on_tasks_changed)
@@ -119,7 +157,7 @@ class TasksWidget(ShellModule):
         self._event_bus.unsubscribe(TASK_WATCHER_AI_REMINDER, self._on_watcher_pulse)
         self._clear_stale_timers()
         self._icon.stop()
-        self.close_popup()
+        self.close_panel()
 
     def _on_tasks_changed(self, _snapshot: TasksSnapshot) -> None:
         GLib.idle_add(self._handle_tasks_changed)
@@ -135,15 +173,14 @@ class TasksWidget(ShellModule):
         self._arm_stale_timers()
 
     def _handle_panel_requested(self) -> bool:
-        if not self._popup.is_visible():
-            self._open_popup()
+        if not self.is_panel_open():
+            self.open_panel()
         return False
 
     def _handle_tasks_changed(self) -> bool:
         self._sync_badge()
-        popup = self._popup.maybe
-        if popup is not None and popup.get_visible():
-            popup.refresh()
+        if self._island is not None and self._island.is_open:
+            self._panel.refresh()
         return False
 
     def _sync_badge(self) -> bool:
@@ -194,24 +231,28 @@ class TasksWidget(ShellModule):
         return False
 
     def _on_button_clicked(self, *_args) -> None:
-        if self._popup.is_visible():
-            self.close_popup()
-            return
-        self._open_popup()
+        self.toggle_panel()
 
-    def _open_popup(self) -> None:
-        popup = self._popup.get()
-        popup.open_for(self._button)
-        self._outside_click.install(
-            popup,
-            self._shell_window,
-            (self._button,),
-            self.close_popup,
-            self._event_bus,
-        )
 
-    def close_popup(self) -> None:
-        self._outside_click.uninstall()
-        popup = self._popup.maybe
-        if popup is not None:
-            popup.close_popup()
+def build_tasks_island(
+    *,
+    tasks_widget: TasksWidget,
+    island_controller: IslandController,
+    on_surface_expand,
+    on_surface_restore,
+) -> OrganicIslandHost:
+    """Assemble the Organic Island host around the tasks chrome + panel."""
+    host = OrganicIslandHost(
+        TASKS_ISLAND_ID,
+        compact=tasks_widget,
+        expanded=tasks_widget.panel,
+        stage=island_controller.stage,
+        on_surface_expand=on_surface_expand,
+        on_surface_restore=on_surface_restore,
+        expanded_width=TASKS_POPUP_WIDTH,
+        expanded_height=min(420, TASKS_POPUP_MAX_HEIGHT + 72),
+        on_closed=lambda: island_controller.note_closed(TASKS_ISLAND_ID),
+    )
+    tasks_widget.bind_island(host)
+    island_controller.register(host)
+    return host
