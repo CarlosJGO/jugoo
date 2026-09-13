@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -71,6 +72,102 @@ def preview_text(
     return joined
 
 
+def fold_search_text(text: str) -> str:
+    """Casefold + strip accents so ``como`` matches ``cómo``."""
+    decomposed = unicodedata.normalize("NFKD", text.casefold())
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+
+def _fold_with_index_map(text: str) -> tuple[str, list[int]]:
+    """Folded string plus original index for each folded character."""
+    folded: list[str] = []
+    mapping: list[int] = []
+    for index, char in enumerate(text):
+        for piece in unicodedata.normalize("NFKD", char.casefold()):
+            if unicodedata.combining(piece):
+                continue
+            folded.append(piece)
+            mapping.append(index)
+    return "".join(folded), mapping
+
+
+def preview_match(
+    text: str,
+    query: str,
+    *,
+    max_chars: int = DEFAULT_PREVIEW_CHARS,
+    max_lines: int = DEFAULT_PREVIEW_LINES,
+) -> str:
+    """Preview centered on the first match so a short hint reveals the needle."""
+    needle = " ".join(fold_search_text(query).split())
+    if not needle:
+        return preview_text(text, max_chars=max_chars, max_lines=max_lines)
+
+    flat = " ".join(text.split())
+    if not flat:
+        return preview_text(text, max_chars=max_chars, max_lines=max_lines)
+
+    spans = find_match_spans(flat, query)
+    if not spans:
+        return preview_text(text, max_chars=max_chars, max_lines=max_lines)
+
+    start_orig, end_orig = spans[0]
+    window = max(8, max_chars)
+    pad = max(0, (window - (end_orig - start_orig)) // 2)
+    start = max(0, start_orig - pad)
+    end = min(len(flat), start + window)
+    if end - start < window:
+        start = max(0, end - window)
+    snippet = flat[start:end]
+    if start > 0:
+        snippet = "…" + snippet.lstrip()
+    if end < len(flat):
+        snippet = snippet.rstrip() + "…"
+    return snippet
+
+
+def find_match_spans(text: str, query: str) -> tuple[tuple[int, int], ...]:
+    """Original-text ranges that match ``query`` (full needle, else each token)."""
+    needle = " ".join(fold_search_text(query).split())
+    if not needle or not text:
+        return ()
+
+    folded, mapping = _fold_with_index_map(text)
+    if not folded or not mapping:
+        return ()
+
+    targets: tuple[str, ...]
+    if needle in folded:
+        targets = (needle,)
+    else:
+        targets = tuple(token for token in needle.split() if token)
+
+    raw: list[tuple[int, int]] = []
+    for target in targets:
+        start = 0
+        while True:
+            at = folded.find(target, start)
+            if at < 0:
+                break
+            end_fold = at + len(target)
+            if at < len(mapping) and end_fold <= len(mapping):
+                raw.append((mapping[at], mapping[end_fold - 1] + 1))
+            start = at + max(1, len(target))
+
+    if not raw:
+        return ()
+
+    raw.sort()
+    merged: list[tuple[int, int]] = [raw[0]]
+    for start, end in raw[1:]:
+        prev_start, prev_end = merged[-1]
+        if start <= prev_end:
+            merged[-1] = (prev_start, max(prev_end, end))
+        else:
+            merged.append((start, end))
+    return tuple(merged)
+
+
 def format_copied_ago(copied_at: float, *, now: float) -> str:
     elapsed = max(0, int(now - copied_at))
     if elapsed < 10:
@@ -94,16 +191,17 @@ def format_copied_ago(copied_at: float, *, now: float) -> str:
 
 
 def search_entries(entries: tuple[ClipboardEntry, ...], query: str) -> tuple[ClipboardEntry, ...]:
-    needle = " ".join(query.casefold().split())
+    """Filter history by a partial hint (case/accent-insensitive substring or tokens)."""
+    needle = " ".join(fold_search_text(query).split())
     if not needle:
         return entries
     tokens = needle.split()
     matches: list[ClipboardEntry] = []
     for entry in entries:
         if entry.is_image:
-            haystack = f"imagen image {entry.mime}".casefold()
+            haystack = fold_search_text(f"imagen image {entry.mime}")
         else:
-            haystack = entry.text.casefold()
+            haystack = fold_search_text(entry.text)
         if needle in haystack or all(token in haystack for token in tokens):
             matches.append(entry)
     return tuple(matches)

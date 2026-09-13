@@ -71,6 +71,11 @@ AUDIO_POLL_INTERVAL_SEC = 0.5
 CLOCK_TIME_FORMAT = "%I:%M %p"
 CLOCK_DATE_FORMAT = "%a · %d %b"
 
+# Keyboard cat (SVG frames under shell/assets/cat/keyboard/).
+# Pixel size is derived from pinned-apps / sibling height.
+# Keep 0 so the glyph can sit flush on the bar floor.
+KEYBOARD_CAT_VERTICAL_INSET = 0
+
 # Tasks module.
 TASKS_PATH = "tasks.json"
 TASKS_ICON_SIZE = 16
@@ -79,6 +84,7 @@ TASKS_POPUP_OFFSET = 8
 TASKS_POPUP_WIDTH = 380
 TASKS_POPUP_MAX_HEIGHT = 520
 TASKS_ROLLOVER_INTERVAL_SEC = 30
+CLOCK_CALENDAR_TASKS_MAX_HEIGHT = 220
 
 # Background task watcher (separate process; does not keep Llama loaded).
 TASK_WATCHER_ENABLED = True
@@ -198,6 +204,7 @@ ASSISTANT_SLIDE_PX = 10
 # "app" = todas las de una app juntas. EXCEPTIONS flips the default per app key.
 NOTIFICATIONS_GROUPING_MODE = "summary"
 NOTIFICATIONS_GROUPING_EXCEPTIONS = ""
+NOTIFICATION_GROUP_HOVER_DELAY_MS = 300
 
 # Sound (non-blocking; shell works without the file).
 NOTIFICATIONS_SOUND_ENABLED = True
@@ -230,6 +237,8 @@ MEDIA_STRAWBERRY_IDLE_KILL_SEC = 60
 MEDIA_STRAWBERRY_PLAY_POLL_MS = 400
 MEDIA_STRAWBERRY_PLAY_POLL_MAX_MS = 15_000
 MEDIA_STRAWBERRY_PLAY_RETRY_MS = 500
+# Coalesce MPRIS Volume writes while dragging the popup slider.
+MEDIA_VOLUME_FLUSH_MS = 40
 
 # Pinned application dock (in-bar; overflow drops below the strip).
 PINNED_APPS_VISIBLE_LIMIT = 9
@@ -257,6 +266,11 @@ CLIPBOARD_MAX_ITEM_BYTES = CLIPBOARD_MAX_TEXT_BYTES
 CLIPBOARD_PREVIEW_CHARS = 96
 CLIPBOARD_PREVIEW_LINES = 2
 CLIPBOARD_THUMBNAIL_SIZE = 56
+# Split card: history list + full detail pane (same window).
+CLIPBOARD_PICKER_WIDTH = 820
+CLIPBOARD_PICKER_HEIGHT = 480
+CLIPBOARD_LIST_WIDTH = 300
+CLIPBOARD_DETAIL_IMAGE_MAX = 520
 
 # Emoji picker (Super+period).
 EMOJI_PICKER_COLUMNS = 9

@@ -23,6 +23,7 @@ from ...config import (
     NOTIFICATION_POPUP_OFFSET,
     NOTIFICATION_POPUP_ROW_BODY_LINES,
     NOTIFICATION_POPUP_WIDTH,
+    NOTIFICATION_GROUP_HOVER_DELAY_MS,
 )
 from ...models import NotificationSnapshot
 from ...popup_handle import pointer_inside_widget, present_popup, hide_popup
@@ -534,6 +535,7 @@ class NotificationGroupRow(Gtk.EventBox):
         )
         self._popover: Gtk.Popover | None = None
         self._popover_leave_timeout_id = 0
+        self._group_hover_timeout_id = 0
         self._hover_opened = False
 
         self.add_events(
@@ -662,14 +664,14 @@ class NotificationGroupRow(Gtk.EventBox):
         if event.window != self.get_window():
             return False
         if len(self._group_snapshots) > 1:
-            self._hover_opened = True
-            self._open_group_window()
+            self._schedule_group_window_open()
         return False
 
     def _on_leave_notify(self, _widget: Gtk.Widget, event: Gdk.EventCrossing) -> bool:
         if event.window != self.get_window():
             return False
         self._hover_opened = False
+        self._cancel_group_window_open()
         if self._popover is not None and self._popover.get_visible():
             self._popover.hide()
         return False
@@ -678,8 +680,26 @@ class NotificationGroupRow(Gtk.EventBox):
         if event.window != self.get_window():
             return False
         if len(self._group_snapshots) > 1 and not self._hover_opened:
-            self._hover_opened = True
-            self._open_group_window()
+            self._schedule_group_window_open()
+        return False
+
+    def _schedule_group_window_open(self) -> None:
+        if self._group_hover_timeout_id:
+            return
+        self._group_hover_timeout_id = GLib.timeout_add(
+            NOTIFICATION_GROUP_HOVER_DELAY_MS,
+            self._open_group_window_after_hover,
+        )
+
+    def _cancel_group_window_open(self) -> None:
+        if self._group_hover_timeout_id:
+            GLib.source_remove(self._group_hover_timeout_id)
+            self._group_hover_timeout_id = 0
+
+    def _open_group_window_after_hover(self) -> bool:
+        self._group_hover_timeout_id = 0
+        self._hover_opened = True
+        self._open_group_window()
         return False
 
     def _on_row_clicked(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:

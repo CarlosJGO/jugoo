@@ -29,6 +29,8 @@ def test_resolve_legacy_flags() -> None:
 
 def test_resolve_music_action() -> None:
     assert resolve_actions_from_argv(["action", "playStopMusic"]) == ("playStopMusic",)
+    assert resolve_actions_from_argv(["action", "media"]) == ("media",)
+    assert resolve_actions_from_argv(["--toggle-media"]) == ("media",)
 
 
 def test_dispatch_music_action_uses_strawberry_transport() -> None:
@@ -46,6 +48,17 @@ def test_dispatch_music_action_uses_strawberry_transport() -> None:
 
     assert dispatch_action("playStopMusic", Shell()) is None
     assert calls == ["play_pause_player"]
+
+
+def test_dispatch_media_action_toggles_popup() -> None:
+    calls: list[str] = []
+
+    class Shell:
+        def toggle_media_popup(self) -> None:
+            calls.append("toggle_media_popup")
+
+    assert dispatch_action("media", Shell()) is None
+    assert calls == ["toggle_media_popup"]
 
 
 def test_resolve_dedupes_and_preserves_order() -> None:

@@ -171,6 +171,13 @@ window#shell.compact box.ethernet-widget {
     min-height: 0;
 }
 
+window#shell.compact box.keyboard-cat-widget {
+    margin: 0 4px 0 6px;
+    padding: 0;
+    min-height: 0;
+    background-color: transparent;
+}
+
 window#shell.compact button.ethernet-button {
     padding: 2px 4px;
     min-height: 18px;
@@ -187,6 +194,23 @@ box.shell-module {
     border-radius: 16px;
     padding: 3px 10px;
     margin: 0 3px;
+}
+
+/* Free-floating cat: no capsule, sits on the bar floor next to pinned apps. */
+window#shell box#shell-left > box.keyboard-cat-widget,
+box.keyboard-cat-widget {
+    background-color: transparent;
+    border-radius: 0;
+    padding: 0;
+    margin: 0 4px 0 6px;
+    min-height: 0;
+    box-shadow: none;
+}
+
+image.keyboard-cat-image {
+    min-width: 0;
+    min-height: 0;
+    background-color: transparent;
 }
 
 label.shell-text {
@@ -796,6 +820,56 @@ image.clipboard-row-thumb {
     margin-right: 2px;
 }
 
+box.clipboard-split {
+    background-color: transparent;
+    min-height: 360px;
+}
+
+box.clipboard-list-pane {
+    background-color: transparent;
+    border-right: 1px solid @shell_border_subtle;
+    padding-right: 8px;
+    margin-right: 8px;
+}
+
+box.clipboard-detail-pane {
+    background-color: @shell_hover_bg_faint;
+    border: 1px solid @shell_border_subtle;
+    border-radius: 12px;
+    padding: 10px;
+    min-width: 360px;
+}
+
+label.clipboard-detail-meta {
+    color: @shell_text_secondary;
+    font-size: 11.5px;
+    padding: 0 2px 2px 2px;
+}
+
+label.clipboard-detail-empty {
+    color: @shell_text_muted;
+    font-size: 13px;
+    padding: 24px 16px;
+}
+
+scrolledwindow.clipboard-detail-scroll,
+scrolledwindow.clipboard-detail-scroll > viewport {
+    background-color: transparent;
+    border: none;
+}
+
+textview.clipboard-detail-text,
+textview.clipboard-detail-text text {
+    background-color: transparent;
+    color: @shell_text_primary;
+    font-family: monospace;
+    font-size: 12.5px;
+}
+
+image.clipboard-detail-image {
+    margin: 8px;
+}
+
 label.launcher-row-name {
     color: @shell_text_primary;
     font-weight: 600;
@@ -1276,8 +1350,8 @@ box.tasks-popup-content {
 }
 
 box.clock-calendar-content {
-    padding: 10px;
-    min-width: 280px;
+    padding: 8px 10px;
+    min-width: 248px;
 }
 
 box.tasks-popup-header {
@@ -1425,15 +1499,83 @@ button.task-row-delete:hover {
     background-color: @shell_hover_bg;
 }
 
-calendar.clock-calendar {
-    background-color: transparent;
+box.clock-calendar-grid {
+    padding: 2px 0;
+}
+
+box.clock-calendar-nav {
+    padding: 0 2px;
+}
+
+label.clock-calendar-heading {
+    color: @shell_text_primary;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+button.clock-calendar-nav-btn {
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    color: @shell_text_secondary;
+    font-size: 16px;
+    min-width: 24px;
+    min-height: 24px;
+    padding: 0;
+}
+
+button.clock-calendar-nav-btn:hover {
+    background-color: @shell_hover_bg_soft;
     color: @shell_text_primary;
 }
 
-calendar.clock-calendar:selected {
+label.clock-calendar-weekday {
+    color: @shell_text_muted;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+button.clock-calendar-day {
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    min-width: 30px;
+    min-height: 32px;
+    padding: 0;
+}
+
+button.clock-calendar-day:hover {
+    background-color: @shell_hover_bg_faint;
+}
+
+button.clock-calendar-day.selected {
     background-color: @shell_accent_soft;
+}
+
+button.clock-calendar-day.other-month label.clock-calendar-day-num {
+    color: @shell_text_muted;
+    opacity: 0.45;
+}
+
+label.clock-calendar-day-num {
     color: @shell_text_primary;
-    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+label.clock-calendar-dot {
+    color: transparent;
+    font-size: 7px;
+    min-height: 7px;
+    margin-top: -1px;
+}
+
+button.clock-calendar-day.has-tasks label.clock-calendar-dot {
+    color: @shell_accent;
+}
+
+button.clock-calendar-day.has-overdue label.clock-calendar-dot {
+    color: @shell_danger;
 }
 
 box.clock-calendar-tasks-header {
@@ -1441,7 +1583,7 @@ box.clock-calendar-tasks-header {
 }
 
 box.clock-calendar-tasks {
-    min-width: 260px;
+    min-width: 228px;
 }
 
 

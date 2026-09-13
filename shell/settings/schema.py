@@ -292,8 +292,8 @@ def build_settings_catalog() -> tuple[SettingDef, ...]:
         SettingDef(
             key="popups.launcher_width",
             category=CategoryId.POPUPS,
-            label="Ancho de Search / pickers",
-            description="Ancho de la tarjeta de Search, Clipboard y Emoji.",
+            label="Ancho de Search / Emoji",
+            description="Ancho de la tarjeta de Search y Emoji. El portapapeles usa su propio ancho (lista + detalle).",
             value_type="int",
             default=shell_config.LAUNCHER_WIDTH,
             config_attr="LAUNCHER_WIDTH",

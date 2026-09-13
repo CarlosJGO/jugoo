@@ -146,6 +146,47 @@ def test_calendar_marks_dated_and_monthly_but_not_every_daily() -> None:
     assert titles == {"Agua", "Renta"}
 
 
+def test_calendar_day_mark_reports_count_and_overdue() -> None:
+    from shell.servicios.tareas.logic import calendar_day_mark
+
+    tasks = (
+        TaskRecord(
+            id="late",
+            title="Informe",
+            due_date="2026-09-01",
+            created_at="2026-08-20T10:00:00",
+        ),
+        TaskRecord(
+            id="rent",
+            title="Renta",
+            repeat=TASK_REPEAT_MONTHLY,
+            month_day=5,
+            created_at="2026-01-01T10:00:00",
+            period_cursor="2026-09",
+        ),
+    )
+    today = date(2026, 9, 10)
+    assert calendar_day_mark(tasks, date(2026, 9, 1), today=today) == (
+        1,
+        True,
+        ("Informe",),
+    )
+    assert calendar_day_mark(tasks, date(2026, 9, 5), today=today) == (
+        1,
+        False,
+        ("Renta",),
+    )
+    assert calendar_day_mark(tasks, date(2026, 9, 20), today=today) is None
+
+
+def test_calendar_day_mark_skips_daily_tasks() -> None:
+    from shell.servicios.tareas.logic import calendar_day_mark
+
+    tasks = (_daily(date(2026, 9, 5)),)
+    today = date(2026, 9, 5)
+    assert calendar_day_mark(tasks, today, today=today) is None
+
+
 def test_store_roundtrip(tmp_path: Path) -> None:
     path = tmp_path / "tasks.json"
     original = (
@@ -188,6 +229,30 @@ def test_service_add_toggle_delete_emits(tmp_path: Path) -> None:
     assert len(events) == 3
 
 
+def test_service_updates_existing_task_preserving_id(tmp_path: Path) -> None:
+    bus = EventBus()
+    service = TasksService(bus, path=tmp_path / "tasks.json")
+    created = service.add_task("Borrador", notes="vieja", due_date="2026-09-12")
+    assert created is not None
+
+    updated = service.update_task(
+        created.id,
+        "Final",
+        notes="nueva",
+        repeat=TASK_REPEAT_MONTHLY,
+        month_day=15,
+    )
+
+    assert updated is not None
+    assert updated.id == created.id
+    assert updated.title == "Final"
+    assert updated.notes == "nueva"
+    assert updated.repeat == TASK_REPEAT_MONTHLY
+    assert updated.month_day == 15
+    assert updated.due_date is None
+    assert load_tasks(tmp_path / "tasks.json") == (updated,)
+
+
 def test_service_reloads_external_tasks_json_changes(tmp_path: Path) -> None:
     path = tmp_path / "tasks.json"
     bus = EventBus()
@@ -216,6 +281,8 @@ if __name__ == "__main__":
     test_monthly_rollover_misses_previous_month()
     test_one_shot_becomes_overdue_after_due_date()
     test_calendar_marks_dated_and_monthly_but_not_every_daily()
+    test_calendar_day_mark_reports_count_and_overdue()
+    test_calendar_day_mark_skips_daily_tasks()
     test_complete_task_does_not_uncomplete()
     with tempfile.TemporaryDirectory() as folder:
         test_store_roundtrip(_Path(folder))

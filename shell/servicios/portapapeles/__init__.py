@@ -3,7 +3,9 @@
 from .historia import (
 	ClipboardEntry,
 	ClipboardHistory,
+	find_match_spans,
 	format_copied_ago,
+	preview_match,
 	preview_text,
 	search_entries,
 )

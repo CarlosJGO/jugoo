@@ -59,6 +59,7 @@ class SettingsOverlay(Gtk.Window):
         outer.get_style_context().add_class("launcher-card")
         outer.get_style_context().add_class("settings-card")
         outer.set_size_request(SETTINGS_CARD_WIDTH, SETTINGS_CARD_HEIGHT)
+        self._card_host = card
         install_starfield(
             card,
             outer,

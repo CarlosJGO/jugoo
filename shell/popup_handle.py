@@ -86,12 +86,18 @@ def present_popup(window: Gtk.Window) -> None:
 
 
 def hide_popup(window: Gtk.Window) -> None:
-    """Hide a popup with a short opacity fade."""
+    """Hide a popup with disintegration (preferred) or a short opacity fade."""
     _cancel_popup_fade(window)
     if not window.get_visible():
         window.hide()
         window.set_opacity(1.0)
         return
+
+    from .ui.disintegrate_hide import disintegrate_hide
+
+    if disintegrate_hide(window):
+        return
+
     theme = active_theme()
     if theme is not None and not theme.animation.enabled:
         window.hide()

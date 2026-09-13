@@ -37,7 +37,7 @@ jugoo --reload-theme
 Una recarga válida regenera
 `~/.config/hypr/config/jugoo_theme_generated.lua` y ejecuta `hyprctl reload`.
 La línea que aplica ese archivo debe permanecer al final de
-`~/.config/hypr/hyprland.lua`, después de Noctalia.
+`~/.config/hypr/hyprland.lua`.
 
 
 ## Fuentes externas

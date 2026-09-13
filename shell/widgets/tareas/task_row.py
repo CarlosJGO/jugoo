@@ -25,6 +25,7 @@ class TaskRow(Gtk.Box):
         *,
         on_toggle: Callable[[str], None],
         on_delete: Callable[[str], None] | None = None,
+        on_edit: Callable[[TaskSnapshot], None] | None = None,
         compact: bool = False,
         can_toggle: bool = True,
     ) -> None:
@@ -99,6 +100,15 @@ class TaskRow(Gtk.Box):
             delete.add(icon)
             delete.connect("clicked", lambda _btn: on_delete(snapshot.id))
             header.pack_start(delete, False, False, 0)
+
+        if on_edit is not None:
+            edit = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
+            edit.set_tooltip_text("Editar")
+            edit.get_style_context().add_class("task-row-edit")
+            icon = Gtk.Image.new_from_icon_name("document-edit-symbolic", Gtk.IconSize.MENU)
+            edit.add(icon)
+            edit.connect("clicked", lambda _btn: on_edit(snapshot))
+            header.pack_start(edit, False, False, 0)
 
         self.pack_start(header, False, False, 0)
 

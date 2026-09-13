@@ -3,5 +3,9 @@
 # Arch / CachyOS
 sudo pacman -S python-gobject python-cairo wtype
 
+# Keyboard cat: read /dev/input keyboards (no extra Python package).
+# After this, log out/in so the session picks up the new group.
+# sudo usermod -aG input "$USER"
+
 # Optional: visual workspace overview / Super+Tab
 yay -S quickshell-overview-git

@@ -38,6 +38,7 @@ class ModuleSlot:
 DEFAULT_LAYOUT: tuple[ModuleSlot, ...] = (
     ModuleSlot("active_window", "left", 0),
     ModuleSlot("pinned_apps", "left", 1),
+    ModuleSlot("keyboard_cat", "left", 2),
     ModuleSlot("workspaces", "center", 0),
     ModuleSlot("tray", "right", 0),
     ModuleSlot("notifications", "right", 1),

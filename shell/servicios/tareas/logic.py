@@ -269,6 +269,25 @@ def marked_days(
     return frozenset(day for day in days if 1 <= day <= last)
 
 
+def calendar_day_mark(
+    tasks: tuple[TaskRecord, ...],
+    on: date,
+    *,
+    today: date,
+) -> tuple[int, bool, tuple[str, ...]] | None:
+    """Task count, overdue flag, and titles for a calendar cell."""
+    items = tuple(
+        item
+        for item in tasks_for_date(tasks, on, today)
+        if item.repeat != TASK_REPEAT_DAILY
+    )
+    if not items:
+        return None
+    overdue = any(item.status == TASK_STATUS_OVERDUE for item in items)
+    titles = tuple(item.title for item in items[:3])
+    return len(items), overdue, titles
+
+
 def pending_today_count(tasks: tuple[TaskRecord, ...], today: date) -> int:
     return sum(
         1

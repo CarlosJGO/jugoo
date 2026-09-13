@@ -1,7 +1,7 @@
 """Session and power actions for the shell power menu.
 
-Primary backend: Noctalia session commands (same stack as Hyprland binds).
-Fallbacks: loginctl / systemctl when Noctalia is unavailable.
+Primary backends match the Hyprland binds stack:
+``loginctl`` for lock/logout and ``systemctl`` for suspend/reboot/poweroff.
 
 Never call destructive actions from automated tests — use ``dry_run=True`` or
 inject a custom ``executor`` that records commands instead of running them.
@@ -30,14 +30,6 @@ POWER_ACTIONS = (
     ACTION_SHUTDOWN,
 )
 
-_NOCTALIA_SESSION_ACTION = {
-    ACTION_LOCK: "lock",
-    ACTION_SUSPEND: "suspend",
-    ACTION_LOGOUT: "logout",
-    ACTION_REBOOT: "reboot",
-    ACTION_SHUTDOWN: "shutdown",
-}
-
 # Brief pause so the locker can paint before the machine sleeps.
 _LOCK_BEFORE_SUSPEND_DELAY_S = 0.5
 
@@ -64,24 +56,15 @@ class PowerService:
         self._dispatch(ACTION_LOCK)
 
     def suspend(self) -> None:
-        """Lock first, then suspend, so wake returns to the login/lock screen."""
-        # Run both lock backends best-effort: Noctalia may report success without
-        # engaging the session locker that asks for a password on resume.
+        """Lock first, then suspend, so wake returns to the lock screen."""
         if self._dry_run:
             self.last_action = ACTION_LOCK
-            self.last_commands = [
-                ["noctalia", "msg", "session", "lock"],
-                ["loginctl", "lock-session"],
-            ]
+            self.last_commands = [["loginctl", "lock-session"]]
         else:
-            for command in (
-                ("noctalia", "msg", "session", "lock"),
-                ("loginctl", "lock-session"),
-            ):
-                try:
-                    self._executor(command)
-                except PowerError:
-                    pass
+            try:
+                self._executor(("loginctl", "lock-session"))
+            except PowerError:
+                pass
             time.sleep(_LOCK_BEFORE_SUSPEND_DELAY_S)
         self._dispatch(ACTION_SUSPEND)
 
@@ -116,25 +99,23 @@ class PowerService:
 
 
 def _command_chain(action: str) -> tuple[tuple[str, ...], ...]:
-    noctalia_action = _NOCTALIA_SESSION_ACTION[action]
-    chain: list[tuple[str, ...]] = [
-        ("noctalia", "msg", "session", noctalia_action),
-    ]
-
     if action == ACTION_LOCK:
-        chain.append(("loginctl", "lock-session"))
-    elif action == ACTION_SUSPEND:
-        chain.append(("systemctl", "suspend"))
-    elif action == ACTION_LOGOUT:
+        return (("loginctl", "lock-session"),)
+    if action == ACTION_SUSPEND:
+        return (("systemctl", "suspend"),)
+    if action == ACTION_LOGOUT:
         session_id = os.environ.get("XDG_SESSION_ID")
         if session_id:
-            chain.append(("loginctl", "terminate-session", session_id))
-    elif action == ACTION_REBOOT:
-        chain.append(("systemctl", "reboot"))
-    elif action == ACTION_SHUTDOWN:
-        chain.append(("systemctl", "poweroff"))
-
-    return tuple(chain)
+            return (("loginctl", "terminate-session", session_id),)
+        user = os.environ.get("USER") or os.environ.get("LOGNAME")
+        if user:
+            return (("loginctl", "terminate-user", user),)
+        return (("hyprctl", "dispatch", "exit"),)
+    if action == ACTION_REBOOT:
+        return (("systemctl", "reboot"),)
+    if action == ACTION_SHUTDOWN:
+        return (("systemctl", "poweroff"),)
+    raise PowerError(f"unknown power action: {action}")
 
 
 def _default_executor(command: Sequence[str]) -> None:

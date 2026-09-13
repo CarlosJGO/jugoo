@@ -164,6 +164,7 @@ class TasksPopup(Gtk.Window):
                 snapshot,
                 on_toggle=self._service.toggle,
                 on_delete=self._service.delete,
+                on_edit=self._on_edit,
                 can_toggle=snapshot.occurrence_date == date.today().isoformat(),
             )
             self._list.pack_start(row, False, False, 0)
@@ -189,14 +190,40 @@ class TasksPopup(Gtk.Window):
         self._reposition()
 
     def _on_composer_submit(self, payload: dict) -> None:
-        self._service.add_task(
-            payload["title"],
-            notes=payload.get("notes", ""),
-            repeat=payload.get("repeat", "none"),
-            due_date=payload.get("due_date"),
-            month_day=payload.get("month_day", 1),
-        )
+        task_id = payload.get("id")
+        if task_id:
+            self._service.update_task(
+                task_id,
+                payload["title"],
+                notes=payload.get("notes", ""),
+                repeat=payload.get("repeat", "none"),
+                due_date=payload.get("due_date"),
+                month_day=payload.get("month_day", 1),
+            )
+        else:
+            self._service.add_task(
+                payload["title"],
+                notes=payload.get("notes", ""),
+                repeat=payload.get("repeat", "none"),
+                due_date=payload.get("due_date"),
+                month_day=payload.get("month_day", 1),
+            )
         self._hide_composer()
+
+    def _on_edit(self, snapshot: TaskSnapshot) -> None:
+        record = next((item for item in self._service.records() if item.id == snapshot.id), None)
+        if record is None:
+            return
+        self._composer.edit(
+            record.id,
+            title=record.title,
+            notes=record.notes,
+            repeat=record.repeat,
+            due_date=record.due_date,
+            month_day=record.month_day,
+        )
+        self.queue_resize()
+        self._reposition()
 
     def _on_size_allocate(self, _widget: Gtk.Widget, allocation: Gtk.Allocation) -> None:
         height = int(allocation.height)

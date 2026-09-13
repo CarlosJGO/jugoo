@@ -48,10 +48,12 @@ from .servicios.tareas.briefing import StartupTaskBriefing
 from .servicios.tareas.presencia import TaskWatcherBridge
 from .servicios.tareas.tasks import TasksService
 from .servicios.tareas.vigilancia.sesion import ensure_task_watcher_service
+from .servicios.teclado.actividad import KeyboardActivityService
 from .settings.manager import SettingsManager
 from .widgets.barra.active_window import ActiveWindowWidget
 from .widgets.barra.clock import ClockWidget
 from .widgets.barra.ethernet import EthernetWidget
+from .widgets.barra.keyboard_cat import KeyboardCatWidget
 from .widgets.barra.notifications import NotificationsWidget
 from .widgets.barra.pinned_apps import PinnedAppsWidget
 from .widgets.barra.power import PowerWidget
@@ -115,6 +117,7 @@ class ShellApplication(Gtk.Window):
         )
         self.network_service = NetworkService(self.event_bus)
         self.media_service = MediaService(self.event_bus)
+        self.keyboard_activity = KeyboardActivityService(self.event_bus)
         self.audio_visualizer = AudioVisualizerService(
             self.event_bus,
             self.media_service,
@@ -167,6 +170,8 @@ class ShellApplication(Gtk.Window):
 
         self.pinned_apps_widget = PinnedAppsWidget(self.event_bus, self)
         self.layout.left.add(self.pinned_apps_widget)
+        self.keyboard_cat_widget = KeyboardCatWidget(self.event_bus, self._bar_host)
+        self.layout.left.add(self.keyboard_cat_widget)
 
         self.ethernet_widget = EthernetWidget(self.event_bus, self.network_service)
         self.tray_widget = SystemTrayWidget(self.tray_service)
@@ -271,6 +276,7 @@ class ShellApplication(Gtk.Window):
         self.notification_service.start()
         self.tasks_service.start()
         self.task_watcher_bridge.start()
+        self.keyboard_activity.start()
         GLib.idle_add(self._ensure_task_watcher)
         GLib.timeout_add(700, self._startup_briefing.schedule)
         self.show_all()
@@ -307,6 +313,9 @@ class ShellApplication(Gtk.Window):
     def toggle_emoji_picker(self) -> None:
         self.applications_controller.close_control_center()
         self.pickers_controller.toggle_emoji()
+
+    def toggle_media_popup(self) -> None:
+        self.media_controller.toggle_popup()
 
     def toggle_settings(self) -> None:
         self.pickers_controller.close_pickers()
@@ -361,6 +370,7 @@ class ShellApplication(Gtk.Window):
         self.applications_controller.close_launcher()
         self.clipboard_service.close()
         self.applications.close()
+        self.keyboard_activity.close()
         self.hyprland.close()
 
 

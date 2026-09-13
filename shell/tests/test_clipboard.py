@@ -8,10 +8,12 @@ from shell.servicios.portapapeles.historia import (
     ClipboardHistory,
     ENTRY_IMAGE,
     HISTORY_VERSION,
+    find_match_spans,
     format_copied_ago,
     hash_bytes,
     load_history,
     load_history_result,
+    preview_match,
     preview_text,
     save_history,
     search_entries,
@@ -102,10 +104,34 @@ def test_search_unicode_and_multiline() -> None:
     )
     assert [item.id for item in search_entries(entries, "pacman")] == ["1"]
     assert [item.id for item in search_entries(entries, "cómo")] == ["2"]
+    assert [item.id for item in search_entries(entries, "como")] == ["2"]
     assert [item.id for item in search_entries(entries, "SEGUNDA")] == ["2"]
     assert [item.id for item in search_entries(entries, "github")] == ["3"]
     assert [item.id for item in search_entries(entries, "imagen")] == ["4"]
     assert search_entries(entries, "") == entries
+
+
+def test_search_partial_needle_in_long_haystack() -> None:
+    hay = "prefijo " + ("pasto " * 40) + "aguja-secreta " + ("pasto " * 40) + "sufijo"
+    entries = (
+        ClipboardEntry(id="1", text=hay, copied_at=1.0),
+        ClipboardEntry(id="2", text="otra cosa", copied_at=2.0),
+    )
+    assert [item.id for item in search_entries(entries, "aguja")] == ["1"]
+    assert [item.id for item in search_entries(entries, "secreta pasto")] == ["1"]
+    snippet = preview_match(hay, "aguja", max_chars=40)
+    assert "aguja" in snippet.casefold()
+    assert snippet.startswith("…") or "prefijo" not in snippet
+
+
+def test_find_match_spans_highlights_all_hits() -> None:
+    text = "Alpha cómo beta cómo gamma"
+    spans = find_match_spans(text, "como")
+    assert spans == ((6, 10), (16, 20))
+    assert text[spans[0][0] : spans[0][1]] == "cómo"
+    assert find_match_spans(text, "") == ()
+    # Full phrase is preferred when present.
+    assert find_match_spans("uno dos tres dos", "dos tres") == ((4, 12),)
 
 
 def test_preview_truncates_without_touching_payload() -> None:

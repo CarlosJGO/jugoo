@@ -714,11 +714,14 @@ class MediaPopup(Gtk.Window):
         self._updating_volume = True
         self._volume.set_value(player.volume)
         self._updating_volume = False
-        if player.volume <= 0.001:
+        self._apply_volume_icon(player.volume)
+
+    def _apply_volume_icon(self, volume: float) -> None:
+        if volume <= 0.001:
             icon = "audio-volume-muted-symbolic"
-        elif player.volume < 0.34:
+        elif volume < 0.34:
             icon = "audio-volume-low-symbolic"
-        elif player.volume < 0.67:
+        elif volume < 0.67:
             icon = "audio-volume-medium-symbolic"
         else:
             icon = "audio-volume-high-symbolic"
@@ -768,13 +771,17 @@ class MediaPopup(Gtk.Window):
     def _on_volume_release(self, scale: Gtk.Scale, event: Gdk.EventButton) -> bool:
         if event.button == 1:
             self._volume_dragging = False
-            self._service.set_volume(scale.get_value())
+            value = scale.get_value()
+            self._apply_volume_icon(value)
+            self._service.set_volume(value, immediate=True)
         return False
 
     def _on_volume_changed(self, scale: Gtk.Scale) -> None:
         if self._updating_volume or not self._volume_dragging:
             return
-        self._service.set_volume(scale.get_value())
+        value = scale.get_value()
+        self._apply_volume_icon(value)
+        self._service.set_volume(value)
 
     def _position_after_show(self) -> bool:
         if self._anchor is None:

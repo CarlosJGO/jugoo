@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -125,6 +126,43 @@ class TasksService:
         self._tasks = self._tasks + (record,)
         self._persist_and_emit()
         return record
+
+    def update_task(
+        self,
+        task_id: str,
+        title: str,
+        *,
+        notes: str = "",
+        repeat: str = TASK_REPEAT_NONE,
+        due_date: str | None = None,
+        month_day: int = 1,
+    ) -> TaskRecord | None:
+        cleaned = title.strip()
+        if not cleaned:
+            return None
+        kind = repeat if repeat in TASK_REPEATS else TASK_REPEAT_NONE
+        today = date.today()
+        due = (due_date or "").strip()[:10] or None
+        if kind == TASK_REPEAT_NONE:
+            parsed = parse_iso_date(due) or today
+            due = parsed.isoformat()
+
+        for index, task in enumerate(self._tasks):
+            if task.id != task_id:
+                continue
+            updated = replace(
+                task,
+                title=cleaned,
+                notes=notes.strip(),
+                repeat=kind,
+                due_date=due if kind == TASK_REPEAT_NONE else None,
+                month_day=max(1, min(int(month_day), 31)),
+                period_cursor=period_key(kind, today, due_date=due),
+            )
+            self._tasks = self._tasks[:index] + (updated,) + self._tasks[index + 1:]
+            self._persist_and_emit()
+            return updated
+        return None
 
     def toggle(self, task_id: str, *, on_date: date | None = None) -> None:
         today = date.today()

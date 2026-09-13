@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from calendar import Calendar, monthrange
 from datetime import date, datetime
 
 import gi
@@ -16,19 +17,213 @@ from ...eventbus import EventBus
 from ...settings.manager import SETTINGS_CHANGED
 from ...popup_handle import PopupOutsideDismiss, hide_popup, present_popup
 from ...popup_spawn import publish_popup_spawn
-from ...servicios.tareas.logic import format_day_label
+from ...servicios.tareas.logic import calendar_day_mark, format_day_label
 from ...servicios.tareas.tasks import TASKS_CHANGED, TasksService
 from ...ui.starfield import install_starfield, resolve_event_bus
 from ...ui import SHELL_MODULE_STACK_SPACING, ShellModule, shell_label
 from ...window_identity import (
     TITLE_CLOCK_CALENDAR,
+    anchor_button_geometry,
+    compute_popup_top_left,
     configure_interactive_popup,
     configure_toplevel,
-    position_popup_below_anchor,
+    monitor_containing_point,
+    popup_window_size,
     register_shell_popup,
+    reposition_popup,
     schedule_popup_position,
 )
 from ..tareas.task_row import TaskRow
+
+_MONTH_LABELS = (
+    "",
+    "Enero",
+    "Febrero",
+    "Marzo",
+    "Abril",
+    "Mayo",
+    "Junio",
+    "Julio",
+    "Agosto",
+    "Septiembre",
+    "Octubre",
+    "Noviembre",
+    "Diciembre",
+)
+_WEEKDAY_LABELS = ("Lu", "Ma", "Mi", "Ju", "Vi", "Sa", "Do")
+_MONTH_GRID = Calendar(firstweekday=0)
+
+
+class TaskMonthGrid(Gtk.Box):
+    """Compact month grid with visible dots on days that have tasks."""
+
+    def __init__(self) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.get_style_context().add_class("clock-calendar-grid")
+        self._year = date.today().year
+        self._month = date.today().month
+        self._selected = date.today()
+        self._marks: dict[int, tuple[int, bool, tuple[str, ...]]] = {}
+        self._day_buttons: dict[date, Gtk.Button] = {}
+        self._on_day_selected_cb = None
+        self._on_month_changed_cb = None
+
+        nav = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        nav.get_style_context().add_class("clock-calendar-nav")
+        prev = Gtk.Button(label="‹", relief=Gtk.ReliefStyle.NONE)
+        prev.get_style_context().add_class("clock-calendar-nav-btn")
+        prev.connect("clicked", self._on_prev_month)
+        next_btn = Gtk.Button(label="›", relief=Gtk.ReliefStyle.NONE)
+        next_btn.get_style_context().add_class("clock-calendar-nav-btn")
+        next_btn.connect("clicked", self._on_next_month)
+        self._heading = Gtk.Label(xalign=0.5)
+        self._heading.get_style_context().add_class("clock-calendar-heading")
+        self._heading.set_hexpand(True)
+        nav.pack_start(prev, False, False, 0)
+        nav.pack_start(self._heading, True, True, 0)
+        nav.pack_start(next_btn, False, False, 0)
+        self.pack_start(nav, False, False, 0)
+
+        weekday_row = Gtk.Grid(column_spacing=2)
+        weekday_row.get_style_context().add_class("clock-calendar-weekdays")
+        for col, label in enumerate(_WEEKDAY_LABELS):
+            cell = Gtk.Label(label=label)
+            cell.get_style_context().add_class("clock-calendar-weekday")
+            cell.set_hexpand(True)
+            weekday_row.attach(cell, col, 0, 1, 1)
+        self.pack_start(weekday_row, False, False, 0)
+
+        self._grid = Gtk.Grid(row_spacing=2, column_spacing=2)
+        self._grid.get_style_context().add_class("clock-calendar-days")
+        self.pack_start(self._grid, False, False, 0)
+        self._rebuild_days()
+
+    def connect_day_selected(self, callback) -> None:
+        self._on_day_selected_cb = callback
+
+    def connect_month_changed(self, callback) -> None:
+        self._on_month_changed_cb = callback
+
+    @property
+    def visible_year(self) -> int:
+        return self._year
+
+    @property
+    def visible_month(self) -> int:
+        return self._month
+
+    def set_marks(self, marks: dict[int, tuple[int, bool, tuple[str, ...]]]) -> None:
+        self._marks = marks
+        self._apply_marks()
+
+    def select_date(self, value: date) -> None:
+        self._year = value.year
+        self._month = value.month
+        self._selected = value
+        self._rebuild_days()
+
+    def _emit_month_changed(self) -> None:
+        if self._on_month_changed_cb is not None:
+            self._on_month_changed_cb(self)
+
+    def _on_prev_month(self, *_args) -> None:
+        if self._month == 1:
+            self._year -= 1
+            self._month = 12
+        else:
+            self._month -= 1
+        self._emit_month_changed()
+        self._rebuild_days()
+
+    def _on_next_month(self, *_args) -> None:
+        if self._month == 12:
+            self._year += 1
+            self._month = 1
+        else:
+            self._month += 1
+        self._emit_month_changed()
+        self._rebuild_days()
+
+    def _rebuild_days(self) -> None:
+        for child in self._grid.get_children():
+            self._grid.remove(child)
+        self._day_buttons.clear()
+        self._heading.set_text(f"{_MONTH_LABELS[self._month]} {self._year}")
+
+        weeks = _MONTH_GRID.monthdatescalendar(self._year, self._month)
+        for row, week in enumerate(weeks):
+            for col, cell_date in enumerate(week):
+                btn = self._make_day_button(cell_date)
+                self._grid.attach(btn, col, row, 1, 1)
+
+        self._apply_marks()
+        self._grid.show_all()
+
+    def _make_day_button(self, cell_date: date) -> Gtk.Button:
+        in_month = cell_date.month == self._month and cell_date.year == self._year
+        btn = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
+        btn.get_style_context().add_class("clock-calendar-day")
+        if not in_month:
+            btn.get_style_context().add_class("other-month")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        number = Gtk.Label(label=str(cell_date.day))
+        number.get_style_context().add_class("clock-calendar-day-num")
+        dot = Gtk.Label(label="")
+        dot.get_style_context().add_class("clock-calendar-dot")
+        box.pack_start(number, False, False, 0)
+        box.pack_start(dot, False, False, 0)
+        btn.add(box)
+
+        if cell_date == self._selected:
+            btn.get_style_context().add_class("selected")
+        btn.connect("clicked", self._on_day_clicked, cell_date)
+        if in_month:
+            self._day_buttons[cell_date] = btn
+        return btn
+
+    def _on_day_clicked(self, _btn: Gtk.Button, picked: date) -> None:
+        month_changed = picked.year != self._year or picked.month != self._month
+        self._selected = picked
+        if month_changed:
+            self._year = picked.year
+            self._month = picked.month
+            self._rebuild_days()
+            self._emit_month_changed()
+        else:
+            for btn in self._day_buttons.values():
+                btn.get_style_context().remove_class("selected")
+            active = self._day_buttons.get(picked)
+            if active is not None:
+                active.get_style_context().add_class("selected")
+        if self._on_day_selected_cb is not None:
+            self._on_day_selected_cb(picked)
+
+    def _apply_marks(self) -> None:
+        for cell_date, btn in self._day_buttons.items():
+            mark = self._marks.get(cell_date.day)
+            ctx = btn.get_style_context()
+            ctx.remove_class("has-tasks")
+            ctx.remove_class("has-overdue")
+            dot = None
+            for child in btn.get_children():
+                if isinstance(child, Gtk.Box):
+                    for label in child.get_children():
+                        if (
+                            isinstance(label, Gtk.Label)
+                            and "clock-calendar-dot" in label.get_style_context().list_classes()
+                        ):
+                            dot = label
+            if dot is None:
+                continue
+            if mark is None:
+                dot.set_text("")
+                continue
+            _count, overdue, _titles = mark
+            dot.set_text("●")
+            ctx.add_class("has-tasks")
+            if overdue:
+                ctx.add_class("has-overdue")
 
 
 class ClockCalendarPopup(Gtk.Window):
@@ -43,7 +238,8 @@ class ClockCalendarPopup(Gtk.Window):
     ) -> None:
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
         self._anchor: Gtk.Widget | None = anchor
-        self._fixed_top: int | None = None
+        self._fixed_position: tuple[int, int] | None = None
+        self._last_height = 0
         self._event_bus = event_bus
         self._tasks_service = tasks_service
         self._selected: date = date.today()
@@ -58,19 +254,15 @@ class ClockCalendarPopup(Gtk.Window):
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         outer.get_style_context().add_class("clock-calendar-content")
+        outer.set_size_request(248, -1)
         bus = event_bus
         if bus is None and isinstance(parent, Gtk.Window):
             bus = resolve_event_bus(parent)
         install_starfield(self, outer, bus, corner_radius=16.0)
 
-        self._calendar = Gtk.Calendar()
-        self._calendar.set_display_options(
-            Gtk.CalendarDisplayOptions.SHOW_HEADING
-            | Gtk.CalendarDisplayOptions.SHOW_DAY_NAMES
-        )
-        self._calendar.get_style_context().add_class("clock-calendar")
-        self._calendar.connect("day-selected", self._on_day_selected)
-        self._calendar.connect("month-changed", self._on_month_changed)
+        self._calendar = TaskMonthGrid()
+        self._calendar.connect_day_selected(self._on_day_selected)
+        self._calendar.connect_month_changed(self._on_month_changed)
         outer.pack_start(self._calendar, False, False, 0)
 
         tasks_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -88,7 +280,13 @@ class ClockCalendarPopup(Gtk.Window):
 
         self._tasks_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self._tasks_list.get_style_context().add_class("clock-calendar-tasks")
-        outer.pack_start(self._tasks_list, False, False, 0)
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_propagate_natural_height(True)
+        scrolled.set_max_content_height(shell_config.CLOCK_CALENDAR_TASKS_MAX_HEIGHT)
+        scrolled.get_style_context().add_class("clock-calendar-tasks-scroll")
+        scrolled.add(self._tasks_list)
+        outer.pack_start(scrolled, False, False, 0)
 
         self._empty = Gtk.Label(label="Sin tareas este día", xalign=0)
         self._empty.get_style_context().add_class("clock-calendar-empty")
@@ -96,10 +294,12 @@ class ClockCalendarPopup(Gtk.Window):
         if event_bus is not None and tasks_service is not None:
             event_bus.subscribe(TASKS_CHANGED, self._on_tasks_changed)
         self.connect("destroy", self._on_destroy)
+        self.connect("size-allocate", self._on_size_allocate)
 
     def open_for(self, anchor: Gtk.Widget) -> None:
         self._anchor = anchor
-        self._fixed_top = None
+        self._fixed_position = None
+        self._last_height = 0
         self._select_today()
         self._refresh_marks()
         self._refresh_day_tasks()
@@ -130,31 +330,39 @@ class ClockCalendarPopup(Gtk.Window):
     def _select_today(self) -> None:
         today = date.today()
         self._refreshing_calendar = True
-        self._calendar.select_month(today.month - 1, today.year)
-        self._calendar.select_day(today.day)
+        self._calendar.select_date(today)
         self._selected = today
         self._refreshing_calendar = False
 
-    def _on_day_selected(self, calendar: Gtk.Calendar) -> None:
+    def _on_day_selected(self, picked: date) -> None:
         if self._refreshing_calendar:
             return
-        year, month, day = calendar.get_date()
-        self._selected = date(int(year), int(month) + 1, int(day))
+        self._selected = picked
         self._refresh_day_tasks()
 
-    def _on_month_changed(self, _calendar: Gtk.Calendar) -> None:
+    def _on_month_changed(self, _grid: TaskMonthGrid) -> None:
         if self._refreshing_calendar:
             return
         self._refresh_marks()
-        self._on_day_selected(self._calendar)
 
     def _refresh_marks(self) -> None:
-        self._calendar.clear_marks()
         if self._tasks_service is None:
+            self._calendar.set_marks({})
             return
-        year, month, _day = self._calendar.get_date()
-        for day in self._tasks_service.marked_days(int(year), int(month) + 1):
-            self._calendar.mark_day(day)
+        year = self._calendar.visible_year
+        month = self._calendar.visible_month
+        today = date.today()
+        marks: dict[int, tuple[int, bool, tuple[str, ...]]] = {}
+        last = monthrange(year, month)[1]
+        for day in range(1, last + 1):
+            mark = calendar_day_mark(
+                self._tasks_service.records(),
+                date(year, month, day),
+                today=today,
+            )
+            if mark is not None:
+                marks[day] = mark
+        self._calendar.set_marks(marks)
 
     def _refresh_day_tasks(self) -> None:
         for child in self._tasks_list.get_children():
@@ -195,18 +403,41 @@ class ClockCalendarPopup(Gtk.Window):
             )
             self._tasks_list.pack_start(row, False, False, 0)
         self._tasks_list.show_all()
+        self._reposition()
+
+    def _on_size_allocate(self, _widget: Gtk.Widget, allocation: Gtk.Allocation) -> None:
+        height = int(allocation.height)
+        if height <= 1 or height == self._last_height:
+            return
+        self._last_height = height
+        self._reposition()
+
+    def _reposition(self) -> None:
+        if self.get_visible() and self._anchor is not None:
+            schedule_popup_position(self._position_after_show)
 
     def _position_after_show(self) -> bool:
-        if self._anchor is not None:
-            top = position_popup_below_anchor(
-                self,
-                self._anchor,
-                title=TITLE_CLOCK_CALENDAR,
-                offset=8,
-                fixed_top=self._fixed_top,
-            )
-            if self._fixed_top is None and top is not None:
-                self._fixed_top = top
+        if self._anchor is None:
+            return False
+        if self._fixed_position is not None:
+            x, y = self._fixed_position
+            reposition_popup(self, title=TITLE_CLOCK_CALENDAR, x=x, y=y)
+            return False
+        geometry = anchor_button_geometry(self._anchor)
+        if geometry is None:
+            return False
+        popup_width, popup_height = popup_window_size(self)
+        monitor = monitor_containing_point(geometry.center_x, geometry.bottom)
+        x, y = compute_popup_top_left(
+            button_center_x=geometry.center_x,
+            button_bottom=geometry.bottom,
+            popup_width=popup_width,
+            popup_height=popup_height,
+            offset=8,
+            monitor=monitor,
+        )
+        reposition_popup(self, title=TITLE_CLOCK_CALENDAR, x=x, y=y)
+        self._fixed_position = (x, y)
         return False
 
 

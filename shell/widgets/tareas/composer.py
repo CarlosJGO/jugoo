@@ -29,6 +29,7 @@ class TaskComposer(Gtk.Box):
         self._on_submit = on_submit
         self._on_cancel = on_cancel
         self._repeat = TASK_REPEAT_NONE
+        self._editing_id: str | None = None
 
         self._title = Gtk.Entry()
         self._title.set_placeholder_text("Nueva tarea")
@@ -107,6 +108,28 @@ class TaskComposer(Gtk.Box):
     def focus_title(self) -> None:
         self._title.grab_focus()
 
+    def edit(
+        self,
+        task_id: str,
+        *,
+        title: str,
+        notes: str,
+        repeat: str,
+        due_date: str | None,
+        month_day: int,
+    ) -> None:
+        self._editing_id = task_id
+        self._title.set_text(title)
+        self._notes.set_text(notes)
+        self._repeat = repeat if repeat in self._repeat_buttons else TASK_REPEAT_NONE
+        self._repeat_buttons[self._repeat].set_active(True)
+        self._due_entry.set_text(due_date or date.today().isoformat())
+        self._month_spin.set_value(month_day)
+        self.set_no_show_all(False)
+        self.show_all()
+        self._sync_repeat_rows()
+        self.focus_title()
+
     def reveal(self) -> None:
         self.set_no_show_all(False)
         self.reset()
@@ -115,6 +138,7 @@ class TaskComposer(Gtk.Box):
         self.focus_title()
 
     def reset(self) -> None:
+        self._editing_id = None
         self._title.set_text("")
         self._notes.set_text("")
         self._repeat = TASK_REPEAT_NONE
@@ -155,6 +179,7 @@ class TaskComposer(Gtk.Box):
             self._title.grab_focus()
             return
         payload = {
+            "id": self._editing_id,
             "title": title,
             "notes": self._notes.get_text().strip(),
             "repeat": self._repeat,
