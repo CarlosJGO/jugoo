@@ -86,6 +86,8 @@ def _record_from_dict(entry: object) -> TaskRecord | None:
         period_cursor=str(entry.get("period_cursor", "")).strip(),
         completed_periods=_string_tuple(entry.get("completed_periods")),
         missed_periods=_string_tuple(entry.get("missed_periods")),
+        category_id=_optional_id(entry.get("category_id")),
+        priority_id=_optional_id(entry.get("priority_id")),
     )
 
 
@@ -101,7 +103,14 @@ def _record_to_dict(task: TaskRecord) -> dict[str, Any]:
         "period_cursor": task.period_cursor,
         "completed_periods": list(task.completed_periods),
         "missed_periods": list(task.missed_periods),
+        "category_id": task.category_id,
+        "priority_id": task.priority_id,
     }
+
+
+def _optional_id(value: object) -> str | None:
+    text = str(value or "").strip()
+    return text or None
 
 
 def _string_tuple(value: object) -> tuple[str, ...]:

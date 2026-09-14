@@ -1359,6 +1359,43 @@ box.tasks-popup-header {
     border-bottom: 1px solid @shell_border_strong;
 }
 
+box.tasks-popup-tabs {
+    padding: 6px 10px 0 10px;
+}
+
+button.tasks-popup-tab {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    color: @shell_text_secondary;
+    font-size: 11px;
+    padding: 5px 8px;
+}
+
+button.tasks-popup-tab:checked,
+button.tasks-popup-tab:active {
+    background-color: alpha(@shell_accent, 0.16);
+    border-color: alpha(@shell_accent, 0.35);
+    color: @shell_text_primary;
+}
+
+box.tasks-popup-date-bar {
+    padding: 6px 10px 0 10px;
+}
+
+button.tasks-popup-date-chip {
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    color: @shell_text_secondary;
+    font-size: 11px;
+    padding: 4px 8px;
+}
+
+button.tasks-popup-date-chip:hover {
+    color: @shell_text_primary;
+}
+
 label.tasks-popup-title,
 label.clock-calendar-tasks-title {
     color: @shell_text_primary;
@@ -1461,6 +1498,30 @@ label.task-row-title {
 label.task-row-meta {
     color: @shell_text_secondary;
     font-size: 10px;
+}
+
+box.task-row-chips {
+    margin-top: 2px;
+}
+
+label.task-row-chip {
+    background-color: alpha(@shell_accent, 0.14);
+    border-radius: 6px;
+    color: @shell_text_secondary;
+    font-size: 9px;
+    padding: 1px 6px;
+}
+
+label.task-row-chip-priority {
+    background-color: alpha(@shell_warning, 0.18);
+}
+
+combobox.task-composer-combo {
+    font-size: 11px;
+}
+
+box.settings-task-taxonomy-row {
+    margin: 0;
 }
 
 image.task-row-chevron {
@@ -2843,6 +2904,18 @@ box.settings-layout-preview {
 
 box.settings-layout-canvas {
     padding: 4px 0;
+}
+
+flowbox.settings-layout-chips {
+    min-height: 0;
+}
+
+flowbox.settings-layout-chips > flowboxchild {
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
 }
 
 label.settings-layout-chip {

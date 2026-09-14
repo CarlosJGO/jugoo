@@ -268,6 +268,65 @@ def test_service_reloads_external_tasks_json_changes(tmp_path: Path) -> None:
     assert snapshot_for(service.records()[0], date.today(), date.today()).status == TASK_STATUS_COMPLETED
 
 
+def test_service_toggle_future_one_shot(tmp_path: Path) -> None:
+    bus = EventBus()
+    service = TasksService(bus, path=tmp_path / "tasks.json")
+    future = date.today() + __import__("datetime").timedelta(days=5)
+    record = service.add_task("Informe", due_date=future.isoformat())
+    assert record is not None
+    service.toggle(record.id, on_date=future)
+    snap = snapshot_for(service.records()[0], future, date.today())
+    assert snap.status == TASK_STATUS_COMPLETED
+    assert future.isoformat() in service.records()[0].completed_periods
+
+
+def test_service_toggle_future_monthly_uses_occurrence_month(tmp_path: Path) -> None:
+    bus = EventBus()
+    service = TasksService(bus, path=tmp_path / "tasks.json")
+    record = service.add_task("Renta", repeat=TASK_REPEAT_MONTHLY, month_day=1)
+    assert record is not None
+    target = date(date.today().year + 1, 3, 1)
+    service.toggle(record.id, on_date=target)
+    key = period_key(TASK_REPEAT_MONTHLY, target)
+    assert key in service.records()[0].completed_periods
+    service.toggle(record.id, on_date=target)
+    assert key not in service.records()[0].completed_periods
+
+
+def test_store_roundtrips_category_and_priority(tmp_path: Path) -> None:
+    path = tmp_path / "tasks.json"
+    original = (
+        TaskRecord(
+            id="tax",
+            title="Ensayo",
+            due_date="2026-09-20",
+            created_at="2026-09-01T10:00:00",
+            category_id="universidad",
+            priority_id="alta",
+        ),
+    )
+    save_tasks(path, original)
+    loaded = load_tasks(path)
+    assert loaded == original
+
+
+def test_completed_snapshots_include_early_one_shot() -> None:
+    from shell.servicios.tareas.logic import completed_snapshots
+
+    today = date(2026, 9, 5)
+    task = TaskRecord(
+        id="early",
+        title="Leer",
+        due_date="2026-09-12",
+        created_at="2026-09-01T10:00:00",
+        completed_periods=("2026-09-12",),
+    )
+    items = completed_snapshots((task,), today)
+    assert len(items) == 1
+    assert items[0].status == TASK_STATUS_COMPLETED
+    assert items[0].occurrence_date == "2026-09-12"
+
+
 if __name__ == "__main__":
     from pathlib import Path as _Path
     import tempfile
@@ -284,8 +343,13 @@ if __name__ == "__main__":
     test_calendar_day_mark_reports_count_and_overdue()
     test_calendar_day_mark_skips_daily_tasks()
     test_complete_task_does_not_uncomplete()
+    test_completed_snapshots_include_early_one_shot()
     with tempfile.TemporaryDirectory() as folder:
         test_store_roundtrip(_Path(folder))
         test_service_add_toggle_delete_emits(_Path(folder))
+        test_service_updates_existing_task_preserving_id(_Path(folder))
         test_service_reloads_external_tasks_json_changes(_Path(folder))
+        test_service_toggle_future_one_shot(_Path(folder))
+        test_service_toggle_future_monthly_uses_occurrence_month(_Path(folder))
+        test_store_roundtrips_category_and_priority(_Path(folder))
     print("tasks tests OK")

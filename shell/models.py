@@ -718,6 +718,8 @@ class TaskRecord:
     period_cursor: str = ""
     completed_periods: tuple[str, ...] = ()
     missed_periods: tuple[str, ...] = ()
+    category_id: str | None = None
+    priority_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -735,6 +737,8 @@ class TaskSnapshot:
     missed_count: int
     created_at: str
     occurrence_date: str
+    category_id: str | None = None
+    priority_id: str | None = None
 
 
 @dataclass(frozen=True)

@@ -393,13 +393,17 @@ class ClockCalendarPopup(Gtk.Window):
             self._tasks_list.show_all()
             return
 
-        can_toggle = self._selected == today
         for snapshot in items:
+            occurrence = self._selected
+            task_id = snapshot.id
             row = TaskRow(
                 snapshot,
-                on_toggle=self._tasks_service.toggle,
+                on_toggle=lambda _tid, tid=task_id, when=occurrence: self._tasks_service.toggle(
+                    tid,
+                    on_date=when,
+                ),
                 compact=True,
-                can_toggle=can_toggle,
+                can_toggle=snapshot.status != "missed",
             )
             self._tasks_list.pack_start(row, False, False, 0)
         self._tasks_list.show_all()

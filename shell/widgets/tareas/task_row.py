@@ -28,6 +28,8 @@ class TaskRow(Gtk.Box):
         on_edit: Callable[[TaskSnapshot], None] | None = None,
         compact: bool = False,
         can_toggle: bool = True,
+        category_label: str | None = None,
+        priority_label: str | None = None,
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.get_style_context().add_class("task-row")
@@ -70,6 +72,20 @@ class TaskRow(Gtk.Box):
             meta.get_style_context().add_class("task-row-meta")
             meta.set_ellipsize(Pango.EllipsizeMode.END)
             text.pack_start(meta, False, False, 0)
+            if category_label or priority_label:
+                chips = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+                chips.get_style_context().add_class("task-row-chips")
+                if category_label:
+                    chip = Gtk.Label(label=category_label)
+                    chip.get_style_context().add_class("task-row-chip")
+                    chip.get_style_context().add_class("task-row-chip-category")
+                    chips.pack_start(chip, False, False, 0)
+                if priority_label:
+                    chip = Gtk.Label(label=priority_label)
+                    chip.get_style_context().add_class("task-row-chip")
+                    chip.get_style_context().add_class("task-row-chip-priority")
+                    chips.pack_start(chip, False, False, 0)
+                text.pack_start(chips, False, False, 0)
         text_event.add(text)
         header.pack_start(text_event, True, True, 0)
 

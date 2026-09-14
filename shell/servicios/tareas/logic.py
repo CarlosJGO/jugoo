@@ -201,6 +201,8 @@ def snapshot_for(task: TaskRecord, on_date: date, today: date) -> TaskSnapshot:
         missed_count=len(task.missed_periods),
         created_at=task.created_at,
         occurrence_date=on_date.isoformat(),
+        category_id=task.category_id,
+        priority_id=task.priority_id,
     )
 
 
@@ -248,6 +250,41 @@ def upcoming_tasks(
             upcoming.append(snapshot)
         day += timedelta(days=1)
     return tuple(sorted(upcoming, key=_snapshot_sort_key))
+
+
+def completed_snapshots(
+    tasks: tuple[TaskRecord, ...],
+    today: date,
+    *,
+    limit: int = 80,
+) -> tuple[TaskSnapshot, ...]:
+    """Recent completed occurrences across one-shot and recurring tasks."""
+    items: list[TaskSnapshot] = []
+    for task in tasks:
+        for key in task.completed_periods:
+            on_date = _occurrence_from_period(task, key)
+            if on_date is None:
+                continue
+            snapshot = snapshot_for(task, on_date, today)
+            if snapshot.status == TASK_STATUS_COMPLETED:
+                items.append(snapshot)
+    items.sort(key=lambda item: item.occurrence_date, reverse=True)
+    return tuple(items[: max(1, int(limit))])
+
+
+def _occurrence_from_period(task: TaskRecord, key: str) -> date | None:
+    if task.repeat == TASK_REPEAT_DAILY:
+        return parse_iso_date(key)
+    if task.repeat == TASK_REPEAT_MONTHLY:
+        parts = key.split("-")
+        if len(parts) < 2:
+            return None
+        try:
+            year, month = int(parts[0]), int(parts[1])
+        except ValueError:
+            return None
+        return month_occurrence_date(year, month, task.month_day)
+    return parse_iso_date(task.due_date) or parse_iso_date(key)
 
 
 def marked_days(

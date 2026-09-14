@@ -272,13 +272,13 @@ class AppLauncherWindow(PickerOverlay):
     def open_settings_mode(self, category: CategoryId = CategoryId.GENERAL) -> None:
         self._active_settings_category = category
         self._mode = category
+        # Switch chrome + shell size before the door measures, and mount the
+        # settings page immediately so search layout never flashes underneath.
         self._update_mode_ui()
+        self._show_settings_category(category)
         if self.get_visible():
-            self._show_settings_category(category)
-        else:
-            self.open_picker(focus_search=False, reset_query=False)
-            GLib.idle_add(self._show_settings_after_open, category)
-            GLib.idle_add(self._refresh_after_present)
+            return
+        self.open_picker(focus_search=False, reset_query=False)
 
     def set_snapshot(self, snapshot: ApplicationsSnapshot) -> None:
         self._snapshot = snapshot
@@ -289,6 +289,10 @@ class AppLauncherWindow(PickerOverlay):
     def on_prepare_open(self) -> None:
         # Refresh is deferred right after present for faster perceived open.
         return
+
+    def on_after_show_all(self) -> None:
+        # show_all() forces both Stack pages (and the search row) visible again.
+        self._reassert_mode_visibility()
 
     def on_query_changed(self, query: str) -> None:
         if self._mode == SEARCH_DESTINATION:
@@ -532,20 +536,57 @@ class AppLauncherWindow(PickerOverlay):
         self.set_search_row_visible(search_mode)
         if not search_mode:
             self.set_empty_visible(False)
-        self._center_stack.set_visible_child_name("launcher" if search_mode else "settings")
+        # While closed (or mid-open), skip crossfade so search does not flash
+        # under settings during the door animation.
+        if self.get_visible() and not self._opening:
+            self._center_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+            self._center_stack.set_transition_duration(100)
+        else:
+            self._center_stack.set_transition_type(Gtk.StackTransitionType.NONE)
+            self._center_stack.set_transition_duration(0)
+        self._reassert_mode_visibility()
         # Side rails stay fixed; only the center column (and total shell) grow for settings.
         center_width = (
             CONTROL_CENTER_CENTER_MIN_WIDTH if search_mode else CONTROL_CENTER_CENTER_SETTINGS_WIDTH
         )
-        self.center_slot.set_size_request(center_width, -1)
         shell_width = CONTROL_CENTER_WIDTH if search_mode else CONTROL_CENTER_SETTINGS_WIDTH
-        self.set_shell_size(shell_width, CONTROL_CENTER_HEIGHT)
+        # Smooth width when switching modes on an already-open puerta; snap on first open.
+        animate = self.get_visible() and not self._opening and not self._closing
+        self.set_shell_size(
+            shell_width,
+            CONTROL_CENTER_HEIGHT,
+            center_width=center_width,
+            animate=animate,
+        )
         for destination, button in self._nav_buttons.items():
             style = button.get_style_context()
             if destination == self._mode:
                 style.add_class("active")
             else:
                 style.remove_class("active")
+
+    def _reassert_mode_visibility(self) -> None:
+        """Keep only the active mode page visible (GTK3 show_all breaks Stack)."""
+        search_mode = self._mode == SEARCH_DESTINATION
+        target = "launcher" if search_mode else "settings"
+        self._center_stack.set_visible_child_name(target)
+        launcher_page = self._center_stack.get_child_by_name("launcher")
+        settings_page = self._center_stack.get_child_by_name("settings")
+        if launcher_page is not None:
+            launcher_page.set_no_show_all(not search_mode)
+            if search_mode:
+                launcher_page.show()
+            else:
+                launcher_page.hide()
+        if settings_page is not None:
+            settings_page.set_no_show_all(search_mode)
+            if search_mode:
+                settings_page.hide()
+            else:
+                settings_page.show()
+        self.set_search_row_visible(search_mode)
+        if not search_mode:
+            self.set_empty_visible(False)
 
     def _show_settings_category(self, category: CategoryId) -> None:
         show_settings_category(
@@ -554,10 +595,6 @@ class AppLauncherWindow(PickerOverlay):
             category,
             on_change=self._on_setting_changed,
         )
-
-    def _show_settings_after_open(self, category: CategoryId) -> bool:
-        self._show_settings_category(category)
-        return False
 
     def _on_setting_changed(self, key: str, value: object) -> None:
         self._settings_manager.set(key, value)

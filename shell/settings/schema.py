@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any, Callable, Literal
 
 from .. import config as shell_config
+from .task_taxonomy import default_categories_json, default_priorities_json
 
 SettingType = Literal["bool", "int", "float", "string", "choice", "path"]
 ApplyMode = Literal["live", "reload", "restart"]
@@ -227,6 +228,28 @@ def build_settings_catalog() -> tuple[SettingDef, ...]:
             step=1,
             tier="A",
             section="Apps ancladas",
+        ),
+        SettingDef(
+            key="widgets.task_categories_json",
+            category=CategoryId.WIDGETS,
+            label="Categorías de tareas",
+            description="Listas dinámicas para clasificar tareas (editor visual).",
+            value_type="string",
+            default=default_categories_json(),
+            apply=APPLY_LIVE,
+            tier="A",
+            section="Tareas",
+        ),
+        SettingDef(
+            key="widgets.task_priorities_json",
+            category=CategoryId.WIDGETS,
+            label="Prioridades de tareas",
+            description="Etiquetas con peso numérico (mayor = más urgente).",
+            value_type="string",
+            default=default_priorities_json(),
+            apply=APPLY_LIVE,
+            tier="A",
+            section="Tareas",
         ),
         # —— Layout (editor-ready) ——
         SettingDef(

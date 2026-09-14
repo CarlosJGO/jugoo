@@ -24,6 +24,7 @@ from ...models import (
 )
 from ...runtime_paths import tasks_path
 from .logic import (
+    completed_snapshots as completed_for,
     overdue_count,
     parse_iso_date,
     pending_today_count,
@@ -102,6 +103,8 @@ class TasksService:
         repeat: str = TASK_REPEAT_NONE,
         due_date: str | None = None,
         month_day: int = 1,
+        category_id: str | None = None,
+        priority_id: str | None = None,
     ) -> TaskRecord | None:
         cleaned = title.strip()
         if not cleaned:
@@ -122,6 +125,8 @@ class TasksService:
             month_day=max(1, min(int(month_day), 31)),
             created_at=created,
             period_cursor=period_key(kind, today, due_date=due),
+            category_id=(category_id or "").strip() or None,
+            priority_id=(priority_id or "").strip() or None,
         )
         self._tasks = self._tasks + (record,)
         self._persist_and_emit()
@@ -136,6 +141,8 @@ class TasksService:
         repeat: str = TASK_REPEAT_NONE,
         due_date: str | None = None,
         month_day: int = 1,
+        category_id: str | None = None,
+        priority_id: str | None = None,
     ) -> TaskRecord | None:
         cleaned = title.strip()
         if not cleaned:
@@ -158,6 +165,8 @@ class TasksService:
                 due_date=due if kind == TASK_REPEAT_NONE else None,
                 month_day=max(1, min(int(month_day), 31)),
                 period_cursor=period_key(kind, today, due_date=due),
+                category_id=(category_id or "").strip() or None,
+                priority_id=(priority_id or "").strip() or None,
             )
             self._tasks = self._tasks[:index] + (updated,) + self._tasks[index + 1:]
             self._persist_and_emit()
@@ -165,15 +174,12 @@ class TasksService:
         return None
 
     def toggle(self, task_id: str, *, on_date: date | None = None) -> None:
-        today = date.today()
-        when = on_date if on_date is not None else today
-        if when != today:
-            return
+        when = on_date if on_date is not None else date.today()
         updated: list[TaskRecord] = []
         changed = False
         for task in self._tasks:
             if task.id == task_id:
-                updated.append(toggle_task(task, today))
+                updated.append(toggle_task(task, when))
                 changed = True
             else:
                 updated.append(task)
@@ -181,6 +187,9 @@ class TasksService:
             return
         self._tasks = tuple(updated)
         self._persist_and_emit()
+
+    def completed(self, *, limit: int = 80) -> tuple[TaskSnapshot, ...]:
+        return completed_for(self._tasks, date.today(), limit=limit)
 
     def delete(self, task_id: str) -> None:
         remaining = tuple(task for task in self._tasks if task.id != task_id)

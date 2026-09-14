@@ -50,6 +50,18 @@ class PickerOverlay(Gtk.Window):
         self._card_height_request = card_height
         self._resolved_card_width = card_width if card_width is not None else LAUNCHER_WIDTH
         self._seed_door_height = card_height if card_height > 0 else LAUNCHER_MAX_HEIGHT
+        self._display_shell_width = self._resolved_card_width
+        self._display_shell_height = card_height if card_height > 0 else LAUNCHER_MAX_HEIGHT
+        self._display_center_width = -1
+        self._size_tick_id = 0
+        self._size_from_w = self._display_shell_width
+        self._size_from_h = self._display_shell_height
+        self._size_to_w = self._display_shell_width
+        self._size_to_h = self._display_shell_height
+        self._size_from_center = -1
+        self._size_to_center = -1
+        self._size_started_us = 0
+        self._size_duration_ms = 0
 
         self.set_name(window_name)
         self.get_style_context().add_class("shell-picker")
@@ -143,6 +155,7 @@ class PickerOverlay(Gtk.Window):
             self.center_slot.set_size_request(CONTROL_CENTER_CENTER_MIN_WIDTH, -1)
             self.center_slot.set_hexpand(True)
             self.center_slot.set_vexpand(True)
+            self._display_center_width = CONTROL_CENTER_CENTER_MIN_WIDTH
             body.pack_start(self.center_slot, True, True, 0)
 
             self.right_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -191,6 +204,7 @@ class PickerOverlay(Gtk.Window):
         self._session.close_session()
         self._present_generation += 1
         self._opening = False
+        self._cancel_size_anim()
         if self._closing or not self.get_visible():
             self._door.cancel()
             self.hide()
@@ -234,6 +248,9 @@ class PickerOverlay(Gtk.Window):
     def on_prepare_open(self) -> None:
         """Subclasses refresh backing data before the overlay is shown."""
 
+    def on_after_show_all(self) -> None:
+        """Called after ``show_all()``; restore mode-specific visibility."""
+
     def on_query_changed(self, query: str) -> None:
         """Subclasses rebuild visible results for ``query``."""
 
@@ -266,6 +283,7 @@ class PickerOverlay(Gtk.Window):
             self._focus_search()
 
     def _on_destroy(self, *_args) -> None:
+        self._cancel_size_anim()
         self._door.cancel()
 
     def _on_search_changed(self, *_args) -> None:
@@ -277,19 +295,134 @@ class PickerOverlay(Gtk.Window):
             self._door.apply(1.0)
 
     def set_search_row_visible(self, visible: bool) -> None:
+        self._search_row.set_no_show_all(not visible)
         if visible:
             self._search_row.show()
         else:
             self._search_row.hide()
 
-    def set_shell_size(self, width: int, height: int) -> None:
+    def set_shell_size(
+        self,
+        width: int,
+        height: int,
+        *,
+        center_width: int | None = None,
+        animate: bool = False,
+    ) -> None:
         """Resize the control-center shell (center column may grow with content)."""
+        width = max(1, int(width))
+        height = max(1, int(height))
+        center = None if center_width is None else max(1, int(center_width))
+        can_animate = (
+            animate
+            and self.get_visible()
+            and not self._opening
+            and not self._closing
+            and not self._door.animating
+            and self._animations_enabled()
+            and (
+                width != self._display_shell_width
+                or height != self._display_shell_height
+                or (center is not None and center != self._display_center_width)
+            )
+        )
+        if not can_animate:
+            self._cancel_size_anim()
+            self._apply_shell_geometry(width, height, center)
+            return
+        self._start_size_anim(width, height, center)
+
+    def _cancel_size_anim(self) -> None:
+        if self._size_tick_id:
+            self.remove_tick_callback(self._size_tick_id)
+            self._size_tick_id = 0
+
+    def _start_size_anim(
+        self,
+        width: int,
+        height: int,
+        center_width: int | None,
+    ) -> None:
+        self._cancel_size_anim()
+        theme = active_theme()
+        base = 240 if theme is None else max(180, min(320, int(theme.animation.duration * 1.4)))
+        self._size_duration_ms = base
+        self._size_from_w = self._display_shell_width
+        self._size_from_h = self._display_shell_height
+        self._size_to_w = width
+        self._size_to_h = height
+        self._size_from_center = self._display_center_width
+        self._size_to_center = (
+            center_width if center_width is not None else self._display_center_width
+        )
+        self._size_started_us = GLib.get_monotonic_time()
+        # Target metadata for open/close paths that read resolved size mid-flight.
+        self._resolved_card_width = width
+        self._card_height_request = height
+        self._seed_door_height = height
+        self._size_tick_id = self.add_tick_callback(self._on_size_tick)
+
+    def _on_size_tick(self, _widget: Gtk.Widget, _clock: Gdk.FrameClock) -> bool:
+        elapsed_ms = (GLib.get_monotonic_time() - self._size_started_us) / 1000.0
+        t = min(1.0, elapsed_ms / max(1, self._size_duration_ms))
+        u = 1.0 - t
+        eased = 1.0 - u * u * u
+        width = int(round(self._size_from_w + (self._size_to_w - self._size_from_w) * eased))
+        height = int(round(self._size_from_h + (self._size_to_h - self._size_from_h) * eased))
+        center: int | None = None
+        if self._size_to_center > 0 and self._size_from_center > 0:
+            center = int(
+                round(
+                    self._size_from_center
+                    + (self._size_to_center - self._size_from_center) * eased
+                )
+            )
+        elif self._size_to_center > 0:
+            center = self._size_to_center
+        self._apply_shell_geometry(width, height, center, commit_targets=False)
+        if t < 1.0:
+            return GLib.SOURCE_CONTINUE
+        self._size_tick_id = 0
+        self._apply_shell_geometry(
+            self._size_to_w,
+            self._size_to_h,
+            self._size_to_center if self._size_to_center > 0 else None,
+        )
+        return GLib.SOURCE_REMOVE
+
+    def _apply_shell_geometry(
+        self,
+        width: int,
+        height: int,
+        center_width: int | None = None,
+        *,
+        commit_targets: bool = True,
+    ) -> None:
+        width = max(1, int(width))
+        height = max(1, int(height))
+        self._display_shell_width = width
+        self._display_shell_height = height
+        if commit_targets:
+            self._resolved_card_width = width
+            self._card_height_request = height
+            self._seed_door_height = height
+        if center_width is not None and self.center_slot is not None:
+            center_width = max(1, int(center_width))
+            self._display_center_width = center_width
+            self.center_slot.set_size_request(center_width, -1)
         if hasattr(self, "_shell_outer") and self._shell_outer is not None:
             self._shell_outer.set_size_request(width, height)
-            self.queue_resize()
-            if self.get_visible() and not self._door.animating and not self._closing:
+        if hasattr(self, "_card_host") and self._card_host is not None:
+            self._card_host.set_size_request(width, height)
+        self.queue_resize()
+        if self.get_visible() and not self._door.animating and not self._closing:
+            # Control center has an explicit shell size; measuring natural width
+            # (e.g. FlowBox chips) can inflate the door and clip the right rail.
+            if self._layout == "control_center":
+                self._door.seed_size(width, height)
+            else:
                 self._door.capture_full_size()
-                self._door.apply(1.0)
+            self._door.apply(1.0)
 
     def focus_search(self) -> None:
         self._focus_search()
@@ -330,6 +463,9 @@ class PickerOverlay(Gtk.Window):
         self._door.apply(0.0)
         self.show_all()
         self.present()
+        # GTK3 show_all() unhides every Stack child and widgets previously hide()'d
+        # without set_no_show_all — subclasses must reassert mode chrome.
+        self.on_after_show_all()
 
         if reversing:
             self._door.capture_full_size()
