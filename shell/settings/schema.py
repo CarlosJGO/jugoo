@@ -144,6 +144,18 @@ def build_settings_catalog() -> tuple[SettingDef, ...]:
         ),
         # —— General / Apariencia ——
         SettingDef(
+            key="apariencia.ui_font",
+            category=CategoryId.APARIENCIA,
+            label="Fuente de la interfaz",
+            description="Familia tipográfica de Jugoo. Vacío usa la del sistema.",
+            value_type="choice",
+            default="",
+            apply=APPLY_LIVE,
+            choices=(),  # filled at runtime from system fonts
+            tier="A",
+            section="Tipografía",
+        ),
+        SettingDef(
             key="apariencia.animations_follow_theme",
             category=CategoryId.APARIENCIA,
             label="Respetar animaciones del tema",

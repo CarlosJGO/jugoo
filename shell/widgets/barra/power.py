@@ -9,10 +9,11 @@ import gi
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 
-from gi.repository import Gdk, Gtk
+from gi.repository import Gdk, GLib, Gtk
 
 from ...config import POWER_COMPACT_ICON_SIZE, POWER_ICON_SIZE, POWER_MENU_OFFSET
 from ...eventbus import EventBus
+from ...runtime_relaunch import relaunch_shell
 from ...servicios.energia.power import (
     ACTION_LOCK,
     ACTION_LOGOUT,
@@ -37,9 +38,12 @@ from ...window_identity import (
 
 MenuEntry = tuple[str, str, str, bool]
 
+ACTION_RELAUNCH_SHELL = "relaunch_shell"
+
 POWER_MENU_ENTRIES: tuple[MenuEntry, ...] = (
     (ACTION_LOCK, "Bloquear", "system-lock-screen-symbolic", False),
     (ACTION_SUSPEND, "Suspender", "system-suspend-symbolic", False),
+    (ACTION_RELAUNCH_SHELL, "Reiniciar Jugoo", "view-refresh-symbolic", False),
     (ACTION_LOGOUT, "Cerrar sesión", "system-log-out-symbolic", True),
     (ACTION_REBOOT, "Reiniciar", "system-reboot-symbolic", True),
     (ACTION_SHUTDOWN, "Apagar", "system-shutdown-symbolic", True),
@@ -373,6 +377,10 @@ class PowerWidget(ShellModule):
         self.close_menu()
 
     def _execute_action(self, action: str) -> None:
+        if action == ACTION_RELAUNCH_SHELL:
+            self.close_menu()
+            GLib.idle_add(self._relaunch_shell)
+            return
         handler = {
             ACTION_LOCK: self._power_service.lock,
             ACTION_SUSPEND: self._power_service.suspend,
@@ -386,6 +394,13 @@ class PowerWidget(ShellModule):
             handler()
         except Exception as error:
             print(f"shell: power action {action} failed: {error}")
+
+    def _relaunch_shell(self) -> bool:
+        try:
+            relaunch_shell()
+        except OSError as error:
+            print(f"shell: relaunch failed: {error}")
+        return False
 
     def close_menu(self) -> None:
         self._outside_click.uninstall()

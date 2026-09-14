@@ -218,7 +218,6 @@ class NotificationGroupWindow(Gtk.Window):
             default = snapshot.actions[0].key
         if default is not None:
             self._on_invoke_action(snapshot.id, default)
-        else:
-            self._on_open_app(snapshot)
+        self._on_open_app(snapshot)
         GLib.idle_add(self.hide_group)
         return True

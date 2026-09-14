@@ -238,6 +238,7 @@ class NotificationToast(Gtk.EventBox):
         snapshot = self._snapshot
         self._cancel_hide_timer()
         self._snapshot = None
+        self._card.get_style_context().remove_class("notification-toast-hover")
         self.hide()
         if emit and snapshot is not None:
             self._on_dismiss(snapshot, reason)
@@ -259,6 +260,7 @@ class NotificationToast(Gtk.EventBox):
         if mode in (Gdk.CrossingMode.GRAB, Gdk.CrossingMode.UNGRAB):
             return False
         self._cancel_hide_timer()
+        self._card.get_style_context().add_class("notification-toast-hover")
         return False
 
     def _on_leave_notify(self, _widget: Gtk.Widget, event: Gdk.EventCrossing) -> bool:
@@ -266,6 +268,7 @@ class NotificationToast(Gtk.EventBox):
             return False
         if pointer_inside_widget(self):
             return False
+        self._card.get_style_context().remove_class("notification-toast-hover")
         if self._snapshot is not None:
             timeout_ms = self._service.resolve_display_timeout_ms(self._snapshot)
             if timeout_ms > 0:

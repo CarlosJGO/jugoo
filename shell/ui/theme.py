@@ -144,7 +144,12 @@ def load_theme(path: Path, *, key: str | None = None) -> Theme:
     )
 
 
-def compile_gtk_css(theme: Theme, structural_css: str) -> str:
+def compile_gtk_css(
+    theme: Theme,
+    structural_css: str,
+    *,
+    ui_font: str = "",
+) -> str:
     """Compile semantic colors and scalable shape values into GTK3 CSS."""
     opacity = theme.effects.opacity
     colors = theme.colors
@@ -207,7 +212,25 @@ def compile_gtk_css(theme: Theme, structural_css: str) -> str:
     prelude.extend(
         f"@define-color {name} {value};" for name, value in definitions.items()
     )
-    return "\n".join(prelude) + "\n\n" + _scale_radii(structural_css, theme.shape.radius)
+    body = _scale_radii(structural_css, theme.shape.radius)
+    family = (ui_font or "").strip()
+    if family:
+        from .fonts import css_font_family
+
+        quoted = css_font_family(family)
+        body += f"""
+
+/* Runtime UI font (apariencia.ui_font) */
+* {{
+    font-family: {quoted}, sans-serif;
+}}
+textview.clipboard-detail-text,
+textview.clipboard-detail-text text,
+label.volume-osd-bar-text {{
+    font-family: monospace;
+}}
+"""
+    return "\n".join(prelude) + "\n\n" + body
 
 
 def export_hypr_theme(theme: Theme, destination: Path) -> Path:
@@ -286,12 +309,17 @@ class ThemeManager:
         self._monitor: Gio.FileMonitor | None = None
         self._reload_source_id = 0
         self._theme: Theme | None = None
+        self._ui_font = ""
 
     @property
     def theme(self) -> Theme:
         if self._theme is None:
             raise RuntimeError("theme manager has not started")
         return self._theme
+
+    @property
+    def ui_font(self) -> str:
+        return self._ui_font
 
     @property
     def available_themes(self) -> tuple[str, ...]:
@@ -313,6 +341,21 @@ class ThemeManager:
         self._watch_active_file()
         return True
 
+    def set_ui_font(self, family: str) -> bool:
+        """Apply a UI font family (empty restores the system default)."""
+        cleaned = str(family or "").strip()
+        if cleaned == self._ui_font:
+            self._apply_gtk_font_name(cleaned)
+            return True
+        previous = self._ui_font
+        self._ui_font = cleaned
+        self._apply_gtk_font_name(cleaned)
+        if not self.reload_current():
+            self._ui_font = previous
+            self._apply_gtk_font_name(previous)
+            return False
+        return True
+
     def reload_current(self) -> bool:
         catalog = discover_themes(self._themes_dir)
         path = catalog.get(self._active_name)
@@ -322,7 +365,7 @@ class ThemeManager:
         try:
             theme = load_theme(path, key=self._active_name)
             structural_css = self._structural_css_path.read_text(encoding="utf-8")
-            css = compile_gtk_css(theme, structural_css)
+            css = compile_gtk_css(theme, structural_css, ui_font=self._ui_font)
             provider = Gtk.CssProvider()
             provider.load_from_data(css.encode("utf-8"))
         except (OSError, UnicodeError, ValueError, GLib.Error) as error:
@@ -349,6 +392,20 @@ class ThemeManager:
         self._event_bus.emit(THEME_CHANGED, theme)
         print(f"Jugoo theme: applied {theme.name}")
         return True
+
+    def _apply_gtk_font_name(self, family: str) -> None:
+        """Sync Gtk.Settings so widgets without explicit CSS pick up the family."""
+        settings = Gtk.Settings.get_default()
+        if settings is None:
+            return
+        if family:
+            settings.set_property("gtk-font-name", f"{family} 11")
+        else:
+            # Reset to the desktop default when available.
+            try:
+                settings.reset_property("gtk-font-name")
+            except (AttributeError, TypeError):
+                settings.set_property("gtk-font-name", "Sans 11")
 
     def close(self) -> None:
         if self._reload_source_id:

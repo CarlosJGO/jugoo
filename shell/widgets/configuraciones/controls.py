@@ -71,6 +71,9 @@ class SettingRow(Gtk.Box):
             combo = Gtk.ComboBoxText()
             combo.get_style_context().add_class("settings-combo")
             selected = str(value)
+            # GTK rejects empty ComboBox ids; Apariencia maps "" → __system__.
+            if selected == "" and any(item == "__system__" for item, _label in choices):
+                selected = "__system__"
             active = 0
             for index, (item_value, label) in enumerate(choices):
                 combo.append(item_value, label)
@@ -150,6 +153,8 @@ class SettingRow(Gtk.Box):
             return
         value = combo.get_active_id()
         if value is not None:
+            if value == "__system__":
+                value = ""
             self._on_change(self._definition.key, value)
 
     def _on_spin(self, spin: Gtk.SpinButton) -> None:

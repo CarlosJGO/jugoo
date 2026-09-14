@@ -26,6 +26,8 @@ from ...popup_handle import (
     pointer_inside_widget,
     pointer_inside_window,
 )
+from ...servicios.aplicaciones.applications import APP_ACTIVATE_REQUESTED
+from ...servicios.escritorio.hyprland import WINDOW_FOCUS_REQUESTED
 from ...servicios.notificaciones.notification_sound import play_notification_sound
 from ...servicios.notificaciones.notifications import (
     NOTIFICATIONS_CHANGED,
@@ -38,6 +40,7 @@ from ...settings.manager import SETTINGS_CHANGED
 from ...ui import ShellModule
 from ..notificaciones.assistant_presenter import AssistantPresenter
 from ..notificaciones.bell_icon import BellIcon
+from ..notificaciones.notification_activate import activate_notification_sender
 from ..notificaciones.notification_popup import NotificationPopup
 from ..notificaciones.notification_toast_manager import NotificationToastManager
 
@@ -305,8 +308,26 @@ class NotificationsWidget(ShellModule):
         self._service.invoke_action(notification_id, action_key)
 
     def _open_app(self, snapshot: NotificationSnapshot) -> None:
-        from ..notificaciones.notification_popup import open_notification_app
-        open_notification_app(snapshot)
+        from ...models import ApplicationsSnapshot
+
+        shell = self._shell_window
+        applications = getattr(shell, "applications", None)
+        hyprland = getattr(shell, "hyprland", None)
+        apps_snapshot = (
+            applications.snapshot if applications is not None else ApplicationsSnapshot()
+        )
+        hypr_snapshot = hyprland.snapshot if hyprland is not None else None
+        activate_notification_sender(
+            snapshot,
+            applications=apps_snapshot,
+            hyprland=hypr_snapshot,
+            focus_window=lambda address: self._event_bus.emit(
+                WINDOW_FOCUS_REQUESTED, address
+            ),
+            activate_app=lambda app_id: self._event_bus.emit(
+                APP_ACTIVATE_REQUESTED, app_id
+            ),
+        )
 
     def _open_group_window(
         self,

@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import shutil
-import subprocess
 from datetime import datetime
-from pathlib import Path
 from typing import Callable
 
 import gi
@@ -49,31 +46,6 @@ _URGENCY_LABELS = {
     1: "Normal",
     2: "Urgente",
 }
-
-
-def open_notification_app(snapshot: NotificationSnapshot) -> None:
-    """Launch or activate the app that sent the notification."""
-    candidates: list[str] = []
-    desktop = snapshot.desktop_entry.strip() if snapshot else ""
-    if desktop:
-        stem = Path(desktop).stem
-        if stem:
-            candidates.append(stem)
-    app_name = snapshot.app_name.strip() if snapshot else ""
-    if app_name and app_name not in candidates:
-        candidates.append(app_name)
-
-    for ident in candidates:
-        commands: list[tuple[str, ...]] = []
-        if shutil.which("uwsm"):
-            commands.append(("uwsm", "app", "--", "gtk-launch", ident))
-        commands.append(("gtk-launch", ident))
-        for command in commands:
-            try:
-                subprocess.Popen(command)
-                return
-            except (OSError, subprocess.SubprocessError):
-                continue
 
 
 class NotificationItemRow(Gtk.EventBox):
@@ -240,8 +212,7 @@ class NotificationItemRow(Gtk.EventBox):
             target = target.get_parent()
         if self._default_action is not None:
             self._on_invoke_action(self._snapshot.id, self._default_action)
-        else:
-            self._on_open_app(self._snapshot)
+        self._on_open_app(self._snapshot)
         return True
 
 
@@ -709,8 +680,8 @@ class NotificationGroupRow(Gtk.EventBox):
         snapshot = self._representative
         if self._default_action is not None:
             self._on_invoke_action(snapshot.id, self._default_action)
-        else:
-            self._on_open_app(snapshot)
+        # Always focus-or-activate the sender; ActionInvoked alone is often a no-op.
+        self._on_open_app(snapshot)
         return True
 
     def _open_group_window(self) -> None:

@@ -32,9 +32,11 @@ from ...settings.task_taxonomy import (
     serialize_priorities,
 )
 from .controls import SettingRow
+from .font_picker import FontFamilyPicker
 
 _CUSTOM_EDITOR_KEYS = frozenset(
     {
+        "apariencia.ui_font",
         "general.profile_fields_json",
         "widgets.task_categories_json",
         "widgets.task_priorities_json",
@@ -81,7 +83,20 @@ def build_category_page(
                 section = Gtk.Label(label=current_section, xalign=0)
                 section.get_style_context().add_class("settings-section")
                 page.pack_start(section, False, False, 0)
-            if definition.key == "general.profile_fields_json":
+            if definition.key == "apariencia.ui_font":
+                page.pack_start(
+                    FontFamilyPicker(
+                        definition,
+                        manager.get(definition.key),
+                        choices=manager.choices_for(definition.key),
+                        on_change=on_change,
+                        apply_label=manager.apply_mode_label(definition.apply),
+                    ),
+                    False,
+                    False,
+                    0,
+                )
+            elif definition.key == "general.profile_fields_json":
                 page.pack_start(_profile_fields_editor(manager, on_change), False, False, 0)
             elif definition.key == "widgets.task_categories_json":
                 page.pack_start(_task_categories_editor(manager, on_change), False, False, 0)

@@ -100,6 +100,8 @@ class ShellApplication(Gtk.Window):
             path=settings_path(),
             theme_setter=self.theme_manager.set_theme,
             theme_choices=self._theme_choices,
+            font_setter=self.theme_manager.set_ui_font,
+            font_choices=self._font_choices,
         )
         self.hyprland = HyprlandService(self.event_bus, PERSISTENT_WORKSPACES)
         self.applications = ApplicationsService(self.event_bus)
@@ -332,6 +334,11 @@ class ShellApplication(Gtk.Window):
             (name, name.replace("-", " ").replace("_", " ").title())
             for name in self.theme_manager.available_themes
         )
+
+    def _font_choices(self) -> tuple[tuple[str, str], ...]:
+        from .ui.fonts import ui_font_choices
+
+        return ui_font_choices()
 
     def _ensure_task_watcher(self) -> bool:
         ensure_task_watcher_service()

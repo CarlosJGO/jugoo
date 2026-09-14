@@ -469,11 +469,8 @@ class ClockWidget(ShellModule):
             spacing=SHELL_MODULE_STACK_SPACING,
         )
         self._hover_surface = Gtk.EventBox()
-        self._hover_surface.add_events(
-            Gdk.EventMask.ENTER_NOTIFY_MASK
-            | Gdk.EventMask.LEAVE_NOTIFY_MASK
-        )
-        self._hover_surface.connect("enter-notify-event", self._on_pointer_enter)
+        self._hover_surface.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+        self._hover_surface.connect("button-press-event", self._on_clicked)
 
         self._time_label = shell_label(
             "",
@@ -569,12 +566,19 @@ class ClockWidget(ShellModule):
             self._event_bus,
         )
 
-    def _on_pointer_enter(self, _widget: Gtk.Widget, event: Gdk.EventCrossing) -> bool:
-        mode = getattr(event, "mode", None)
-        if mode in (Gdk.CrossingMode.GRAB, Gdk.CrossingMode.UNGRAB):
-            return False
+    def _toggle_calendar(self) -> None:
+        popup = self._ensure_calendar_popup()
+        if popup.get_visible():
+            self._outside_dismiss.uninstall()
+            self._close_calendar()
+            return
         self._open_calendar()
-        return False
+
+    def _on_clicked(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
+        if event.button != 1:
+            return False
+        self._toggle_calendar()
+        return True
 
     def _on_destroy(self, *_args) -> None:
         self._outside_dismiss.uninstall()

@@ -2327,8 +2327,12 @@ box.notification-toast-content {
 }
 
 .notification-toast-content:hover,
-.notification-toast-card:hover {
-    border-color: @shell_border_strong;
+.notification-toast-card:hover,
+.notification-toast-content.notification-toast-hover,
+.notification-toast-card.notification-toast-hover,
+box.notification-toast-content.notification-toast-hover {
+    background-color: @shell_hover_bg_soft;
+    border-color: @shell_accent;
 }
 
 .notification-toast-critical,
@@ -2890,6 +2894,68 @@ label.settings-row-hint {
 
 label.settings-row-unit {
     color: @shell_text_muted;
+    font-size: 12px;
+}
+
+button.settings-font-button {
+    background-color: @shell_hover_bg_faint;
+    border: 1px solid @shell_border_medium;
+    border-radius: 10px;
+    min-height: 32px;
+    min-width: 160px;
+    padding: 4px 10px;
+}
+
+button.settings-font-button:hover {
+    background-color: @shell_hover_bg_soft;
+    border-color: @shell_accent;
+}
+
+label.settings-font-button-label {
+    color: @shell_text_primary;
+    font-size: 12px;
+}
+
+popover.settings-font-popover {
+    background-color: @shell_surface_bg_panel;
+    border: 1px solid @shell_border_strong;
+    border-radius: 12px;
+    padding: 0;
+}
+
+box.settings-font-popover-body {
+    padding: 8px;
+}
+
+entry.settings-font-search {
+    min-height: 28px;
+}
+
+scrolledwindow.settings-font-scroll {
+    min-height: 160px;
+}
+
+listbox.settings-font-list {
+    background: transparent;
+    border: 0;
+}
+
+row.settings-font-row {
+    border-radius: 8px;
+    padding: 6px 8px;
+    min-height: 0;
+}
+
+row.settings-font-row:hover {
+    background-color: @shell_hover_bg_soft;
+}
+
+row.settings-font-row:selected {
+    background-color: @shell_accent_soft;
+}
+
+label.settings-font-preview {
+    color: @shell_text_primary;
     font-size: 12px;
 }
 

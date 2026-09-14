@@ -705,6 +705,140 @@ def test_notification_app_key_uses_stable_app_name() -> None:
     assert notification_app_key(app_name="", app_icon="discord.desktop") == "discord"
 
 
+def test_activate_notification_sender_focuses_existing_window() -> None:
+    from shell.models import (
+        ActiveWindow,
+        ApplicationsSnapshot,
+        DesktopApplication,
+        HyprlandSnapshot,
+        Window,
+        Workspace,
+    )
+    from shell.widgets.notificaciones.notification_activate import (
+        activate_notification_sender,
+        resolve_notification_app_id,
+    )
+
+    app = DesktopApplication(
+        id="discord",
+        name="Discord",
+        icon="discord",
+        wm_class="discord",
+    )
+    apps = ApplicationsSnapshot(applications=(app,))
+    snapshot = NotificationSnapshot(
+        id=1,
+        app_name="Discord",
+        app_icon="discord",
+        summary="Ping",
+        body="",
+        actions=(),
+        urgency=1,
+        timestamp=0.0,
+        expire_timeout_ms=0,
+        desktop_entry="discord",
+    )
+    assert resolve_notification_app_id(snapshot, apps) == "discord"
+
+    window = Window(
+        address="0xabc",
+        app_class="discord",
+        title="Discord",
+        workspace_id=3,
+        application_name="Discord",
+    )
+    hypr = HyprlandSnapshot(
+        workspaces=(
+            Workspace(
+                id=3,
+                name="3",
+                active=False,
+                windows=(window,),
+                icons=("discord",),
+                focused_window_address=None,
+            ),
+        ),
+        active_window=ActiveWindow(
+            address="0xother",
+            app_class="kitty",
+            application_name="kitty",
+            title="term",
+            icon="kitty",
+        ),
+    )
+    focused: list[str] = []
+    activated: list[str] = []
+    focused_existing = activate_notification_sender(
+        snapshot,
+        applications=apps,
+        hyprland=hypr,
+        focus_window=focused.append,
+        activate_app=activated.append,
+    )
+    assert focused_existing is True
+    assert focused == ["0xabc"]
+    assert activated == []
+
+
+def test_activate_notification_sender_activates_when_no_window() -> None:
+    from shell.models import (
+        ActiveWindow,
+        ApplicationsSnapshot,
+        DesktopApplication,
+        HyprlandSnapshot,
+        Workspace,
+    )
+    from shell.widgets.notificaciones.notification_activate import (
+        activate_notification_sender,
+    )
+
+    app = DesktopApplication(id="spotify", name="Spotify", icon="spotify")
+    apps = ApplicationsSnapshot(applications=(app,))
+    snapshot = NotificationSnapshot(
+        id=2,
+        app_name="Spotify",
+        app_icon="spotify",
+        summary="Track",
+        body="",
+        actions=(),
+        urgency=1,
+        timestamp=0.0,
+        expire_timeout_ms=0,
+        desktop_entry="spotify",
+    )
+    hypr = HyprlandSnapshot(
+        workspaces=(
+            Workspace(
+                id=1,
+                name="1",
+                active=True,
+                windows=(),
+                icons=(),
+                focused_window_address=None,
+            ),
+        ),
+        active_window=ActiveWindow(
+            address="",
+            app_class="",
+            application_name="",
+            title="",
+            icon="",
+        ),
+    )
+    focused: list[str] = []
+    activated: list[str] = []
+    focused_existing = activate_notification_sender(
+        snapshot,
+        applications=apps,
+        hyprland=hypr,
+        focus_window=focused.append,
+        activate_app=activated.append,
+    )
+    assert focused_existing is False
+    assert focused == []
+    assert activated == ["spotify"]
+
+
 def test_service_should_play_sound_respects_muted_apps() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         history_path = Path(tmpdir) / "notifications.json"
@@ -868,6 +1002,8 @@ if __name__ == "__main__":
     test_toast_click_flow_marks_read_without_actions()
     test_popup_open_clears_queue_without_touching_history()
     test_notification_app_key_uses_stable_app_name()
+    test_activate_notification_sender_focuses_existing_window()
+    test_activate_notification_sender_activates_when_no_window()
     test_service_should_play_sound_respects_muted_apps()
     test_sound_muted_apps_persist_after_restart()
     test_muted_app_still_records_notification_history()

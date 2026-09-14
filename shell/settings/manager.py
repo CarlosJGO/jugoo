@@ -38,6 +38,8 @@ class SettingsManager:
         path: Path | None = None,
         theme_setter: Callable[[str], bool] | None = None,
         theme_choices: Callable[[], tuple[tuple[str, str], ...]] | None = None,
+        font_setter: Callable[[str], bool] | None = None,
+        font_choices: Callable[[], tuple[tuple[str, str], ...]] | None = None,
     ) -> None:
         catalog = build_settings_catalog()
         # Inject default layout JSON so the key is never empty in a fresh store.
@@ -69,6 +71,8 @@ class SettingsManager:
         self._event_bus = event_bus
         self._theme_setter = theme_setter
         self._theme_choices = theme_choices
+        self._font_setter = font_setter
+        self._font_choices = font_choices
         self._hooks: dict[str, ApplyHook] = {}
         self._volume_osd_delay_setter: Callable[[int], None] | None = None
         self._workspace_hover_setter: Callable[[int], None] | None = None
@@ -123,6 +127,17 @@ class SettingsManager:
         definition = self._store.definition(key)
         if key == "tema.active" and self._theme_choices is not None:
             return self._theme_choices()
+        if key == "apariencia.ui_font" and self._font_choices is not None:
+            from ..ui.fonts import SYSTEM_UI_FONT_CHOICE, normalize_ui_font
+
+            choices = self._font_choices()
+            current = normalize_ui_font(self._store.get(key))
+            if current and current not in {item for item, _label in choices}:
+                return choices + ((current, f"{current} (no instalada)"),)
+            # Ensure the system sentinel is present even if a custom provider omits it.
+            if not any(item == SYSTEM_UI_FONT_CHOICE for item, _label in choices):
+                choices = ((SYSTEM_UI_FONT_CHOICE, "Sistema (predeterminada)"),) + choices
+            return choices
         return definition.choices
 
     def set_volume_osd_delay_hook(self, callback: Callable[[int], None]) -> None:
@@ -170,6 +185,7 @@ class SettingsManager:
 
     def _register_builtin_hooks(self) -> None:
         self._hooks["tema.active"] = self._apply_theme
+        self._hooks["apariencia.ui_font"] = self._apply_ui_font
         self._hooks["popups.volume_osd_hide_ms"] = self._apply_volume_osd
         self._hooks["comportamiento.workspace_hover_delay_ms"] = self._apply_workspace_hover
 
@@ -207,6 +223,16 @@ class SettingsManager:
         name = str(value)
         if not self._theme_setter(name):
             print(f"Jugoo settings: theme {name!r} rejected")
+
+    def _apply_ui_font(
+        self, _manager: SettingsManager, _definition: SettingDef, value: Any
+    ) -> None:
+        if self._font_setter is None:
+            return
+        from ..ui.fonts import normalize_ui_font
+
+        if not self._font_setter(normalize_ui_font(value)):
+            print(f"Jugoo settings: ui font {value!r} rejected")
 
     def _apply_volume_osd(
         self, _manager: SettingsManager, _definition: SettingDef, value: Any
