@@ -51,6 +51,26 @@ class SettingsStoreTests(unittest.TestCase):
         self.assertIn("settings", ids)
         self.assertEqual(parse_layout(""), DEFAULT_LAYOUT)
 
+    def test_parse_layout_drops_legacy_focus_hints(self) -> None:
+        raw = json.dumps(
+            [
+                {
+                    "id": "clock",
+                    "region": "right",
+                    "order": 5,
+                    "visible": True,
+                    "focus": {
+                        "preferred_regions": ["top", "bottom"],
+                        "priority": 9,
+                    },
+                }
+            ]
+        )
+        slots = parse_layout(raw)
+        self.assertEqual(len(slots), 1)
+        self.assertEqual(slots[0].id, "clock")
+        self.assertNotIn("focus", slots[0].to_dict())
+
 
 if __name__ == "__main__":
     unittest.main()

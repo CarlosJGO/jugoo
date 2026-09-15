@@ -9,7 +9,7 @@ gi.require_version("Gdk", "3.0")
 
 from gi.repository import Gdk, GLib, Gtk
 
-from ...config import NETWORK_COMPACT_ICON_SIZE, NETWORK_ICON_SIZE
+from ...config import NETWORK_ICON_SIZE
 from ...eventbus import EventBus
 from ...models import NetworkSnapshot
 from ...servicios.red.network import (
@@ -35,7 +35,6 @@ class EthernetWidget(ShellModule):
 
         self._event_bus = event_bus
         self._service = network_service
-        self._compact = False
         self._snapshot = network_service.snapshot
         self._pulse_source_id = 0
         self._pulse_opacity = 1.0
@@ -62,14 +61,6 @@ class EthernetWidget(ShellModule):
     def get_anchor_button(self) -> Gtk.Widget:
         return self._button
 
-    def apply_shell_compact(self, compact: bool) -> None:
-        if compact == self._compact:
-            return
-        self._compact = compact
-        self._icon.set_pixel_size(
-            NETWORK_COMPACT_ICON_SIZE if compact else NETWORK_ICON_SIZE
-        )
-
     def _on_destroy(self, *_args) -> None:
         self._stop_pulse()
         self._event_bus.unsubscribe(NETWORK_CHANGED, self._on_network_changed)
@@ -86,9 +77,7 @@ class EthernetWidget(ShellModule):
             return False
 
         self._icon.set_from_icon_name(icon_name, Gtk.IconSize.MENU)
-        self._icon.set_pixel_size(
-            NETWORK_COMPACT_ICON_SIZE if self._compact else NETWORK_ICON_SIZE
-        )
+        self._icon.set_pixel_size(NETWORK_ICON_SIZE)
         self._button.set_tooltip_text(build_ethernet_tooltip(snapshot))
         self._apply_visual_state(ethernet_visual_state(snapshot))
         self.show_all()

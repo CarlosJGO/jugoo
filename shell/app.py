@@ -26,7 +26,6 @@ from .controllers.control_center import ControlCenterController
 from .controllers.pickers import PickersController
 from .controllers.media import MediaController
 from .controllers.settings import SettingsController
-from .controllers.shell_compact import ShellCompactController
 from .controllers.volume_osd import VolumeOsdController
 from .controllers.workspace_interaction import WorkspaceInteractionController
 from .eventbus import EventBus
@@ -247,23 +246,6 @@ class ShellApplication(Gtk.Window):
         )
         # Load persisted overrides after live hooks exist so first apply is complete.
         self.settings_manager.start()
-
-        self.compact_controller = ShellCompactController(
-            self.event_bus,
-            self.hyprland,
-            shell_window=self,
-            hide_in_compact=(),
-            compact_adapters=(
-                self.clock_widget,
-                self.ethernet_widget,
-                self.tray_widget,
-                self.notifications_widget,
-                self.tasks_widget,
-                self.settings_widget,
-                self.power_widget,
-                self.pinned_apps_widget,
-            ),
-        )
 
         self.connect("destroy", self._on_destroy)
 

@@ -16,8 +16,6 @@ gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, DbusmenuGtk3
 
 from ...config import (
-    TRAY_COMPACT_ICON_SIZE,
-    TRAY_COMPACT_SLOT_SIZE,
     TRAY_ICON_SIZE,
     TRAY_ITEM_SPACING,
     TRAY_SLOT_SIZE,
@@ -62,7 +60,6 @@ class SystemTrayWidget(ShellModule):
 
         self._service = tray_service
         self._items: dict[str, _TrayItemView] = {}
-        self._compact = False
 
         self._container = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
@@ -75,25 +72,13 @@ class SystemTrayWidget(ShellModule):
         self._service.start()
         self.connect("destroy", self._on_destroy)
 
-    def apply_shell_compact(self, compact: bool) -> None:
-        if compact == self._compact:
-            return
-        self._compact = compact
-        for item in self._service.snapshots:
-            view = self._items.get(item.address)
-            if view is None:
-                continue
-            self._apply_slot_geometry(view)
-            self._update_item_view(view, item)
-        self._queue_relayout()
-
     @property
     def _slot_size(self) -> int:
-        return TRAY_COMPACT_SLOT_SIZE if self._compact else TRAY_SLOT_SIZE
+        return TRAY_SLOT_SIZE
 
     @property
     def _icon_size(self) -> int:
-        return TRAY_COMPACT_ICON_SIZE if self._compact else TRAY_ICON_SIZE
+        return TRAY_ICON_SIZE
 
     def _apply_slot_geometry(self, view: _TrayItemView) -> None:
         view.event_box.set_size_request(self._slot_size, self._slot_size)

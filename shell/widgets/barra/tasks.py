@@ -11,7 +11,6 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk
 
 from ...config import (
-    TASKS_COMPACT_ICON_SIZE,
     TASKS_ICON_SIZE,
     TASK_WATCHER_POLL_INTERVAL_SEC,
     TASK_WATCHER_QUIET_AFTER_INTERVALS,
@@ -53,7 +52,6 @@ class TasksWidget(ShellModule):
         self._event_bus = event_bus
         self._service = tasks_service
         self._shell_window = shell_window
-        self._compact = False
         self._presence = WatcherPresence()
         self._stale_quiet_id = 0
         self._stale_inactive_id = 0
@@ -96,14 +94,6 @@ class TasksWidget(ShellModule):
     @property
     def watcher_status(self) -> str:
         return self._presence.status
-
-    def apply_shell_compact(self, compact: bool) -> None:
-        if compact == self._compact:
-            return
-        self._compact = compact
-        self._icon.set_pixel_size(
-            TASKS_COMPACT_ICON_SIZE if compact else TASKS_ICON_SIZE
-        )
 
     def get_anchor_button(self) -> Gtk.Widget:
         return self._button

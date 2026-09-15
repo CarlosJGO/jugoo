@@ -12,7 +12,6 @@ gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GLib, Gtk
 
 from ...config import (
-    NOTIFICATION_COMPACT_ICON_SIZE,
     NOTIFICATION_ICON_SIZE,
     NOTIFICATIONS_SOUND_PATH,
 )
@@ -67,7 +66,6 @@ class NotificationsWidget(ShellModule):
         self._event_bus = event_bus
         self._service = notification_service
         self._shell_window = shell_window
-        self._compact = False
         self._shell_press_bound = False
 
         self._overlay = Gtk.Overlay()
@@ -116,14 +114,6 @@ class NotificationsWidget(ShellModule):
         self._event_bus.subscribe(SETTINGS_CHANGED, self._on_settings_changed)
         self.connect("destroy", self._on_destroy)
         GLib.idle_add(self._sync_badge)
-
-    def apply_shell_compact(self, compact: bool) -> None:
-        if compact == self._compact:
-            return
-        self._compact = compact
-        self._icon.set_pixel_size(
-            NOTIFICATION_COMPACT_ICON_SIZE if compact else NOTIFICATION_ICON_SIZE
-        )
 
     def _create_popup(self) -> NotificationPopup:
         return NotificationPopup(

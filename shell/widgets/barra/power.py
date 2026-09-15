@@ -11,7 +11,7 @@ gi.require_version("Gdk", "3.0")
 
 from gi.repository import Gdk, GLib, Gtk
 
-from ...config import POWER_COMPACT_ICON_SIZE, POWER_ICON_SIZE, POWER_MENU_OFFSET
+from ...config import POWER_ICON_SIZE, POWER_MENU_OFFSET
 from ...eventbus import EventBus
 from ...runtime_relaunch import relaunch_shell
 from ...servicios.energia.power import (
@@ -280,11 +280,6 @@ class PowerWidget(ShellModule):
         self._menu = PopupHandle(self._create_menu)
         self._confirm = PopupHandle(self._create_confirm)
         self._outside_click = PopupOutsideDismiss()
-
-    def apply_shell_compact(self, compact: bool) -> None:
-        self._icon.set_pixel_size(
-            POWER_COMPACT_ICON_SIZE if compact else POWER_ICON_SIZE
-        )
 
     def get_anchor_button(self) -> Gtk.Widget:
         return self._button

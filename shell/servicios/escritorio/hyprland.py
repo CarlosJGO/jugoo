@@ -319,7 +319,14 @@ class HyprlandService:
                 snapshot = self._refresh_full()
                 self._emit(WINDOW_CLOSED, snapshot)
                 self._emit_active_window(snapshot)
-            elif event in {"movewindow", "movewindowv2", "createworkspace", "destroyworkspace", "renameworkspace", "urgent"}:
+            elif event in {
+                "movewindow",
+                "movewindowv2",
+                "createworkspace",
+                "destroyworkspace",
+                "renameworkspace",
+                "urgent",
+            }:
                 snapshot = self._refresh_full()
                 self._emit(WORKSPACE_CHANGED, snapshot)
                 self._emit_active_window(snapshot)
@@ -543,3 +550,4 @@ class HyprlandService:
             raise HyprlandError("HYPRLAND_INSTANCE_SIGNATURE is not set")
         runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
         return runtime_dir / "hypr" / signature / ".socket2.sock"
+

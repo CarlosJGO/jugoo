@@ -500,9 +500,6 @@ class ClockWidget(ShellModule):
     def _format_time(value: datetime) -> str:
         return value.strftime(shell_config.CLOCK_TIME_FORMAT)
 
-    def apply_shell_compact(self, compact: bool) -> None:
-        return
-
     def _on_settings_changed(self, payload: object) -> None:
         if not isinstance(payload, dict):
             return

@@ -12,7 +12,6 @@ gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GLib, Gtk
 
 from ...config import (
-    PINNED_APP_COMPACT_ICON_SIZE,
     PINNED_APP_ICON_SIZE,
     PINNED_APP_SPACING,
     PINNED_APPS_VISIBLE_LIMIT,
@@ -248,7 +247,6 @@ class PinnedAppsWidget(ShellModule):
         super().__init__("pinned-apps-widget", spacing=PINNED_APP_SPACING)
         self._event_bus = event_bus
         self._shell_window = shell_window
-        self._compact = False
         self._snapshot = ApplicationsSnapshot()
         self._hyprland: HyprlandSnapshot | None = None
         self._active_address = ""
@@ -293,17 +291,8 @@ class PinnedAppsWidget(ShellModule):
         self.set_no_show_all(True)
         self.hide()
 
-    def apply_shell_compact(self, compact: bool) -> None:
-        if compact == self._compact:
-            return
-        self._compact = compact
-        size = PINNED_APP_COMPACT_ICON_SIZE if compact else PINNED_APP_ICON_SIZE
-        self._expand_icon.set_pixel_size(size)
-        for button in self._buttons.values():
-            button.set_icon_size(size)
-
     def _icon_size(self) -> int:
-        return PINNED_APP_COMPACT_ICON_SIZE if self._compact else PINNED_APP_ICON_SIZE
+        return PINNED_APP_ICON_SIZE
 
     def _on_applications_changed(self, snapshot: ApplicationsSnapshot) -> None:
         if not isinstance(snapshot, ApplicationsSnapshot):

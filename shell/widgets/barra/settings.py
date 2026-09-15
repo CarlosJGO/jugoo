@@ -8,13 +8,11 @@ gi.require_version("Gtk", "3.0")
 
 from gi.repository import Gtk
 
-from ...config import POWER_COMPACT_ICON_SIZE
 from ...ui import ShellModule
 from ..configuraciones.black_hole_icon import BlackHoleIcon
 
 # Match the visual weight of other bar action icons (bell/tasks/power block).
 _SETTINGS_ICON_SIZE = 22
-_SETTINGS_COMPACT_ICON_SIZE = max(POWER_COMPACT_ICON_SIZE + 4, 16)
 
 
 class SettingsWidget(ShellModule):
@@ -23,7 +21,6 @@ class SettingsWidget(ShellModule):
     def __init__(self, on_toggle) -> None:
         super().__init__("settings-widget", spacing=0)
         self._on_toggle = on_toggle
-        self._compact = False
 
         self._button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
         self._button.get_style_context().add_class("settings-button")
@@ -32,16 +29,6 @@ class SettingsWidget(ShellModule):
         self._button.add(self._icon)
         self._button.connect("clicked", self._on_clicked)
         self.pack_start(self._button, False, False, 0)
-
-    def set_compact(self, compact: bool) -> None:
-        if compact == self._compact:
-            return
-        self._compact = compact
-        size = _SETTINGS_COMPACT_ICON_SIZE if compact else _SETTINGS_ICON_SIZE
-        self._icon.set_pixel_size(size)
-
-    def apply_shell_compact(self, compact: bool) -> None:
-        self.set_compact(compact)
 
     def _on_clicked(self, *_args) -> None:
         self._on_toggle()
