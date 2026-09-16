@@ -112,7 +112,8 @@ def build_settings_catalog() -> tuple[SettingDef, ...]:
             label="Avatar de usuario",
             description=(
                 "Imagen circular del panel de usuario. "
-                "Si está vacío, Jugoo intenta ~/.face y ~/.face.icon."
+                "Al elegirla, Jugoo guarda una copia en assets/usuario. "
+                "Si aún no hay copia, se intenta ~/.face y ~/.face.icon."
             ),
             value_type="path",
             default="",
@@ -124,7 +125,10 @@ def build_settings_catalog() -> tuple[SettingDef, ...]:
             key="general.machine_image_path",
             category=CategoryId.GENERAL,
             label="Foto de la PC",
-            description="Imagen asociada a esta máquina en el panel de usuario.",
+            description=(
+                "Imagen de esta máquina en el panel de usuario. "
+                "Al elegirla, Jugoo guarda una copia en assets/pc."
+            ),
             value_type="path",
             default="",
             apply=APPLY_LIVE,

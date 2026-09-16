@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Callable
 
 import gi
 
@@ -15,12 +15,9 @@ from ...config import NOTIFICATION_POPUP_ICON_SIZE
 from ...models import NotificationSnapshot
 from ...ui.notification_icon import apply_notification_icon
 
-if TYPE_CHECKING:
-    from .notification_popup import _format_timestamp
-
 
 class NotificationMiniRow(Gtk.EventBox):
-    """Compact read-only row shown inside the group hover popover."""
+    """Row for a single notification inside the group window (full body text)."""
 
     def __init__(
         self,
@@ -30,7 +27,6 @@ class NotificationMiniRow(Gtk.EventBox):
     ) -> None:
         super().__init__()
         self._snapshot = snapshot
-        self.set_size_request(-1, 52)
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         row.get_style_context().add_class("notification-mini-row")
@@ -43,7 +39,7 @@ class NotificationMiniRow(Gtk.EventBox):
         )
         icon.get_style_context().add_class("notification-mini-row-icon")
         icon.set_halign(Gtk.Align.CENTER)
-        icon.set_valign(Gtk.Align.CENTER)
+        icon.set_valign(Gtk.Align.START)
         icon.set_size_request(NOTIFICATION_POPUP_ICON_SIZE, NOTIFICATION_POPUP_ICON_SIZE)
         row.pack_start(icon, False, False, 0)
 
@@ -54,8 +50,8 @@ class NotificationMiniRow(Gtk.EventBox):
             summary = Gtk.Label(label=snapshot.summary, xalign=0)
             summary.get_style_context().add_class("notification-mini-row-summary")
             summary.set_hexpand(True)
-            summary.set_single_line_mode(True)
-            summary.set_ellipsize(Pango.EllipsizeMode.END)
+            summary.set_line_wrap(True)
+            summary.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
             text_box.pack_start(summary, False, False, 0)
 
         if snapshot.body:
@@ -63,8 +59,7 @@ class NotificationMiniRow(Gtk.EventBox):
             body.get_style_context().add_class("notification-mini-row-body")
             body.set_hexpand(True)
             body.set_line_wrap(True)
-            body.set_lines(2)
-            body.set_ellipsize(Pango.EllipsizeMode.END)
+            body.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
             text_box.pack_start(body, False, False, 0)
 
         from .notification_popup import _format_timestamp
@@ -81,6 +76,7 @@ class NotificationMiniRow(Gtk.EventBox):
         dismiss_button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
         dismiss_button.set_tooltip_text("Eliminar")
         dismiss_button.get_style_context().add_class("notification-item-action")
+        dismiss_button.set_valign(Gtk.Align.START)
         dismiss_button.add(
             Gtk.Image.new_from_icon_name("window-close-symbolic", Gtk.IconSize.MENU)
         )

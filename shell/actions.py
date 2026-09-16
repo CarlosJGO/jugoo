@@ -52,6 +52,14 @@ ACTIONS: tuple[ShellAction, ...] = (
         "Play or pause music in Strawberry",
     ),
     ShellAction(
+        "musicVolumeUp",
+        "Raise Strawberry player volume",
+    ),
+    ShellAction(
+        "musicVolumeDown",
+        "Lower Strawberry player volume",
+    ),
+    ShellAction(
         "media",
         "Toggle media popup (Ventana / Reproductor)",
         legacy_flags=("--toggle-media",),
@@ -179,17 +187,19 @@ def dispatch_action(name: str, shell) -> str | None:
         return f"unknown action {name!r}; try: jugoo action list"
 
     handlers: dict[str, Callable[[], None]] = {
-        "launcher": shell.toggle_launcher,
-        "clipboard": shell.toggle_clipboard_picker,
-        "emoji": shell.toggle_emoji_picker,
-        "playStopMusic": shell.media_service.play_pause_player,
-        "media": shell.toggle_media_popup,
-        "settings": shell.toggle_settings,
-        "control-center": shell.toggle_control_center,
-        "notifications": shell.toggle_notifications,
-        "session": shell.toggle_session,
-        "tasks": shell.open_tasks_panel,
-        "reload-theme": shell.reload_theme,
+        "launcher": lambda: shell.toggle_launcher(),
+        "clipboard": lambda: shell.toggle_clipboard_picker(),
+        "emoji": lambda: shell.toggle_emoji_picker(),
+        "playStopMusic": lambda: shell.media_service.play_pause_player(),
+        "musicVolumeUp": lambda: shell.media_service.volume_up_player(),
+        "musicVolumeDown": lambda: shell.media_service.volume_down_player(),
+        "media": lambda: shell.toggle_media_popup(),
+        "settings": lambda: shell.toggle_settings(),
+        "control-center": lambda: shell.toggle_control_center(),
+        "notifications": lambda: shell.toggle_notifications(),
+        "session": lambda: shell.toggle_session(),
+        "tasks": lambda: shell.open_tasks_panel(),
+        "reload-theme": lambda: shell.reload_theme(),
     }
     handler = handlers.get(name)
     if handler is None:

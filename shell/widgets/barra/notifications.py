@@ -18,7 +18,12 @@ from ...config import (
 from ... import config as shell_config
 from ...eventbus import EventBus
 from ...identity import assets_dir
-from ...models import NOTIFICATION_KIND_ASSISTANT, NotificationSnapshot
+from ...models import (
+    NOTIFICATION_KIND_ASSISTANT,
+    ActiveWindow,
+    HyprlandSnapshot,
+    NotificationSnapshot,
+)
 from ...popup_handle import (
     PopupHandle,
     PopupOutsideDismiss,
@@ -26,13 +31,18 @@ from ...popup_handle import (
     pointer_inside_window,
 )
 from ...servicios.aplicaciones.applications import APP_ACTIVATE_REQUESTED
-from ...servicios.escritorio.hyprland import WINDOW_FOCUS_REQUESTED
+from ...servicios.escritorio.hyprland import (
+    ACTIVE_WINDOW_CHANGED,
+    FULLSCREEN_CHANGED,
+    WINDOW_FOCUS_REQUESTED,
+)
 from ...servicios.notificaciones.notification_sound import play_notification_sound
 from ...servicios.notificaciones.notifications import (
     NOTIFICATIONS_CHANGED,
     NOTIFICATION_RECEIVED,
     NOTIFICATIONS_PAUSED_CHANGED,
     NOTIFICATIONS_SOUND_MUTE_CHANGED,
+    NOTIFICATIONS_BLOCKED_CHANGED,
     NotificationService,
 )
 from ...settings.manager import SETTINGS_CHANGED
@@ -111,9 +121,13 @@ class NotificationsWidget(ShellModule):
         self._event_bus.subscribe(NOTIFICATION_RECEIVED, self._on_notification_received)
         self._event_bus.subscribe(NOTIFICATIONS_PAUSED_CHANGED, self._on_paused_changed)
         self._event_bus.subscribe(NOTIFICATIONS_SOUND_MUTE_CHANGED, self._on_sound_mute_changed)
+        self._event_bus.subscribe(NOTIFICATIONS_BLOCKED_CHANGED, self._on_blocked_changed)
         self._event_bus.subscribe(SETTINGS_CHANGED, self._on_settings_changed)
+        self._event_bus.subscribe(FULLSCREEN_CHANGED, self._on_fullscreen_changed)
+        self._event_bus.subscribe(ACTIVE_WINDOW_CHANGED, self._on_active_window_changed)
         self.connect("destroy", self._on_destroy)
         GLib.idle_add(self._sync_badge)
+        GLib.idle_add(self._sync_fullscreen_from_hyprland)
 
     def _create_popup(self) -> NotificationPopup:
         return NotificationPopup(
@@ -130,6 +144,7 @@ class NotificationsWidget(ShellModule):
             on_dismiss_group=self._dismiss_group,
             on_toggle_paused=self._toggle_paused,
             on_toggle_app_sound_mute=self._toggle_app_sound_mute,
+            on_toggle_app_blocked=self._toggle_app_blocked,
         )
 
     def _on_destroy(self, *_args) -> None:
@@ -141,7 +156,10 @@ class NotificationsWidget(ShellModule):
         self._event_bus.unsubscribe(NOTIFICATION_RECEIVED, self._on_notification_received)
         self._event_bus.unsubscribe(NOTIFICATIONS_PAUSED_CHANGED, self._on_paused_changed)
         self._event_bus.unsubscribe(NOTIFICATIONS_SOUND_MUTE_CHANGED, self._on_sound_mute_changed)
+        self._event_bus.unsubscribe(NOTIFICATIONS_BLOCKED_CHANGED, self._on_blocked_changed)
         self._event_bus.unsubscribe(SETTINGS_CHANGED, self._on_settings_changed)
+        self._event_bus.unsubscribe(FULLSCREEN_CHANGED, self._on_fullscreen_changed)
+        self._event_bus.unsubscribe(ACTIVE_WINDOW_CHANGED, self._on_active_window_changed)
         self.close_popup()
         self._close_group_window()
         self._toast_manager.destroy()
@@ -164,12 +182,39 @@ class NotificationsWidget(ShellModule):
     def _on_sound_mute_changed(self, _apps: object) -> None:
         GLib.idle_add(self._handle_sound_mute_changed)
 
+    def _on_blocked_changed(self, _apps: object) -> None:
+        GLib.idle_add(self._handle_blocked_changed)
+
     def _on_settings_changed(self, payload: object) -> None:
         if not isinstance(payload, dict):
             return
         if payload.get("key") not in _GROUPING_SETTING_KEYS:
             return
         GLib.idle_add(self._handle_grouping_settings_changed)
+
+    def _on_fullscreen_changed(self, snapshot: object) -> None:
+        if not isinstance(snapshot, HyprlandSnapshot):
+            return
+        GLib.idle_add(self._apply_fullscreen, bool(snapshot.active_window.fullscreen))
+
+    def _on_active_window_changed(self, active_window: object) -> None:
+        if not isinstance(active_window, ActiveWindow):
+            return
+        GLib.idle_add(self._apply_fullscreen, bool(active_window.fullscreen))
+
+    def _sync_fullscreen_from_hyprland(self) -> bool:
+        hyprland = getattr(self._shell_window, "hyprland", None)
+        if hyprland is None:
+            return False
+        snapshot = getattr(hyprland, "snapshot", None)
+        if not isinstance(snapshot, HyprlandSnapshot):
+            return False
+        self._apply_fullscreen(bool(snapshot.active_window.fullscreen))
+        return False
+
+    def _apply_fullscreen(self, active: bool) -> bool:
+        self._toast_manager.set_fullscreen(active)
+        return False
 
     def _handle_grouping_settings_changed(self) -> bool:
         popup = self._popup.maybe
@@ -182,6 +227,13 @@ class NotificationsWidget(ShellModule):
         popup = self._popup.maybe
         if popup is not None and popup.get_visible():
             popup.refresh()
+        return False
+
+    def _handle_blocked_changed(self) -> bool:
+        popup = self._popup.maybe
+        if popup is not None and popup.get_visible():
+            popup.refresh()
+        self._sync_badge()
         return False
 
     def _handle_notifications_changed(self) -> bool:
@@ -355,6 +407,12 @@ class NotificationsWidget(ShellModule):
 
     def _toggle_app_sound_mute(self, app_key: str) -> None:
         self._service.toggle_app_sound_muted(app_key)
+
+    def _toggle_app_blocked(self, app_key: str) -> None:
+        will_block = not self._service.is_app_blocked(app_key)
+        self._service.toggle_app_blocked(app_key)
+        if will_block:
+            self._toast_manager.clear_for_app(app_key)
 
     def _on_shell_button_press(self, _window: Gtk.Widget, event: Gdk.EventButton) -> bool:
         if event.button not in (1, 3):

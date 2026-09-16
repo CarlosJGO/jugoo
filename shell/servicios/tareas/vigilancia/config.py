@@ -24,7 +24,7 @@ class WatcherConfig:
     ai_binary: str = "llama-cli"
     ai_model_path: str = "~/IA/models/llama-3.1-8b-instruct-q6_k.gguf"
     ai_context_size: int = 1024
-    ai_max_tokens: int = 32
+    ai_max_tokens: int = 128
     ai_timeout_sec: int = 45
     briefing_enabled: bool = True
     briefing_max_tokens: int = 80

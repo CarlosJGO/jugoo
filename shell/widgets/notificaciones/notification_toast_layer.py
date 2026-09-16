@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import gi
 
 gi.require_version("Gtk", "3.0")
@@ -12,6 +14,9 @@ from gi.repository import Gtk, GtkLayerShell, GLib
 from ...config import (
     NOTIFICATION_POPUP_OFFSET,
     NOTIFICATIONS_TOAST_WIDTH,
+    NOTIFICATIONS_WHISPER_TOP_MARGIN,
+    NOTIFICATIONS_WHISPER_WIDTH,
+    POPUP_EDGE_MARGIN,
 )
 from ...ui.theme import active_theme
 from ...window_identity import (
@@ -22,10 +27,12 @@ from ...window_identity import (
     configure_toplevel,
     monitor_containing_point,
     popup_window_size,
+    query_hyprland_monitors,
     register_shell_popup,
     schedule_popup_position,
 )
-from .notification_toast import NotificationToast
+
+ToastPlacement = Literal["bell", "whisper"]
 
 _FADE_TICK_MS = 16
 
@@ -45,10 +52,12 @@ class NotificationToastLayer(Gtk.Window):
     def __init__(
         self,
         shell_window: Gtk.Window,
-        toasts: list[NotificationToast] | None = None,
+        toasts: list[Gtk.Widget] | None = None,
     ) -> None:
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
+        self._shell_window = shell_window
         self._anchor_button: Gtk.Widget | None = None
+        self._placement: ToastPlacement = "bell"
         self._fade_source_id = 0
 
         self.set_name("shell-notification-toast-layer")
@@ -76,7 +85,31 @@ class NotificationToastLayer(Gtk.Window):
         GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.TOP, True)
         GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.LEFT, True)
 
-    def add_toast(self, toast: NotificationToast) -> None:
+    @property
+    def placement(self) -> ToastPlacement:
+        return self._placement
+
+    def set_placement(self, placement: ToastPlacement) -> None:
+        """Switch between bell-anchored cards and top-center whisper chips."""
+        if placement == self._placement:
+            return
+        self._placement = placement
+        style = self._box.get_style_context()
+        if placement == "whisper":
+            self._box.set_spacing(4)
+            self._box.set_size_request(NOTIFICATIONS_WHISPER_WIDTH, -1)
+            self.set_default_size(NOTIFICATIONS_WHISPER_WIDTH, -1)
+            style.add_class("notification-toast-container-whisper")
+        else:
+            self._box.set_spacing(8)
+            self._box.set_size_request(NOTIFICATIONS_TOAST_WIDTH, -1)
+            self.set_default_size(NOTIFICATIONS_TOAST_WIDTH, -1)
+            style.remove_class("notification-toast-container-whisper")
+        self.resize(1, 1)
+        if self.get_visible():
+            self.refresh_position()
+
+    def add_toast(self, toast: Gtk.Widget) -> None:
         """Add a toast card to the dynamic vertical box."""
         if toast.get_parent() is None:
             self._box.pack_start(toast, False, False, 0)
@@ -84,7 +117,7 @@ class NotificationToastLayer(Gtk.Window):
         self.resize(1, 1)
         self.refresh_position()
 
-    def remove_toast(self, toast: NotificationToast) -> None:
+    def remove_toast(self, toast: Gtk.Widget) -> None:
         """Remove a toast card from the dynamic vertical box."""
         if toast.get_parent() == self._box:
             self._box.remove(toast)
@@ -99,11 +132,14 @@ class NotificationToastLayer(Gtk.Window):
 
     def show_for(self, anchor_button: Gtk.Widget) -> None:
         self._anchor_button = anchor_button
-        anchor_window = anchor_button.get_window()
-        if anchor_window is not None:
-            output = anchor_button.get_display().get_monitor_at_window(anchor_window)
-            if output is not None:
-                GtkLayerShell.set_monitor(self, output)
+        if self._placement == "whisper":
+            self._pin_to_shell_monitor()
+        else:
+            anchor_window = anchor_button.get_window()
+            if anchor_window is not None:
+                output = anchor_button.get_display().get_monitor_at_window(anchor_window)
+                if output is not None:
+                    GtkLayerShell.set_monitor(self, output)
         if self.get_visible():
             self._position_later()
             return
@@ -143,10 +179,23 @@ class NotificationToastLayer(Gtk.Window):
         if self.get_visible():
             self._position_later()
 
+    def _pin_to_shell_monitor(self) -> None:
+        window = self._shell_window.get_window()
+        display = self._shell_window.get_display()
+        if window is not None and display is not None:
+            output = display.get_monitor_at_window(window)
+            if output is not None:
+                GtkLayerShell.set_monitor(self, output)
+
     def _position_later(self) -> None:
         schedule_popup_position(self._position_after_show)
 
     def _position_after_show(self) -> bool:
+        if self._placement == "whisper":
+            return self._position_whisper()
+        return self._position_bell_anchored()
+
+    def _position_bell_anchored(self) -> bool:
         anchor = self._anchor_button
         if anchor is None:
             return False
@@ -170,6 +219,50 @@ class NotificationToastLayer(Gtk.Window):
         GtkLayerShell.set_margin(self, GtkLayerShell.Edge.LEFT, max(0, left))
         GtkLayerShell.set_margin(self, GtkLayerShell.Edge.TOP, max(0, top))
         return False
+
+    def _position_whisper(self) -> bool:
+        width, _height = popup_window_size(self)
+        if width <= 1:
+            width = NOTIFICATIONS_WHISPER_WIDTH
+
+        monitor = self._shell_monitor_rect()
+        edge = POPUP_EDGE_MARGIN
+        if monitor is None:
+            GtkLayerShell.set_margin(self, GtkLayerShell.Edge.LEFT, edge)
+            GtkLayerShell.set_margin(
+                self, GtkLayerShell.Edge.TOP, NOTIFICATIONS_WHISPER_TOP_MARGIN
+            )
+            return False
+
+        left = monitor.x + (monitor.width - width) // 2
+        left = max(
+            monitor.x + edge,
+            min(left, monitor.x + monitor.width - width - edge),
+        )
+        top = monitor.y + NOTIFICATIONS_WHISPER_TOP_MARGIN
+        GtkLayerShell.set_margin(self, GtkLayerShell.Edge.LEFT, max(0, left - monitor.x))
+        GtkLayerShell.set_margin(self, GtkLayerShell.Edge.TOP, max(edge, top - monitor.y))
+        return False
+
+    def _shell_monitor_rect(self):
+        window = self._shell_window.get_window()
+        if window is not None:
+            origin = window.get_origin()
+            if isinstance(origin, tuple) and len(origin) == 3:
+                _ok, ox, oy = origin
+            elif isinstance(origin, tuple) and len(origin) == 2:
+                ox, oy = origin
+            else:
+                ox = oy = 0
+            allocation = self._shell_window.get_allocation()
+            cx = int(ox) + max(allocation.width, 1) // 2
+            cy = int(oy) + max(allocation.height, 1) // 2
+            found = monitor_containing_point(cx, cy)
+            if found is not None:
+                return found
+
+        monitors = query_hyprland_monitors()
+        return monitors[0] if monitors else None
 
     def _fade_in_tick(self) -> bool:
         opacity = min(1.0, self.get_opacity() + _fade_step())

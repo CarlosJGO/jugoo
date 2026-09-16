@@ -58,6 +58,7 @@ NOTIFICATION_DISMISSED = "notification_dismissed"
 NOTIFICATION_ACTION_INVOKED = "notification_action_invoked"
 NOTIFICATIONS_PAUSED_CHANGED = "notifications_paused_changed"
 NOTIFICATIONS_SOUND_MUTE_CHANGED = "notifications_sound_mute_changed"
+NOTIFICATIONS_BLOCKED_CHANGED = "notifications_blocked_changed"
 
 CLOSE_REASON_EXPIRED = 1
 CLOSE_REASON_DISMISS = 2
@@ -322,6 +323,7 @@ class NotificationService:
         self._store = NotificationStore()
         self._paused = NOTIFICATIONS_PAUSED_DEFAULT
         self._sound_muted_apps: set[str] = set()
+        self._blocked_apps: set[str] = set()
         self._bus: Gio.DBusConnection | None = None
         self._primary_owner_id = 0
         self._fallback_owner_id = 0
@@ -340,6 +342,7 @@ class NotificationService:
             tuple[NotificationSnapshot, ...],
             bool,
             int,
+            frozenset[str],
             frozenset[str],
         ] | None = None
         self._persist_busy = False
@@ -381,6 +384,10 @@ class NotificationService:
     def sound_muted_apps(self) -> tuple[str, ...]:
         return tuple(sorted(self._sound_muted_apps))
 
+    @property
+    def blocked_apps(self) -> tuple[str, ...]:
+        return tuple(sorted(self._blocked_apps))
+
     def app_key_for(self, snapshot: NotificationSnapshot) -> str:
         return notification_app_key(
             app_name=snapshot.app_name,
@@ -395,6 +402,12 @@ class NotificationService:
 
     def should_play_sound(self, snapshot: NotificationSnapshot) -> bool:
         return not self.is_snapshot_sound_muted(snapshot)
+
+    def is_app_blocked(self, app_key: str) -> bool:
+        return str(app_key).casefold() in self._blocked_apps
+
+    def is_snapshot_blocked(self, snapshot: NotificationSnapshot) -> bool:
+        return self.is_app_blocked(self.app_key_for(snapshot))
 
     def set_app_sound_muted(self, app_key: str, *, muted: bool) -> bool:
         normalized = str(app_key).casefold().strip()
@@ -417,6 +430,38 @@ class NotificationService:
         self.set_app_sound_muted(app_key, muted=not muted)
         return not muted
 
+    def set_app_blocked(self, app_key: str, *, blocked: bool) -> bool:
+        normalized = str(app_key).casefold().strip()
+        if not normalized:
+            return False
+        if blocked:
+            if normalized in self._blocked_apps:
+                return False
+            self._blocked_apps.add(normalized)
+            matching_ids = [
+                snapshot.id
+                for snapshot in self._store.history_snapshots
+                if self.app_key_for(snapshot) == normalized
+            ]
+            if matching_ids:
+                self.dismiss_many(matching_ids)
+            else:
+                self._persist_state()
+            self._event_bus.emit(NOTIFICATIONS_BLOCKED_CHANGED, self.blocked_apps)
+            return True
+
+        if normalized not in self._blocked_apps:
+            return False
+        self._blocked_apps.remove(normalized)
+        self._persist_state()
+        self._event_bus.emit(NOTIFICATIONS_BLOCKED_CHANGED, self.blocked_apps)
+        return True
+
+    def toggle_app_blocked(self, app_key: str) -> bool:
+        blocked = self.is_app_blocked(app_key)
+        self.set_app_blocked(app_key, blocked=not blocked)
+        return not blocked
+
     def get(self, notification_id: int) -> NotificationSnapshot | None:
         return self._store.get(notification_id)
 
@@ -433,6 +478,10 @@ class NotificationService:
     ) -> NotificationSnapshot | None:
         """Post a shell-originated notification through the existing store."""
         if self._closing:
+            return None
+        app_key = notification_app_key(app_name=app_name, app_icon=app_icon)
+        if self.is_app_blocked(app_key):
+            self._log(f"Notify blocked app={app_name!r} summary={summary!r}")
             return None
         snapshot = self._store.add(
             app_name=app_name,
@@ -611,11 +660,14 @@ class NotificationService:
         return self._resolve_expire_timeout_ms(snapshot)
 
     def _load_persisted_state(self) -> None:
-        items, paused, next_id, sound_muted_apps = load_history(self._history_path)
+        items, paused, next_id, sound_muted_apps, blocked_apps = load_history(
+            self._history_path
+        )
         trimmed = trim_history(items, NOTIFICATIONS_MAX_HISTORY)
         self._store.restore(trimmed, next_id)
         self._paused = paused
         self._sound_muted_apps = set(sound_muted_apps)
+        self._blocked_apps = set(blocked_apps)
         if trimmed != items:
             self._persist_state()
         if trimmed:
@@ -631,6 +683,7 @@ class NotificationService:
             self._paused,
             self._store.next_id,
             frozenset(self._sound_muted_apps),
+            frozenset(self._blocked_apps),
         )
         if sync or self._closing:
             with self._persist_lock:
@@ -641,6 +694,7 @@ class NotificationService:
                 paused=pending[1],
                 next_id=pending[2],
                 sound_muted_apps=pending[3],
+                blocked_apps=pending[4],
             )
             return
 
@@ -684,6 +738,7 @@ class NotificationService:
                     paused=pending[1],
                     next_id=pending[2],
                     sound_muted_apps=pending[3],
+                    blocked_apps=pending[4],
                 )
             except OSError as error:
                 print(f"shell: notifications: persist failed: {error}")
@@ -919,15 +974,26 @@ class NotificationService:
         ) = parameters.unpack()
         hints = normalize_hints(dict(hints_variant) if hints_variant else {})
         replaces_id = int(replaces_id or 0)
+        app_name_text = str(app_name or "")
+        app_icon_text = str(app_icon or "")
+        app_key = notification_app_key(app_name=app_name_text, app_icon=app_icon_text)
+        if self.is_app_blocked(app_key):
+            self._log(
+                f"Notify blocked app={app_name_text!r} summary={str(summary or '')!r}"
+            )
+            reply_id = replaces_id if replaces_id else 0
+            invocation.return_value(GLib.Variant("(u)", (reply_id,)))
+            return
+
         provisional_id = replaces_id if replaces_id else self._store.next_id
         icon_name, image_path, normalized_app_icon, desktop_entry = resolve_icon_fields(
-            app_icon=str(app_icon or ""),
+            app_icon=app_icon_text,
             hints=hints,
             notification_id=provisional_id,
             cache_dir=self._icon_cache_dir,
         )
         snapshot = self._store.add(
-            app_name=str(app_name or ""),
+            app_name=app_name_text,
             replaces_id=replaces_id,
             app_icon=normalized_app_icon,
             icon_name=icon_name,

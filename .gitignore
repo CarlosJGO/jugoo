@@ -26,3 +26,7 @@ Thumbs.db
 
 #notificaciones
 notifications.json
+
+# Personal profile photos (copied into shell/assets on pick)
+shell/assets/usuario.*
+shell/assets/pc.*

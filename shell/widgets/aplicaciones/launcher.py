@@ -199,6 +199,7 @@ class AppLauncherWindow(PickerOverlay):
             self.right_slot.pack_start(nav, True, True, 0)
 
         self._list = Gtk.ListBox()
+        self._list.set_name("launcher-app-list")
         self._list.get_style_context().add_class("launcher-list")
         self._list.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self._list.set_activate_on_single_click(True)
@@ -216,8 +217,10 @@ class AppLauncherWindow(PickerOverlay):
         scrolled.connect("button-press-event", self._on_list_button_press)
 
         self._list_overlay = Gtk.Overlay()
+        self._list_overlay.get_style_context().add_class("launcher-list-overlay")
         self._list_overlay.add(scrolled)
         self._center_stack = Gtk.Stack()
+        self._center_stack.get_style_context().add_class("launcher-center-stack")
         self._center_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         self._center_stack.set_transition_duration(100)
         self._center_stack.add_named(self._list_overlay, "launcher")

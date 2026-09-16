@@ -57,10 +57,12 @@ class NotificationItemRow(Gtk.EventBox):
         *,
         app_key: str,
         app_sound_muted: bool,
+        app_blocked: bool,
         on_mark_read: Callable[[int], None],
         on_dismiss: Callable[[int], None],
         on_invoke_action: Callable[[int, str], None],
         on_toggle_app_sound_mute: Callable[[str], None],
+        on_toggle_app_blocked: Callable[[str], None],
     ) -> None:
         super().__init__()
 
@@ -144,6 +146,25 @@ class NotificationItemRow(Gtk.EventBox):
             lambda _btn, key=app_key: on_toggle_app_sound_mute(key),
         )
         actions.pack_start(sound_button, False, False, 0)
+
+        block_button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
+        block_button.get_style_context().add_class("notification-item-action")
+        block_icon = (
+            "notifications-disabled-symbolic"
+            if app_blocked
+            else "notifications-symbolic"
+        )
+        block_button.set_tooltip_text(
+            "Permitir notificaciones de la aplicación"
+            if app_blocked
+            else "Bloquear notificaciones de la aplicación"
+        )
+        block_button.add(Gtk.Image.new_from_icon_name(block_icon, Gtk.IconSize.MENU))
+        block_button.connect(
+            "clicked",
+            lambda _btn, key=app_key: on_toggle_app_blocked(key),
+        )
+        actions.pack_start(block_button, False, False, 0)
 
         if not snapshot.read:
             read_button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
@@ -237,6 +258,7 @@ class NotificationPopup(Gtk.Window):
         on_dismiss_group: Callable[[list[NotificationSnapshot]], None],
         on_toggle_paused: Callable[[], None],
         on_toggle_app_sound_mute: Callable[[str], None],
+        on_toggle_app_blocked: Callable[[str], None],
     ) -> None:
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
 
@@ -253,6 +275,7 @@ class NotificationPopup(Gtk.Window):
         self._on_dismiss_group = on_dismiss_group
         self._on_toggle_paused = on_toggle_paused
         self._on_toggle_app_sound_mute = on_toggle_app_sound_mute
+        self._on_toggle_app_blocked = on_toggle_app_blocked
         self._anchor_button: Gtk.Widget | None = None
         self._fixed_popup_top: int | None = None
         self._position: tuple[int, int, int] | None = None
@@ -290,6 +313,11 @@ class NotificationPopup(Gtk.Window):
         self._muted_apps_box.get_style_context().add_class("notification-popup-muted-apps")
         self._muted_apps_box.set_no_show_all(True)
         header.pack_start(self._muted_apps_box, False, False, 0)
+
+        self._blocked_apps_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._blocked_apps_box.get_style_context().add_class("notification-popup-muted-apps")
+        self._blocked_apps_box.set_no_show_all(True)
+        header.pack_start(self._blocked_apps_box, False, False, 0)
 
         actions_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         actions_row.set_halign(Gtk.Align.END)
@@ -347,6 +375,7 @@ class NotificationPopup(Gtk.Window):
     def refresh(self) -> None:
         self._sync_paused_ui()
         self._sync_muted_apps_ui()
+        self._sync_blocked_apps_ui()
         for child in self._list_box.get_children():
             self._list_box.remove(child)
 
@@ -375,11 +404,13 @@ class NotificationPopup(Gtk.Window):
                 group,
                 app_key=app_key,
                 app_sound_muted=self._service.is_app_sound_muted(app_key),
+                app_blocked=self._service.is_app_blocked(app_key),
                 on_mark_group_read=self._on_mark_group_read,
                 on_dismiss_group=self._on_dismiss_group,
                 on_invoke_action=self._on_invoke_action,
                 on_open_app=self._on_open_app,
                 on_toggle_app_sound_mute=self._on_toggle_app_sound_mute,
+                on_toggle_app_blocked=self._on_toggle_app_blocked,
                 on_open_group_window=self._on_open_group_window,
             )
             self._list_box.pack_start(row, False, False, 0)
@@ -439,6 +470,39 @@ class NotificationPopup(Gtk.Window):
         self._muted_apps_box.set_no_show_all(False)
         self._muted_apps_box.show_all()
 
+    def _sync_blocked_apps_ui(self) -> None:
+        for child in self._blocked_apps_box.get_children():
+            self._blocked_apps_box.remove(child)
+
+        blocked_apps = self._service.blocked_apps
+        if not blocked_apps:
+            self._blocked_apps_box.set_no_show_all(True)
+            self._blocked_apps_box.hide()
+            return
+
+        title = Gtk.Label(label="Apps bloqueadas", xalign=0)
+        title.get_style_context().add_class("notification-popup-muted-title")
+        self._blocked_apps_box.pack_start(title, False, False, 0)
+
+        for app_key in blocked_apps:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            label = Gtk.Label(label=app_key, xalign=0)
+            label.get_style_context().add_class("notification-popup-muted-app")
+            label.set_hexpand(True)
+            row.pack_start(label, True, True, 0)
+
+            unblock = Gtk.Button(label="Permitir", relief=Gtk.ReliefStyle.NONE)
+            unblock.get_style_context().add_class("notification-popup-clear")
+            unblock.connect(
+                "clicked",
+                lambda _btn, key=app_key: self._on_toggle_app_blocked(key),
+            )
+            row.pack_start(unblock, False, False, 0)
+            self._blocked_apps_box.pack_start(row, False, False, 0)
+
+        self._blocked_apps_box.set_no_show_all(False)
+        self._blocked_apps_box.show_all()
+
     def _position_after_show(self) -> bool:
         if self._anchor_button is not None:
             geometry = anchor_button_geometry(self._anchor_button)
@@ -476,11 +540,13 @@ class NotificationGroupRow(Gtk.EventBox):
         *,
         app_key: str,
         app_sound_muted: bool,
+        app_blocked: bool,
         on_mark_group_read: Callable[[list[NotificationSnapshot]], None],
         on_dismiss_group: Callable[[list[NotificationSnapshot]], None],
         on_invoke_action: Callable[[int, str], None],
         on_open_app: Callable[[NotificationSnapshot], None],
         on_toggle_app_sound_mute: Callable[[str], None],
+        on_toggle_app_blocked: Callable[[str], None],
         on_open_group_window: Callable[
             [list[NotificationSnapshot], Gtk.Widget, Gtk.Window], None
         ],
@@ -604,6 +670,25 @@ class NotificationGroupRow(Gtk.EventBox):
             lambda _btn, key=app_key: on_toggle_app_sound_mute(key),
         )
         actions.pack_start(sound_button, False, False, 0)
+
+        block_button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
+        block_button.get_style_context().add_class("notification-item-action")
+        block_icon = (
+            "notifications-disabled-symbolic"
+            if app_blocked
+            else "notifications-symbolic"
+        )
+        block_button.set_tooltip_text(
+            "Permitir notificaciones de la aplicación"
+            if app_blocked
+            else "Bloquear notificaciones de la aplicación"
+        )
+        block_button.add(Gtk.Image.new_from_icon_name(block_icon, Gtk.IconSize.MENU))
+        block_button.connect(
+            "clicked",
+            lambda _btn, key=app_key: on_toggle_app_blocked(key),
+        )
+        actions.pack_start(block_button, False, False, 0)
 
         if not self._representative.read:
             read_button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)

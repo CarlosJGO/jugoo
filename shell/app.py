@@ -22,6 +22,7 @@ from .config import (
     TOP_MARGIN,
 )
 from .controllers.applications import ApplicationsController
+from .controllers.bar_retract import BarRetractController
 from .controllers.control_center import ControlCenterController
 from .controllers.pickers import PickersController
 from .controllers.media import MediaController
@@ -222,6 +223,12 @@ class ShellApplication(Gtk.Window):
             self,
         )
 
+        self.bar_retract_controller = BarRetractController(
+            self.event_bus,
+            self.hyprland,
+            self,
+        )
+
         self.applications_controller = ApplicationsController(
             self.event_bus,
             self.applications,
@@ -254,6 +261,7 @@ class ShellApplication(Gtk.Window):
         self.hyprland.start()
         self.audio_service.start()
         self.volume_osd_controller.start()
+        self.bar_retract_controller.start()
         self.network_service.start()
         self.media_service.start()
         self.audio_visualizer.start()
@@ -346,6 +354,7 @@ class ShellApplication(Gtk.Window):
         self.settings_manager.close()
         self.event_bus.close()
         self.volume_osd_controller.close()
+        self.bar_retract_controller.close()
         self.audio_service.close()
         self.network_service.close()
         self.media_service.close()

@@ -535,6 +535,7 @@ def test_watcher_uses_fallback_when_ai_is_not_viable(tmp_path: Path) -> None:
         notifier=notifier,
         generator=generator,
         clock=_now,
+        state=ReminderState(),
     )
     watcher._context.observe(None)
     watcher._tick()
@@ -576,6 +577,7 @@ def test_watcher_uses_ai_when_resources_allow(tmp_path: Path) -> None:
         notifier=notifier,
         generator=generator,
         clock=_now,
+        state=ReminderState(),
     )
     watcher._tick()
     if watcher._ai_thread is not None:
@@ -607,6 +609,7 @@ def test_watcher_done_and_snooze_actions(tmp_path: Path) -> None:
         notifier=notifier,
         generator=FakeGenerator(),
         clock=datetime.now,
+        state=ReminderState(),
     )
     watcher._tick()
     assert notifier.bodies
@@ -638,6 +641,7 @@ def test_watcher_emits_heartbeat_on_successful_quiet_tick(tmp_path: Path) -> Non
         notifier=notifier,
         generator=FakeGenerator(),
         clock=_now,
+        state=ReminderState(),
     )
     watcher._event_bus.subscribe(TASK_WATCHER_HEARTBEAT, received.append)
     assert watcher._on_tick() is True
@@ -675,6 +679,7 @@ def test_watcher_emits_reminder_instead_of_heartbeat(tmp_path: Path) -> None:
         notifier=notifier,
         generator=FakeGenerator(),
         clock=_now,
+        state=ReminderState(),
     )
     watcher._event_bus.subscribe(TASK_WATCHER_HEARTBEAT, heartbeats.append)
     watcher._event_bus.subscribe(TASK_WATCHER_REMINDER, reminders.append)
@@ -717,6 +722,7 @@ def test_watcher_emits_ai_reminder_kind(tmp_path: Path) -> None:
         notifier=notifier,
         generator=FakeGenerator("Ey, acuérdate de pagar la luz 👀"),
         clock=_now,
+        state=ReminderState(),
     )
     watcher._event_bus.subscribe(TASK_WATCHER_AI_REMINDER, kinds.append)
     watcher._on_tick()
@@ -838,6 +844,149 @@ def test_watcher_lock_prevents_a_second_instance(tmp_path: Path) -> None:
     assert first is not None
     assert second is None
     release_watcher_lock(first)
+
+
+def test_reminder_state_persists_across_reload(tmp_path: Path) -> None:
+    path = tmp_path / "reminder_state.json"
+    state = ReminderState(path)
+    now = datetime.now().timestamp()
+    state.mark_notified(
+        "task-1",
+        "2026-09-05",
+        now,
+        message="Sigue pendiente el informe.",
+        cooldown_sec=3600,
+    )
+    reloaded = ReminderState(path)
+    memory = reloaded.memory("task-1")
+    assert memory.times_mentioned_today == 1
+    assert memory.last_message == "Sigue pendiente el informe."
+    assert memory.cooldown_until > now
+    assert memory.reminder_count == 1
+
+
+def test_reminder_prompt_includes_mention_memory() -> None:
+    from shell.servicios.tareas.vigilancia.ia import build_reminder_prompt
+    from shell.servicios.tareas.vigilancia.politica import ReminderDecision
+
+    snapshot = _snapshot(status="overdue", due_date="2026-09-01", period_key="2026-09-01")
+    state = ReminderState()
+    state.mark_notified(
+        snapshot.id,
+        snapshot.period_key,
+        datetime.now().timestamp(),
+        message="Ojo, el informe sigue pendiente.",
+    )
+    decision = ReminderDecision(
+        True,
+        "overdue",
+        snapshot,
+        (snapshot,),
+        -100.0,
+        0.0,
+    )
+    prompt = build_reminder_prompt(decision, _activity(), now=_now(), state=state)
+    assert "menciones_hoy: 1" in prompt
+    assert "último_mensaje: Ojo, el informe sigue pendiente." in prompt
+    assert snapshot.title in prompt
+
+
+def test_parse_reminder_messages_splits_and_caps() -> None:
+    from shell.servicios.tareas.vigilancia.ia import parse_reminder_messages
+
+    raw = (
+        "Ojo, el informe sigue pendiente.\n"
+        "---\n"
+        "Aja, la luz también espera.\n"
+        "---\n"
+        "Y el CRUD del parcial ya urge.\n"
+        "---\n"
+        "Cuarto mensaje que no debe pasar.\n"
+    )
+    messages = parse_reminder_messages(raw)
+    assert len(messages) == 3
+    assert "informe" in messages[0]
+    assert "luz" in messages[1]
+
+
+def test_watcher_emits_multiple_ai_messages(tmp_path: Path) -> None:
+    path = tmp_path / "tasks.json"
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"x" * 100)
+    save_tasks(
+        path,
+        (
+            TaskRecord(
+                id="bill",
+                title="Pagar luz",
+                due_date="2026-09-01",
+                created_at="2026-08-20T10:00:00",
+                period_cursor="2026-09-01",
+            ),
+            TaskRecord(
+                id="report",
+                title="Terminar informe",
+                due_date="2026-09-01",
+                created_at="2026-08-20T10:00:00",
+                period_cursor="2026-09-01",
+            ),
+        ),
+    )
+    notifier = RecordingNotifier()
+    generator = FakeGenerator(
+        "Ojo, pagar luz sigue pendiente.\n---\nAja, el informe tampoco se hizo solo."
+    )
+    state = ReminderState()
+    watcher = TaskWatcher(
+        config=_config(ai_model_path=str(model)),
+        provider=LocalTaskProvider(path),
+        resource_monitor=ResourceMonitor(
+            reader=lambda: ComputeResources(
+                vram_used_bytes=100,
+                vram_total_bytes=50_000_000,
+                gpu_usage_percent=8.0,
+                ram_available_bytes=9_000_000,
+                ram_total_bytes=16_000_000,
+            )
+        ),
+        notifier=notifier,
+        generator=generator,
+        clock=_now,
+        state=state,
+    )
+    watcher._on_tick()
+    if watcher._ai_thread is not None:
+        watcher._ai_thread.join(timeout=1)
+    # Without a GLib loop, stagger collapses to immediate multi-emit.
+    assert len(notifier.bodies) == 2
+    assert state.memory("bill").last_message or state.memory("report").last_message
+
+
+def test_choose_reminder_returns_multiple_candidates() -> None:
+    now = _now()
+    first = _snapshot(
+        ident="a",
+        title="Vencida A",
+        status="overdue",
+        due_date="2026-09-01",
+        period_key="2026-09-01",
+    )
+    second = _snapshot(
+        ident="b",
+        title="Vencida B",
+        status="overdue",
+        due_date="2026-09-02",
+        period_key="2026-09-02",
+    )
+    decision = choose_reminder(
+        (first, second),
+        ReminderState(),
+        _activity(),
+        now=now,
+        config=_config(),
+    )
+    assert decision.should_notify
+    assert len(decision.candidates) == 2
 
 
 if __name__ == "__main__":

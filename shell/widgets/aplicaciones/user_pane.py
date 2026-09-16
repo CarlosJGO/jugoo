@@ -23,6 +23,12 @@ from ...ui.image_files import (
     load_cover_pixbuf,
     rounded_pixbuf,
 )
+from ...ui.profile_images import (
+    AVATAR_SETTING_KEY,
+    MACHINE_SETTING_KEY,
+    install_profile_image,
+    resolve_profile_image,
+)
 
 _AVATAR_SIZE = 96
 _MACHINE_IMAGE_SIZE = 72
@@ -31,8 +37,8 @@ _AVATAR_FALLBACK_ICON = "avatar-default-symbolic"
 _MACHINE_FALLBACK_ICON = "computer-symbolic"
 _DEFAULT_AVATAR_CANDIDATES = (Path("~/.face"), Path("~/.face.icon"))
 _PROFILE_KEYS = (
-    "general.avatar_path",
-    "general.machine_image_path",
+    AVATAR_SETTING_KEY,
+    MACHINE_SETTING_KEY,
     "general.profile_fields_json",
 )
 
@@ -185,7 +191,12 @@ class UserPane(Gtk.Box):
         )
         if path is None:
             return
-        self._manager.set("general.avatar_path", str(path))
+        try:
+            installed = install_profile_image(path, AVATAR_SETTING_KEY)
+        except OSError as error:
+            print(f"shell: avatar install failed: {error}", flush=True)
+            return
+        self._manager.set(AVATAR_SETTING_KEY, str(installed))
 
     def _pick_machine_image(self) -> None:
         path = choose_image_path(
@@ -194,10 +205,19 @@ class UserPane(Gtk.Box):
         )
         if path is None:
             return
-        self._manager.set("general.machine_image_path", str(path))
+        try:
+            installed = install_profile_image(path, MACHINE_SETTING_KEY)
+        except OSError as error:
+            print(f"shell: machine image install failed: {error}", flush=True)
+            return
+        self._manager.set(MACHINE_SETTING_KEY, str(installed))
 
     def _resolve_avatar_path(self) -> Path | None:
-        configured = str(self._manager.get("general.avatar_path") or "").strip()
+        installed = resolve_profile_image(AVATAR_SETTING_KEY)
+        if installed is not None:
+            return installed
+        # Legacy: path stored before assets/usuario copies existed.
+        configured = str(self._manager.get(AVATAR_SETTING_KEY) or "").strip()
         if configured:
             configured_path = Path(configured).expanduser()
             if configured_path.is_file():
@@ -209,7 +229,10 @@ class UserPane(Gtk.Box):
         return None
 
     def _resolve_machine_image_path(self) -> Path | None:
-        configured = str(self._manager.get("general.machine_image_path") or "").strip()
+        installed = resolve_profile_image(MACHINE_SETTING_KEY)
+        if installed is not None:
+            return installed
+        configured = str(self._manager.get(MACHINE_SETTING_KEY) or "").strip()
         if not configured:
             return None
         path = Path(configured).expanduser()

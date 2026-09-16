@@ -59,6 +59,22 @@ class ActiveWindow:
 
 
 @dataclass(frozen=True)
+class FloatingClient:
+    """Mapped floating Hyprland client with compositor-global geometry."""
+
+    address: str
+    app_class: str
+    x: int
+    y: int
+    width: int
+    height: int
+    workspace_id: int
+    monitor: int
+    fullscreen: int = 0
+    pinned: bool = False
+
+
+@dataclass(frozen=True)
 class HyprlandSnapshot:
     """The service-owned state exposed to modules through high-level events."""
 

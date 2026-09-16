@@ -22,14 +22,18 @@ from ..proveedor import LocalTaskProvider, TaskProvider
 from .config import WatcherConfig
 from .contexto import ContextDetector, start_hyprland_context
 from .sesion import acquire_watcher_lock, release_watcher_lock
-from .estado import ReminderState
+from .estado import ReminderState, default_reminder_state
 from .eventos import (
     KIND_AI_REMINDER,
     KIND_HEARTBEAT,
     KIND_REMINDER,
     event_name_for_kind,
 )
-from .ia import LocalTextGenerator, generate_reminder_text
+from .ia import (
+    LocalTextGenerator,
+    attribute_messages_to_tasks,
+    generate_reminder_text,
+)
 from .notificaciones import (
     ACTION_DONE,
     ACTION_OPEN,
@@ -37,8 +41,10 @@ from .notificaciones import (
     ACTION_SNOOZE_SHORT,
     DBusReminderNotifier,
 )
-from .politica import ActivitySnapshot, ReminderDecision, choose_reminder
+from .politica import ActivitySnapshot, ReminderDecision, choose_reminder, cooldown_seconds
 from .recursos import AiViability, ResourceMonitor
+
+_REMINDER_STAGGER_SEC = 2
 
 
 class TaskWatcher:
@@ -51,6 +57,7 @@ class TaskWatcher:
         notifier: DBusReminderNotifier | None = None,
         generator: LocalTextGenerator | None = None,
         clock: Callable[[], datetime] | None = None,
+        state: ReminderState | None = None,
     ) -> None:
         self._config = config if config is not None else WatcherConfig.from_shell()
         self._provider = provider if provider is not None else LocalTaskProvider()
@@ -58,7 +65,8 @@ class TaskWatcher:
         self._notifier = notifier if notifier is not None else DBusReminderNotifier()
         self._generator = generator if generator is not None else LocalTextGenerator(self._config)
         self._clock = clock or datetime.now
-        self._state = ReminderState()
+        # Tests inject an in-memory ReminderState(); production persists to disk.
+        self._state = state if state is not None else default_reminder_state()
         self._event_bus = EventBus(dispatch_on_main=False)
         self._hyprland = None
         self._context = ContextDetector(self._event_bus)
@@ -186,32 +194,103 @@ class TaskWatcher:
     ) -> None:
         try:
             now = self._clock()
-            body, source = generate_reminder_text(
+            bodies, source = generate_reminder_text(
                 decision,
                 activity,
                 now=now,
                 config=self._config,
                 generator=self._generator,
                 use_ai=use_ai,
+                state=self._state,
             )
             if use_ai and GLib is not None and self._loop is not None:
-                GLib.idle_add(self._finish_reminder, decision, body, source)
+                GLib.idle_add(self._finish_reminder, decision, bodies, source)
                 return
-            self._finish_reminder(decision, body, source)
+            self._finish_reminder(decision, bodies, source)
         except Exception as error:
             print(f"Task watcher: reminder failed: {error}")
             with self._ai_lock:
                 self._ai_inflight = False
 
-    def _finish_reminder(self, decision: ReminderDecision, body: str, source: str = "fallback") -> bool:
+    def _finish_reminder(
+        self,
+        decision: ReminderDecision,
+        bodies: list[str],
+        source: str = "fallback",
+    ) -> bool:
         try:
-            self._emit_reminder(decision, body, source)
+            self._emit_reminder_batch(decision, bodies, source)
         finally:
             with self._ai_lock:
                 self._ai_inflight = False
         return False
 
-    def _emit_reminder(self, decision: ReminderDecision, body: str, source: str = "fallback") -> None:
+    def _emit_reminder_batch(
+        self,
+        decision: ReminderDecision,
+        bodies: list[str],
+        source: str = "fallback",
+    ) -> None:
+        snapshot = decision.snapshot
+        if snapshot is None:
+            return
+        cleaned = [str(body).strip() for body in bodies if str(body).strip()]
+        if not cleaned:
+            return
+        cleaned = cleaned[:3]
+        now = self._clock()
+        now_ts = now.timestamp()
+        attributed = attribute_messages_to_tasks(cleaned, decision)
+        candidates = {
+            item.id: item
+            for item in (decision.candidates or ())
+        }
+        if snapshot.id not in candidates:
+            candidates[snapshot.id] = snapshot
+        # Always cooldown the primary pick so the next tick does not re-fire it.
+        mentioned_ids = set(attributed) | {snapshot.id}
+        for task_id in mentioned_ids:
+            target = candidates.get(task_id)
+            if target is None:
+                continue
+            message = attributed.get(task_id, cleaned[0] if task_id == snapshot.id else "")
+            next_count = self._state.memory(task_id).reminder_count + 1
+            wait = cooldown_seconds(next_count, self._config.reminder_cooldown_sec)
+            self._state.mark_notified(
+                task_id,
+                target.period_key,
+                now_ts,
+                message=message,
+                cooldown_sec=wait,
+            )
+        for index, body in enumerate(cleaned):
+            delay = index * _REMINDER_STAGGER_SEC
+            if delay <= 0 or GLib is None or self._loop is None:
+                self._emit_one_notification(decision, body, source)
+                continue
+            GLib.timeout_add_seconds(
+                delay,
+                self._emit_one_notification_idle,
+                decision,
+                body,
+                source,
+            )
+
+    def _emit_one_notification_idle(
+        self,
+        decision: ReminderDecision,
+        body: str,
+        source: str,
+    ) -> bool:
+        self._emit_one_notification(decision, body, source)
+        return False
+
+    def _emit_one_notification(
+        self,
+        decision: ReminderDecision,
+        body: str,
+        source: str = "fallback",
+    ) -> None:
         snapshot = decision.snapshot
         if snapshot is None:
             return
@@ -223,7 +302,6 @@ class TaskWatcher:
             expire_timeout_ms=self._config.notification_timeout_ms,
             task_id=snapshot.id,
         )
-        self._state.mark_notified(snapshot.id, snapshot.period_key, self._clock().timestamp())
         if notification_id is not None:
             self._notification_tasks[notification_id] = snapshot.id
         self._announce(KIND_AI_REMINDER if source == "ai" else KIND_REMINDER)

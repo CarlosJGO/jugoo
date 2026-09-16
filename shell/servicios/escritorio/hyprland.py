@@ -16,6 +16,7 @@ from ...eventbus import EventBus
 from ...icons import DESKTOP_ICON, application_for_window, icon_for_window
 from ...models import (
     ActiveWindow,
+    FloatingClient,
     HyprlandSnapshot,
     Window,
     WorkspaceRecord,
@@ -36,6 +37,7 @@ WINDOW_CLOSED = "window_closed"
 WINDOW_FOCUS_REQUESTED = "window_focus_requested"
 FULLSCREEN_CHANGED = "fullscreen_changed"
 MONITOR_CHANGED = "monitor_changed"
+FLOATING_LAYOUT_CHANGED = "floating_layout_changed"
 
 
 class HyprlandError(RuntimeError):
@@ -50,6 +52,8 @@ class HyprlandService:
         self._persistent_workspaces = persistent_workspaces
         self._snapshot: HyprlandSnapshot | None = None
         self._snapshot_lock = threading.RLock()
+        self._floating_clients: tuple[FloatingClient, ...] = ()
+        self._active_workspace_id = 0
         self._stop_event = threading.Event()
         self._socket: socket.socket | None = None
         self._socket_lock = threading.Lock()
@@ -76,6 +80,35 @@ class HyprlandService:
     def snapshot(self) -> HyprlandSnapshot | None:
         with self._snapshot_lock:
             return self._snapshot
+
+    @property
+    def floating_clients(self) -> tuple[FloatingClient, ...]:
+        with self._snapshot_lock:
+            return self._floating_clients
+
+    @property
+    def active_workspace_id(self) -> int:
+        with self._snapshot_lock:
+            return self._active_workspace_id
+
+    def poll_floating_layout(self) -> tuple[FloatingClient, ...]:
+        """Refresh floating client geometry (used while dragging near the bar)."""
+        try:
+            clients_raw = self._json("clients")
+            active_workspace_id = int(self._json("activeworkspace").get("id", 0))
+        except HyprlandError:
+            return self.floating_clients
+        clients = self._floating_clients_from_raw(clients_raw)
+        with self._snapshot_lock:
+            changed = (
+                clients != self._floating_clients
+                or active_workspace_id != self._active_workspace_id
+            )
+            self._floating_clients = clients
+            self._active_workspace_id = active_workspace_id
+        if changed:
+            self._event_bus.emit(FLOATING_LAYOUT_CHANGED, clients)
+        return clients
 
     def start(self) -> None:
         if self._thread is not None:
@@ -326,6 +359,7 @@ class HyprlandService:
                 "destroyworkspace",
                 "renameworkspace",
                 "urgent",
+                "changefloatingmode",
             }:
                 snapshot = self._refresh_full()
                 self._emit(WORKSPACE_CHANGED, snapshot)
@@ -342,10 +376,12 @@ class HyprlandService:
             print(f"shell: {error}")
 
     def _refresh_full(self) -> HyprlandSnapshot:
+        clients_raw = self._json("clients")
         records = tuple(self._workspace(item) for item in self._json("workspaces"))
-        windows = tuple(self._window(item) for item in self._json("clients"))
+        windows = tuple(self._window(item) for item in clients_raw)
         active_workspace_id = int(self._json("activeworkspace").get("id", 0))
         active_window = self._active_window(self._json("activewindow"))
+        floating = self._floating_clients_from_raw(clients_raw)
         snapshot = HyprlandSnapshot(
             workspaces=compose_workspaces(
                 records,
@@ -357,7 +393,17 @@ class HyprlandService:
             ),
             active_window=active_window,
         )
-        return self._replace_snapshot(snapshot)
+        with self._snapshot_lock:
+            floating_changed = (
+                floating != self._floating_clients
+                or active_workspace_id != self._active_workspace_id
+            )
+            self._floating_clients = floating
+            self._active_workspace_id = active_workspace_id
+        replaced = self._replace_snapshot(snapshot)
+        if floating_changed:
+            self._event_bus.emit(FLOATING_LAYOUT_CHANGED, floating)
+        return replaced
 
     def _refresh_active_workspace(self) -> HyprlandSnapshot:
         active_workspace_id = int(self._json("activeworkspace").get("id", 0))
@@ -436,6 +482,60 @@ class HyprlandService:
             icon=application.icon,
             pid=window.pid,
         )
+
+    @staticmethod
+    def _floating_clients_from_raw(items: Any) -> tuple[FloatingClient, ...]:
+        if not isinstance(items, list):
+            return ()
+        clients: list[FloatingClient] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if not bool(item.get("floating")):
+                continue
+            if not bool(item.get("mapped", True)):
+                continue
+            if bool(item.get("hidden", False)):
+                continue
+            # Skip clients Hyprland marks as not currently visible on a monitor.
+            if item.get("visible") is False:
+                continue
+            at = item.get("at") or [0, 0]
+            size = item.get("size") or [0, 0]
+            try:
+                x, y = int(at[0]), int(at[1])
+                width, height = int(size[0]), int(size[1])
+            except (TypeError, ValueError, IndexError):
+                continue
+            workspace = item.get("workspace") or {}
+            try:
+                workspace_id = int(workspace.get("id", 0))
+            except (TypeError, ValueError):
+                workspace_id = 0
+            try:
+                monitor = int(item.get("monitor", 0) or 0)
+            except (TypeError, ValueError):
+                monitor = 0
+            try:
+                fullscreen = int(item.get("fullscreen", 0) or 0)
+            except (TypeError, ValueError):
+                fullscreen = 0
+            clients.append(
+                FloatingClient(
+                    address=str(item.get("address", "")),
+                    app_class=str(item.get("class", "")),
+                    x=x,
+                    y=y,
+                    width=width,
+                    height=height,
+                    workspace_id=workspace_id,
+                    monitor=monitor,
+                    fullscreen=fullscreen,
+                    pinned=bool(item.get("pinned", False)),
+                )
+            )
+        clients.sort(key=lambda client: client.address)
+        return tuple(clients)
 
     @staticmethod
     def _active_window(item: dict[str, Any]) -> ActiveWindow:

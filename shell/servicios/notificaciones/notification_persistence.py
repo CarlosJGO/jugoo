@@ -19,25 +19,33 @@ def shell_notifications_history_path(base_dir: Path, relative_name: str) -> Path
     return base_dir / relative_name
 
 
-def load_history(path: Path) -> tuple[tuple[NotificationSnapshot, ...], bool, int, frozenset[str]]:
-    """Return snapshots, paused flag, next notification id, and sound-muted app keys."""
+def load_history(
+    path: Path,
+) -> tuple[tuple[NotificationSnapshot, ...], bool, int, frozenset[str], frozenset[str]]:
+    """Return snapshots, paused, next id, sound-muted apps, and blocked apps."""
     if not path.is_file():
-        return (), False, 1, frozenset()
+        return (), False, 1, frozenset(), frozenset()
 
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         print(f"shell: notifications: could not load history {path}: {error}")
-        return (), False, 1, frozenset()
+        return (), False, 1, frozenset(), frozenset()
 
     if not isinstance(payload, dict):
-        return (), False, 1, frozenset()
+        return (), False, 1, frozenset(), frozenset()
 
     paused = bool(payload.get("paused", False))
     next_id = int(payload.get("next_id", 1) or 1)
     raw_items = payload.get("items", [])
     if not isinstance(raw_items, list):
-        return (), paused, next_id, _load_sound_muted_apps(payload)
+        return (
+            (),
+            paused,
+            next_id,
+            _load_app_key_set(payload, "sound_muted_apps"),
+            _load_app_key_set(payload, "blocked_apps"),
+        )
 
     items: list[NotificationSnapshot] = []
     for entry in raw_items:
@@ -48,11 +56,17 @@ def load_history(path: Path) -> tuple[tuple[NotificationSnapshot, ...], bool, in
     items.sort(key=lambda item: item.id)
     if items:
         next_id = max(next_id, max(item.id for item in items) + 1)
-    return tuple(items), paused, next_id, _load_sound_muted_apps(payload)
+    return (
+        tuple(items),
+        paused,
+        next_id,
+        _load_app_key_set(payload, "sound_muted_apps"),
+        _load_app_key_set(payload, "blocked_apps"),
+    )
 
 
-def _load_sound_muted_apps(payload: dict[str, Any]) -> frozenset[str]:
-    raw = payload.get("sound_muted_apps", ())
+def _load_app_key_set(payload: dict[str, Any], field: str) -> frozenset[str]:
+    raw = payload.get(field, ())
     if not isinstance(raw, list):
         return frozenset()
     return frozenset(str(entry).casefold() for entry in raw if str(entry).strip())
@@ -65,6 +79,7 @@ def save_history(
     paused: bool,
     next_id: int,
     sound_muted_apps: frozenset[str] | set[str] = frozenset(),
+    blocked_apps: frozenset[str] | set[str] = frozenset(),
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -72,6 +87,7 @@ def save_history(
         "paused": paused,
         "next_id": next_id,
         "sound_muted_apps": sorted(str(app_key) for app_key in sound_muted_apps),
+        "blocked_apps": sorted(str(app_key) for app_key in blocked_apps),
         "items": [_snapshot_to_dict(item) for item in items],
     }
     tmp_path = path.with_suffix(path.suffix + ".tmp")

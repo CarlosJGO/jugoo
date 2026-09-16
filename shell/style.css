@@ -381,6 +381,38 @@ button.active-window-transport-btn:active {
     opacity: 0.85;
 }
 
+label.active-window-volume {
+    color: @shell_accent;
+    font-size: 10px;
+    font-weight: 700;
+    font-feature-settings: "tnum";
+    min-width: 0;
+    margin: 0 8px 4px 0;
+    padding: 0;
+    opacity: 0.78;
+    text-shadow: 0 1px 3px @shell_shadow_strong;
+    transition: opacity 120ms ease, color 120ms ease;
+}
+
+label.active-window-volume.active-window-volume-flash {
+    color: @shell_text_primary;
+    opacity: 1.0;
+    font-size: 11px;
+    text-shadow:
+        0 0 8px alpha(@shell_accent, 0.55),
+        0 1px 3px @shell_shadow_strong;
+}
+
+label.active-window-volume.active-window-volume-empty {
+    color: @shell_danger;
+    opacity: 0.95;
+}
+
+label.active-window-volume.active-window-volume-full {
+    color: @shell_accent;
+    opacity: 0.95;
+}
+
 drawingarea.active-window-spectrum {
     background-color: transparent;
 }
@@ -501,9 +533,12 @@ box.launcher-card {
     box-shadow: 0 12px 32px @shell_shadow;
 }
 
-/* One shared shell; three sibling columns (not floating cards). */
+/* One shared shell; three sibling columns (not floating cards).
+   Keep translucent so StarfieldBackground (estrellas) shows through —
+   opaque panel bg would beat box.shell-starfield-glass by specificity. */
 box.launcher-card.control-center-shell {
-    background-color: @shell_surface_bg_panel;
+    background-image: none;
+    background-color: alpha(@shell_surface_bg_elevated, 0.55);
     border: 1px solid @shell_border_strong;
     border-radius: 16px;
     padding: 0;
@@ -628,8 +663,9 @@ filechooserwidget.shell-file-chooser-widget {
 
 
 box.launcher-search-row {
-    background-color: @shell_hover_bg_faint;
-    border: 1px solid @shell_border_subtle;
+    background-image: none;
+    background-color: alpha(@shell_surface_bg_elevated, 0.32);
+    border: 1px solid alpha(@shell_border_subtle, 0.45);
     border-radius: 12px;
     padding: 6px 10px;
 }
@@ -649,28 +685,71 @@ label.launcher-empty {
     padding: 18px 8px;
 }
 
-listbox.launcher-list {
-    background-color: transparent;
-    background: transparent;
-}
-
+/* GTK3 CSS nodes: GtkListBox → `list`, GtkListBoxRow → `row`.
+   adw-gtk3 paints `list { background-color: @view_bg_color }` (#1d1d20).
+   Wrong node name (`listbox`) left that opaque fill in place. */
+#launcher-app-list,
+overlay.launcher-list-overlay,
+stack.launcher-center-stack,
+stack.launcher-center-stack > *,
 scrolledwindow.launcher-scroll,
-scrolledwindow.launcher-scroll > viewport {
+scrolledwindow.launcher-scroll.background,
+scrolledwindow.launcher-scroll > viewport,
+scrolledwindow.launcher-scroll > viewport.frame,
+list.launcher-list,
+list.launcher-list.background,
+list.launcher-list.view,
+listbox.launcher-list {
+    background: none;
     background-color: transparent;
-    background: transparent;
+    background-image: none;
+    border: none;
+    box-shadow: none;
 }
 
+#launcher-app-list > row,
+#launcher-app-list > row.activatable,
+list.launcher-list > row,
+list.launcher-list > row.activatable,
 row.launcher-row {
+    background: none;
     background-color: transparent;
-    background: transparent;
+    background-image: none;
+    border: none;
+    box-shadow: none;
+    outline-style: none;
+    outline-width: 0;
+    -gtk-outline-radius: 0;
     border-radius: 10px;
     margin: 2px 0;
     padding: 0;
+    transition: none;
 }
 
+#launcher-app-list > row:hover,
+#launcher-app-list > row:selected,
+#launcher-app-list > row:selected:hover,
+#launcher-app-list > row:focus,
+#launcher-app-list > row:selected:focus,
+list.launcher-list > row:hover,
+list.launcher-list > row:selected,
+list.launcher-list > row:selected:hover,
+list.launcher-list > row:focus,
+list.launcher-list > row:selected:focus,
 row.launcher-row:hover,
-row.launcher-row:selected {
-    background-color: @shell_hover_bg_faint;
+row.launcher-row:selected,
+row.launcher-row:selected:hover,
+row.launcher-row:focus {
+    background: none;
+    background-image: none;
+    /* Soft glass highlight — no solid card fill. */
+    background-color: alpha(@shell_text_primary, 0.08);
+    border: 1px solid alpha(@shell_border_subtle, 0.35);
+    box-shadow: none;
+    outline-style: none;
+    outline-width: 0;
+    -gtk-outline-radius: 0;
+    transition: none;
 }
 
 row.launcher-row-favorite {
@@ -678,6 +757,8 @@ row.launcher-row-favorite {
 }
 
 box.launcher-row-content {
+    background-color: transparent;
+    background-image: none;
     padding: 8px 10px;
 }
 
@@ -2300,6 +2381,77 @@ button.notification-toast-action-btn:hover {
 }
 
 /* ==========================================================================
+   Fullscreen whisper — compact HUD chip (not a scaled toast)
+   ========================================================================== */
+
+eventbox#shell-notification-whisper {
+    background-color: transparent;
+}
+
+box.notification-toast-container-whisper {
+    background-color: transparent;
+    padding: 0;
+}
+
+box.notification-whisper-chip {
+    background-color: alpha(@shell_surface_bg_panel, 0.78);
+    border: 1px solid alpha(@shell_border_strong, 0.55);
+    border-radius: 18px;
+    padding: 4px 12px 4px 6px;
+    min-width: 0;
+    min-height: 28px;
+    box-shadow:
+        inset 0 1px 0 alpha(@shell_glass_highlight, 0.35),
+        0 3px 12px alpha(@shell_shadow, 0.40);
+}
+
+box.notification-whisper-chip.notification-whisper-hover {
+    background-color: alpha(@shell_hover_bg_soft, 0.88);
+    border-color: alpha(@shell_accent, 0.70);
+}
+
+box.notification-whisper-chip.notification-whisper-critical {
+    border-color: alpha(@shell_danger, 0.65);
+    box-shadow:
+        inset 0 1px 0 alpha(@shell_danger, 0.25),
+        0 3px 12px alpha(@shell_danger, 0.22);
+}
+
+box.notification-whisper-chip.notification-whisper-low {
+    opacity: 0.82;
+    border-color: alpha(@shell_border_subtle, 0.70);
+}
+
+box.notification-whisper-accent {
+    background-color: alpha(@shell_accent, 0.85);
+    border-radius: 2px;
+    min-width: 3px;
+    min-height: 14px;
+}
+
+box.notification-whisper-critical box.notification-whisper-accent {
+    background-color: alpha(@shell_danger, 0.90);
+}
+
+box.notification-whisper-low box.notification-whisper-accent {
+    background-color: alpha(@shell_text_muted, 0.55);
+}
+
+image.notification-whisper-icon {
+    min-width: 14px;
+    min-height: 14px;
+    opacity: 0.95;
+}
+
+label.notification-whisper-summary {
+    color: @shell_text_primary;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    opacity: 0.92;
+}
+
+/* ==========================================================================
    Assistant card (Jugoo speaking — distinct from toast notifications)
    ========================================================================== */
 
@@ -2886,7 +3038,9 @@ drawingarea.settings-black-hole {
 
 /* Translucent glass so StarfieldBackground shows through popup/layer cards. */
 box.shell-starfield-glass,
-flowbox.shell-starfield-glass {
+flowbox.shell-starfield-glass,
+box.launcher-card.shell-starfield-glass,
+box.launcher-card.control-center-shell.shell-starfield-glass {
     background-image: none;
     background-color: alpha(@shell_surface_bg_elevated, 0.55);
 }

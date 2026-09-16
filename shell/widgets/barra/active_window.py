@@ -13,11 +13,12 @@ from gi.repository import Gdk, GLib, Gtk, Pango
 from ...config import (
     ACTIVE_WINDOW_CONTENT_SPACING,
     ACTIVE_WINDOW_ICON_SIZE,
+    ACTIVE_WINDOW_VOLUME_FLASH_MS,
     ACTIVE_WINDOW_WIDTH,
     AUDIO_VISUALIZER_BAR_COUNT,
 )
 from ...eventbus import EventBus
-from ...models import ActiveWindow, AudioVisualizerSnapshot, MediaSnapshot
+from ...models import ActiveWindow, AudioVisualizerSnapshot, MediaPlayerSnapshot, MediaSnapshot
 from ...servicios.audio.audio_visualizer import AUDIO_VISUALIZER_CHANGED
 from ...servicios.multimedia.media import (
     MEDIA_CHANGED,
@@ -59,6 +60,8 @@ class ActiveWindowWidget(Gtk.EventBox):
         )
         self._media_snapshot = media_service.snapshot
         self._visualizer_snapshot = AudioVisualizerSnapshot.hidden(AUDIO_VISUALIZER_BAR_COUNT)
+        self._last_volume_percent: int | None = None
+        self._volume_flash_source_id = 0
 
         self.get_style_context().add_class("active-window-widget")
         self.set_size_request(ACTIVE_WINDOW_WIDTH, -1)
@@ -137,7 +140,22 @@ class ActiveWindowWidget(Gtk.EventBox):
 
         body.pack_start(self._open_zone, True, True, 0)
         body.pack_end(self._transport, False, False, 0)
-        self.add(body)
+
+        # Volume % sits in the cava panel's bottom-right corner (not in the transport row).
+        self._volume_label = Gtk.Label(label="")
+        self._volume_label.get_style_context().add_class("active-window-volume")
+        self._volume_label.set_halign(Gtk.Align.END)
+        self._volume_label.set_valign(Gtk.Align.END)
+        self._volume_label.set_single_line_mode(True)
+        self._volume_label.set_ellipsize(Pango.EllipsizeMode.NONE)
+        self._volume_label.set_tooltip_text("Volumen de Strawberry")
+        self._volume_label.set_no_show_all(True)
+        self._volume_label.hide()
+
+        overlay = Gtk.Overlay()
+        overlay.add(body)
+        overlay.add_overlay(self._volume_label)
+        self.add(overlay)
 
         self._event_bus.subscribe(ACTIVE_WINDOW_CHANGED, self._on_active_window_changed)
         self._event_bus.subscribe(MEDIA_CHANGED, self._on_media_changed)
@@ -222,6 +240,65 @@ class ActiveWindowWidget(Gtk.EventBox):
             "Pausar (Reproductor)" if playing else "Reproducir (Reproductor)"
         )
 
+    def _strawberry_player(self) -> MediaPlayerSnapshot | None:
+        for player in self._media_snapshot.players:
+            if is_strawberry_player(player):
+                return player
+        return None
+
+    def _sync_volume_badge(self) -> None:
+        """Show Strawberry volume % beside transport; punch it when the value moves."""
+        player = self._strawberry_player()
+        style = self._volume_label.get_style_context()
+        if player is None:
+            self._last_volume_percent = None
+            self._cancel_volume_flash()
+            style.remove_class("active-window-volume-flash")
+            style.remove_class("active-window-volume-empty")
+            style.remove_class("active-window-volume-full")
+            self._volume_label.set_no_show_all(True)
+            self._volume_label.hide()
+            return
+
+        percent = int(round(max(0.0, min(1.0, float(player.volume))) * 100))
+        self._volume_label.set_text(f"{percent}%")
+        self._volume_label.set_tooltip_text(f"Volumen de Strawberry: {percent}%")
+        self._volume_label.set_no_show_all(False)
+        self._volume_label.show()
+
+        style.remove_class("active-window-volume-empty")
+        style.remove_class("active-window-volume-full")
+        if percent <= 0:
+            style.add_class("active-window-volume-empty")
+        elif percent >= 100:
+            style.add_class("active-window-volume-full")
+
+        previous = self._last_volume_percent
+        self._last_volume_percent = percent
+        if previous is not None and previous != percent:
+            self._punch_volume_badge()
+
+    def _punch_volume_badge(self) -> None:
+        style = self._volume_label.get_style_context()
+        style.add_class("active-window-volume-flash")
+        self._cancel_volume_flash()
+        self._volume_flash_source_id = GLib.timeout_add(
+            ACTIVE_WINDOW_VOLUME_FLASH_MS,
+            self._clear_volume_flash,
+        )
+
+    def _clear_volume_flash(self) -> bool:
+        self._volume_flash_source_id = 0
+        self._volume_label.get_style_context().remove_class(
+            "active-window-volume-flash"
+        )
+        return False
+
+    def _cancel_volume_flash(self) -> None:
+        if self._volume_flash_source_id:
+            GLib.source_remove(self._volume_flash_source_id)
+            self._volume_flash_source_id = 0
+
     def _render(self) -> bool:
         style = self.get_style_context()
         # Transport is always shown inside this bar object.
@@ -247,10 +324,14 @@ class ActiveWindowWidget(Gtk.EventBox):
                 self._render_window(self._active_window)
 
         self._sync_play_glyph()
+        self._sync_volume_badge()
         self.queue_draw()
         self.show_all()
         self._transport.show_all()
         self._status.hide()
+        # Volume badge may stay hidden when Strawberry is offline.
+        if self._strawberry_player() is None:
+            self._volume_label.hide()
         return False
 
     def _on_draw_spectrum(self, widget: Gtk.EventBox, cr) -> bool:
@@ -314,6 +395,7 @@ class ActiveWindowWidget(Gtk.EventBox):
         return False
 
     def _on_destroy(self, *_args) -> None:
+        self._cancel_volume_flash()
         self._event_bus.unsubscribe(ACTIVE_WINDOW_CHANGED, self._on_active_window_changed)
         self._event_bus.unsubscribe(MEDIA_CHANGED, self._on_media_changed)
         self._event_bus.unsubscribe(MEDIA_DISPLAY_MODE_CHANGED, self._on_display_mode_changed)

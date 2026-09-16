@@ -31,6 +31,7 @@ from ...config import (
     MEDIA_STRAWBERRY_PLAY_POLL_MAX_MS,
     MEDIA_STRAWBERRY_PLAY_POLL_MS,
     MEDIA_STRAWBERRY_PLAY_RETRY_MS,
+    MEDIA_STRAWBERRY_VOLUME_STEP,
     MEDIA_TRACK_CHANGE_REFRESH_MS,
     MEDIA_VOLUME_FLUSH_MS,
 )
@@ -489,6 +490,41 @@ class MediaService:
             return False
 
         GLib.idle_add(run_transport)
+
+    def volume_up_player(self) -> None:
+        """Bar/global bind: raise Strawberry MPRIS volume."""
+        self.adjust_strawberry_volume(MEDIA_STRAWBERRY_VOLUME_STEP)
+
+    def volume_down_player(self) -> None:
+        """Bar/global bind: lower Strawberry MPRIS volume."""
+        self.adjust_strawberry_volume(-MEDIA_STRAWBERRY_VOLUME_STEP)
+
+    def adjust_strawberry_volume(self, delta: float) -> None:
+        """Change Strawberry player volume (not the system sink)."""
+        if self.ensure_strawberry_running(want_play=False):
+            return
+        self._mark_strawberry_managed()
+        bus_name = find_strawberry_bus_name(self._snapshot.players)
+        if bus_name is None:
+            return
+        player = next(
+            (item for item in self._snapshot.players if item.bus_name == bus_name),
+            None,
+        )
+        if player is None or not player.can_control:
+            return
+        clamped = max(0.0, min(1.0, float(player.volume) + float(delta)))
+        if abs(clamped - float(player.volume)) < 0.0005:
+            return
+        self._pending_volume = (bus_name, clamped)
+        self._apply_volume_optimistically(bus_name, clamped)
+        self._event_bus.emit(MEDIA_CHANGED, self._snapshot)
+        if self._volume_flush_source_id or self._volume_inflight:
+            return
+        self._volume_flush_source_id = GLib.timeout_add(
+            MEDIA_VOLUME_FLUSH_MS,
+            self._flush_pending_volume,
+        )
 
     def _call_strawberry_player(self, method: str) -> None:
         bus_name = find_strawberry_bus_name(self._snapshot.players)

@@ -43,6 +43,11 @@ def briefing_path() -> Path:
     return xdg_data_dir() / "briefing.json"
 
 
+def reminder_state_path() -> Path:
+    """Per-task reminder cooldown / mention bookkeeping (not user task data)."""
+    return xdg_data_dir() / "reminder_state.json"
+
+
 def clipboard_history_path() -> Path:
     return xdg_data_dir() / CLIPBOARD_HISTORY_PATH
 

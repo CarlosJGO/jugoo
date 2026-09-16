@@ -28,6 +28,7 @@ from shell.servicios.notificaciones.notification_persistence import (
 )
 from shell.servicios.notificaciones.notifications import (
     CLOSE_REASON_CLOSE_CALL,
+    NOTIFICATION_RECEIVED,
     NotificationService,
     NotificationStore,
     parse_notification_actions,
@@ -146,10 +147,11 @@ def test_persistence_preserves_unread_after_expire() -> None:
         save_history(path, items=store.snapshots, paused=False, next_id=store.next_id)
 
         restored_store = NotificationStore()
-        loaded, paused, next_id, muted = load_history(path)
+        loaded, paused, next_id, muted, blocked = load_history(path)
         restored_store.restore(loaded, next_id)
         assert paused is False
         assert muted == frozenset()
+        assert blocked == frozenset()
         assert restored_store.unread_count() == 1
         assert restored_store.history_snapshots[0].expired is True
         assert restored_store.history_snapshots[0].read is False
@@ -327,11 +329,19 @@ def test_persistence_roundtrip() -> None:
             dismissed=False,
             expired=False,
         )
-        save_history(path, items=(snapshot,), paused=True, next_id=8, sound_muted_apps=frozenset({"strawberry"}))
-        loaded, paused, next_id, muted = load_history(path)
+        save_history(
+            path,
+            items=(snapshot,),
+            paused=True,
+            next_id=8,
+            sound_muted_apps=frozenset({"strawberry"}),
+            blocked_apps=frozenset({"discord"}),
+        )
+        loaded, paused, next_id, muted, blocked = load_history(path)
         assert paused is True
         assert next_id == 8
         assert muted == frozenset({"strawberry"})
+        assert blocked == frozenset({"discord"})
         assert len(loaded) == 1
         assert loaded[0].summary == "Saved"
         assert loaded[0].icon_name == "icon"
@@ -343,6 +353,7 @@ def test_persistence_roundtrip() -> None:
         payload = json.loads(path.read_text(encoding="utf-8"))
         assert payload["version"] == 1
         assert payload["sound_muted_apps"] == ["strawberry"]
+        assert payload["blocked_apps"] == ["discord"]
 
 
 def test_post_assistant_sets_kind_and_skips_normal_fields() -> None:
@@ -412,7 +423,7 @@ def test_assistant_kind_persists_in_history() -> None:
             source=ASSISTANT_SOURCE_AI,
         )
         save_history(path, items=(snapshot,), paused=False, next_id=10)
-        loaded, _, _, _ = load_history(path)
+        loaded, _, _, _, _ = load_history(path)
         assert loaded[0].kind == NOTIFICATION_KIND_ASSISTANT
         assert loaded[0].meta == "1 pendiente"
         assert loaded[0].source == ASSISTANT_SOURCE_AI
@@ -427,6 +438,8 @@ def test_assistant_geometry_differs_from_toast() -> None:
         ASSISTANT_CARD_WIDTH,
         NOTIFICATIONS_TOAST_MAX_HEIGHT,
         NOTIFICATIONS_TOAST_WIDTH,
+        NOTIFICATIONS_WHISPER_MAX_HEIGHT,
+        NOTIFICATIONS_WHISPER_WIDTH,
     )
 
     assert ASSISTANT_CARD_WIDTH == 360
@@ -434,6 +447,10 @@ def test_assistant_geometry_differs_from_toast() -> None:
     assert ASSISTANT_CARD_WIDTH != NOTIFICATIONS_TOAST_WIDTH
     assert ASSISTANT_CARD_MAX_HEIGHT != NOTIFICATIONS_TOAST_MAX_HEIGHT
     assert ASSISTANT_CARD_MAX_HEIGHT > NOTIFICATIONS_TOAST_MAX_HEIGHT
+    assert NOTIFICATIONS_WHISPER_WIDTH < NOTIFICATIONS_TOAST_WIDTH
+    assert NOTIFICATIONS_WHISPER_MAX_HEIGHT < NOTIFICATIONS_TOAST_MAX_HEIGHT
+    assert NOTIFICATIONS_WHISPER_WIDTH != ASSISTANT_CARD_WIDTH
+    assert NOTIFICATIONS_WHISPER_MAX_HEIGHT != ASSISTANT_CARD_MAX_HEIGHT
 
 
 def _pump_context(max_iterations: int = 200) -> None:
@@ -577,9 +594,10 @@ def test_dbus_notify_dismiss_and_action() -> None:
         assert service.history_snapshots[0].expired is True
         assert service.history_snapshots[0].dismissed is False
 
-        restored, paused, _next_id, muted = load_history(history_path)
+        restored, paused, _next_id, muted, blocked = load_history(history_path)
         assert paused is False
         assert muted == frozenset()
+        assert blocked == frozenset()
         assert any(item.id == notification_id and item.expired for item in restored)
 
         service.dismiss(notification_id)
@@ -647,7 +665,7 @@ def test_service_timeout_expires_but_keeps_history() -> None:
         assert len(service.history_snapshots) == 1
         assert service.history_snapshots[0].expired is True
         assert service.unread_count == 1
-        restored, _, _, _ = load_history(history_path)
+        restored, _, _, _, _ = load_history(history_path)
         assert any(item.id == notification_id and item.expired for item in restored)
         assert any(item.id == notification_id and not item.read for item in restored)
 
@@ -916,6 +934,60 @@ def test_muted_app_still_records_notification_history() -> None:
         service.close()
 
 
+def test_blocked_app_does_not_record_or_emit() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        history_path = Path(tmpdir) / "notifications.json"
+        bus = EventBus()
+        received: list[NotificationSnapshot] = []
+        bus.subscribe(NOTIFICATION_RECEIVED, received.append)
+        service = NotificationService(bus, history_path=history_path)
+        service.start()
+
+        service._store.add(
+            app_name="Discord",
+            replaces_id=0,
+            app_icon="",
+            icon_name="",
+            image_path="",
+            summary="Old",
+            body="",
+            actions=(),
+            urgency=1,
+            expire_timeout_ms=-1,
+        )
+        assert len(service.history_snapshots) == 1
+
+        service.set_app_blocked("Discord", blocked=True)
+        assert service.is_app_blocked("discord") is True
+        assert service.blocked_apps == ("discord",)
+        assert len(service.history_snapshots) == 0
+
+        posted = service.post(
+            app_name="Discord",
+            summary="Hello",
+            body="World",
+        )
+        assert posted is None
+        assert received == []
+        assert len(service.history_snapshots) == 0
+        service.close()
+
+
+def test_blocked_apps_persist_after_restart() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        history_path = Path(tmpdir) / "notifications.json"
+        service = NotificationService(EventBus(), history_path=history_path)
+        service.start()
+        service.set_app_blocked("Discord", blocked=True)
+        service.close()
+
+        reloaded = NotificationService(EventBus(), history_path=history_path)
+        reloaded.start()
+        assert reloaded.is_app_blocked("discord") is True
+        assert reloaded.blocked_apps == ("discord",)
+        reloaded.close()
+
+
 def test_toast_manager_lifecycle() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         history_path = Path(tmpdir) / "notifications.json"
@@ -974,6 +1046,65 @@ def test_toast_manager_lifecycle() -> None:
         service.close()
 
 
+def test_toast_manager_fullscreen_uses_whisper() -> None:
+    from shell.widgets.notificaciones.notification_toast import NotificationToast
+    from shell.widgets.notificaciones.notification_whisper import NotificationWhisper
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        history_path = Path(tmpdir) / "notifications.json"
+        service = NotificationService(EventBus(), history_path=history_path)
+        service.start()
+
+        shell_win = Gtk.Window()
+        btn = Gtk.Button()
+        mgr = NotificationToastManager(
+            shell_win,
+            service,
+            btn,
+            on_invoke_action=lambda *_args: None,
+            on_mark_read=lambda *_args: None,
+            max_visible=3,
+        )
+
+        normal = _add(service._store, summary="Normal toast")
+        mgr.enqueue(normal)
+        assert mgr.visible_count == 1
+        assert isinstance(mgr._toasts[normal.id], NotificationToast)
+        assert mgr._layer.placement == "bell"
+
+        mgr.set_fullscreen(True)
+        assert mgr.fullscreen is True
+        assert mgr.visible_count == 0
+        assert mgr._layer.placement == "whisper"
+
+        a = _add(service._store, summary="Whisper A")
+        b = _add(service._store, summary="Whisper B")
+        mgr.enqueue(a)
+        mgr.enqueue(b)
+        assert mgr.visible_count == 1
+        assert mgr.pending_count == 1
+        assert isinstance(mgr._toasts[a.id], NotificationWhisper)
+        assert a.id in mgr._toasts
+        assert b.id not in mgr._toasts
+
+        mgr._toasts[a.id].dismiss("timeout")
+        assert a.id not in mgr._toasts
+        assert b.id in mgr._toasts
+        assert isinstance(mgr._toasts[b.id], NotificationWhisper)
+
+        mgr.set_fullscreen(False)
+        assert mgr.fullscreen is False
+        assert mgr.visible_count == 0
+        assert mgr._layer.placement == "bell"
+
+        restored = _add(service._store, summary="Back to card")
+        mgr.enqueue(restored)
+        assert isinstance(mgr._toasts[restored.id], NotificationToast)
+
+        mgr.destroy()
+        service.close()
+
+
 if __name__ == "__main__":
     test_parse_notification_actions()
     test_urgency_from_hints_defaults_to_normal()
@@ -1007,5 +1138,8 @@ if __name__ == "__main__":
     test_service_should_play_sound_respects_muted_apps()
     test_sound_muted_apps_persist_after_restart()
     test_muted_app_still_records_notification_history()
+    test_blocked_app_does_not_record_or_emit()
+    test_blocked_apps_persist_after_restart()
     test_toast_manager_lifecycle()
+    test_toast_manager_fullscreen_uses_whisper()
     print("notification safe tests OK")

@@ -41,6 +41,7 @@ def test_schema_contains_avatar_path_setting() -> None:
     setting = definitions["general.avatar_path"]
     assert setting.category is CategoryId.GENERAL
     assert setting.value_type == "path"
+    assert "assets/usuario" in setting.description
 
 
 def test_schema_contains_machine_and_profile_settings() -> None:
@@ -48,6 +49,7 @@ def test_schema_contains_machine_and_profile_settings() -> None:
     machine = definitions["general.machine_image_path"]
     fields = definitions["general.profile_fields_json"]
     assert machine.value_type == "path"
+    assert "assets/pc" in machine.description
     assert fields.value_type == "string"
     assert fields.default == "[]"
 

@@ -63,6 +63,14 @@ class ToastPresentationQueue:
                 return slot
         return None
 
+    def drop(self, notification_id: int) -> None:
+        """Remove an id from pending and/or visible tracking."""
+        if notification_id in self._pending:
+            self._pending = deque(
+                item for item in self._pending if item != notification_id
+            )
+        self.release(notification_id)
+
     def clear(self) -> tuple[int, ...]:
         cancelled_visible = self.visible_ids
         self._pending.clear()

@@ -107,15 +107,31 @@ class SettingRow(Gtk.Box):
             spin.connect("value-changed", self._on_spin)
             return spin
 
+        if definition.value_type != "path":
+            entry = Gtk.Entry()
+            entry.set_text(str(value))
+            entry.set_width_chars(22)
+            entry.get_style_context().add_class("settings-entry")
+            entry.connect("activate", self._on_entry)
+            entry.connect("focus-out-event", self._on_entry_focus_out)
+            return entry
+
+        from ...ui.profile_images import is_profile_image_setting
+
+        # Profile photos live at fixed assets/usuario|pc paths — no path entry.
+        if is_profile_image_setting(definition.key):
+            browse = Gtk.Button(label="Elegir…")
+            browse.set_tooltip_text("Seleccionar imagen")
+            browse.get_style_context().add_class("settings-browse-button")
+            browse.connect("clicked", lambda _btn: self._on_browse_profile_image())
+            return browse
+
         entry = Gtk.Entry()
         entry.set_text(str(value))
         entry.set_width_chars(22)
         entry.get_style_context().add_class("settings-entry")
         entry.connect("activate", self._on_entry)
         entry.connect("focus-out-event", self._on_entry_focus_out)
-
-        if definition.value_type != "path":
-            return entry
 
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         box.pack_start(entry, True, True, 0)
@@ -127,17 +143,30 @@ class SettingRow(Gtk.Box):
         self._path_entry = entry
         return box
 
-    def _on_browse(self, entry: Gtk.Entry) -> None:
-        from ...ui.image_files import choose_file_path, choose_image_path
+    def _on_browse_profile_image(self) -> None:
+        from ...ui.image_files import choose_image_path
+        from ...ui.profile_images import install_profile_image
 
         parent = self.get_toplevel()
         window = parent if isinstance(parent, Gtk.Window) else None
-        key = self._definition.key
         title = f"Seleccionar — {self._definition.label}"
-        if key in {"general.avatar_path", "general.machine_image_path"}:
-            path = choose_image_path(window, title=title)
-        else:
-            path = choose_file_path(window, title=title)
+        path = choose_image_path(window, title=title)
+        if path is None:
+            return
+        try:
+            installed = install_profile_image(path, self._definition.key)
+        except OSError as error:
+            print(f"shell: profile image install failed: {error}", flush=True)
+            return
+        self._on_change(self._definition.key, str(installed))
+
+    def _on_browse(self, entry: Gtk.Entry) -> None:
+        from ...ui.image_files import choose_file_path
+
+        parent = self.get_toplevel()
+        window = parent if isinstance(parent, Gtk.Window) else None
+        title = f"Seleccionar — {self._definition.label}"
+        path = choose_file_path(window, title=title)
         if path is None:
             return
         entry.set_text(str(path))

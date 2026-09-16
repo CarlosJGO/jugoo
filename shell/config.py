@@ -40,6 +40,12 @@ WORKSPACES_PER_BLOCK = 3
 # Layer-shell top inset. 0 anchors the bar flush with the monitor edge (y=0).
 TOP_MARGIN = 0
 
+# Retract the top bar when a floating window intrudes into its strip.
+BAR_RETRACT_ENABLED = True
+BAR_RETRACT_POLL_MS = 32
+BAR_RETRACT_GAP_PX = 4
+BAR_RETRACT_ANIM_TICK_MS = 16
+
 # Screen-edge padding when clamping anchored popups.
 POPUP_EDGE_MARGIN = 8
 
@@ -56,6 +62,8 @@ APPLICATION_ICON_SIZE = 18
 FOCUSED_APPLICATION_ICON_SIZE = 21
 ACTIVE_WINDOW_ICON_SIZE = 24
 ACTIVE_WINDOW_CONTENT_SPACING = 8
+# How long the cava volume % stays “punched” after a change (gamefeel).
+ACTIVE_WINDOW_VOLUME_FLASH_MS = 900
 # Stable pixel width for the active-window block (title length must not affect bar layout).
 ACTIVE_WINDOW_WIDTH = 280
 WORKSPACE_VISIBLE_ICON_LIMIT = 3
@@ -97,7 +105,7 @@ TASK_WATCHER_AI_ENABLED = True
 TASK_WATCHER_AI_BINARY = "llama-cli"
 TASK_WATCHER_AI_MODEL_PATH = "~/IA/models/llama-3.1-8b-instruct-q6_k.gguf"
 TASK_WATCHER_AI_CONTEXT_SIZE = 1024
-TASK_WATCHER_AI_MAX_TOKENS = 32
+TASK_WATCHER_AI_MAX_TOKENS = 128
 TASK_WATCHER_AI_TIMEOUT_SEC = 15
 TASK_STARTUP_BRIEFING_ENABLED = True
 TASK_STARTUP_BRIEFING_MAX_TOKENS = 120
@@ -184,6 +192,15 @@ NOTIFICATIONS_TOAST_WIDTH = 400
 NOTIFICATIONS_TOAST_MAX_HEIGHT = 120
 NOTIFICATIONS_TOAST_TIMEOUT_MS = 5000
 
+# Fullscreen "whisper": own compact HUD chip (not a scaled-down toast).
+NOTIFICATIONS_WHISPER_WIDTH = 240
+NOTIFICATIONS_WHISPER_MAX_HEIGHT = 34
+NOTIFICATIONS_WHISPER_ICON_SIZE = 14
+NOTIFICATIONS_WHISPER_MAX_VISIBLE = 1
+NOTIFICATIONS_WHISPER_TIMEOUT_MS = 3200
+NOTIFICATIONS_WHISPER_CRITICAL_TIMEOUT_MS = 5500
+NOTIFICATIONS_WHISPER_TOP_MARGIN = 14
+
 # Assistant card (startup briefing / Jugoo speaking). Separate from toasts.
 ASSISTANT_CARD_WIDTH = 360
 ASSISTANT_CARD_MAX_HEIGHT = 240
@@ -230,6 +247,8 @@ MEDIA_STRAWBERRY_PLAY_POLL_MAX_MS = 15_000
 MEDIA_STRAWBERRY_PLAY_RETRY_MS = 500
 # Coalesce MPRIS Volume writes while dragging the popup slider.
 MEDIA_VOLUME_FLUSH_MS = 40
+# Strawberry volume step for global binds (MainMod+Shift+F9/F11).
+MEDIA_STRAWBERRY_VOLUME_STEP = 0.05
 
 # Pinned application dock (in-bar; overflow drops below the strip).
 PINNED_APPS_VISIBLE_LIMIT = 9
