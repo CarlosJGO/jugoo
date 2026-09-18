@@ -1,4 +1,4 @@
-"""Assistant briefing card — Jugoo speaking, not a system toast."""
+"""Assistant briefing / chat card — Jugoo speaking, not a system toast."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from gi.repository import Gdk, Gtk, GLib, Pango
 
 from ...config import (
     ASSISTANT_CARD_MAX_HEIGHT,
+    ASSISTANT_CARD_MESSAGE_MAX_HEIGHT,
     ASSISTANT_CARD_WIDTH,
     ASSISTANT_ICON_SIZE,
 )
@@ -28,7 +29,7 @@ AssistantDismissReason = Literal["timeout", "click", "cancel"]
 
 
 class AssistantCard(Gtk.EventBox):
-    """Compact assistant surface: header, message, optional meta."""
+    """Chat-like assistant surface: who is speaking, scrollable message, origin."""
 
     def __init__(
         self,
@@ -60,7 +61,7 @@ class AssistantCard(Gtk.EventBox):
         self._card.set_size_request(ASSISTANT_CARD_WIDTH, -1)
         self._card.get_style_context().add_class("assistant-card")
         self._card.get_style_context().add_class("assistant-card-content")
-        install_starfield(self, self._card, resolve_event_bus(self), corner_radius=16.0)
+        install_starfield(self, self._card, resolve_event_bus(self), corner_radius=18.0)
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         header.get_style_context().add_class("assistant-card-header")
@@ -74,24 +75,54 @@ class AssistantCard(Gtk.EventBox):
         icon_slot.pack_start(self._icon, True, True, 0)
         header.pack_start(icon_slot, False, False, 0)
 
+        titles = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        titles.set_valign(Gtk.Align.CENTER)
         self._title = Gtk.Label(xalign=0)
         self._title.get_style_context().add_class("assistant-card-title")
         self._title.set_text(APPLICATION_NAME)
         self._title.set_ellipsize(Pango.EllipsizeMode.END)
         self._title.set_single_line_mode(True)
-        header.pack_start(self._title, True, True, 0)
+        titles.pack_start(self._title, False, False, 0)
+
+        self._subtitle = Gtk.Label(xalign=0)
+        self._subtitle.get_style_context().add_class("assistant-card-subtitle")
+        self._subtitle.set_text("te está hablando")
+        self._subtitle.set_ellipsize(Pango.EllipsizeMode.END)
+        self._subtitle.set_single_line_mode(True)
+        titles.pack_start(self._subtitle, False, False, 0)
+        header.pack_start(titles, True, True, 0)
         self._card.pack_start(header, False, False, 0)
 
-        self._message = Gtk.Label(xalign=0, yalign=0)
+        bubble = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        bubble.get_style_context().add_class("assistant-card-bubble")
+
+        self._scroll = Gtk.ScrolledWindow()
+        self._scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._scroll.set_shadow_type(Gtk.ShadowType.NONE)
+        self._scroll.set_hexpand(True)
+        self._scroll.set_min_content_height(48)
+        self._scroll.set_max_content_height(ASSISTANT_CARD_MESSAGE_MAX_HEIGHT)
+        try:
+            self._scroll.set_propagate_natural_height(True)
+        except AttributeError:
+            pass
+
+        self._message = Gtk.TextView()
         self._message.get_style_context().add_class("assistant-card-message")
-        self._message.set_line_wrap(True)
-        self._message.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        self._message.set_max_width_chars(42)
-        self._message.set_selectable(False)
-        # Prefer natural height; hard ellipsize only as a last-resort cap.
-        self._message.set_ellipsize(Pango.EllipsizeMode.END)
-        self._message.set_lines(12)
-        self._card.pack_start(self._message, False, False, 0)
+        self._message.set_editable(False)
+        self._message.set_cursor_visible(False)
+        self._message.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self._message.set_accepts_tab(False)
+        self._message.set_left_margin(2)
+        self._message.set_right_margin(2)
+        self._message.set_top_margin(2)
+        self._message.set_bottom_margin(2)
+        self._message.set_pixels_above_lines(1)
+        self._message.set_pixels_below_lines(1)
+        self._message.set_can_focus(False)
+        self._scroll.add(self._message)
+        bubble.pack_start(self._scroll, True, True, 0)
+        self._card.pack_start(bubble, True, True, 0)
 
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         footer.get_style_context().add_class("assistant-card-footer")
@@ -141,20 +172,22 @@ class AssistantCard(Gtk.EventBox):
         self._title.set_text(snapshot.app_name.strip() or APPLICATION_NAME)
 
         message = (snapshot.body or snapshot.summary or "").strip()
-        self._message.set_text(message)
+        buffer = self._message.get_buffer()
+        buffer.set_text(message)
 
         meta = (snapshot.meta or "").strip()
-        if meta:
-            self._meta.set_text(meta)
-            self._meta.show()
+        # "te responde" is already the subtitle; don't duplicate in the footer.
+        if meta and meta.casefold() not in {"te responde", "te está hablando"}:
+            self._subtitle.set_text(meta)
+            self._meta.hide()
         else:
+            self._subtitle.set_text("te está hablando")
             self._meta.hide()
 
         self._origin.set_text(assistant_source_label(snapshot.source))
 
         self.show_all()
-        if not meta:
-            self._meta.hide()
+        self._meta.hide()
         timeout_ms = self._service.resolve_display_timeout_ms(snapshot)
         if timeout_ms > 0:
             self._hide_source_id = GLib.timeout_add(timeout_ms, self._auto_hide)

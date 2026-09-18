@@ -30,6 +30,7 @@ from ...models import (
     WorkspaceAudioState,
     compose_workspace_blocks,
 )
+from ...ui.workspace_accents import accent_class_for_workspace
 
 WORKSPACE_CHANGED = "workspace_changed"
 WORKSPACE_REQUESTED = "workspace_requested"
@@ -40,8 +41,10 @@ WINDOW_CLOSED = "window_closed"
 WORKSPACE_HOVER_STARTED = "workspace_hover_started"
 WORKSPACE_HOVER_ENDED = "workspace_hover_ended"
 WORKSPACE_AUDIO_REQUESTED = "workspace_audio_requested"
+WORKSPACE_ACCENTS_CHANGED = "workspace_accents_changed"
 AUDIO_CHANGED = "audio_changed"
 _WORKSPACE_DRAG_THRESHOLD_PX = 8
+_ACCENT_CLASS_PREFIX = "ws-accent-"
 
 
 class WorkspaceButton(Gtk.Button):
@@ -127,6 +130,8 @@ class WorkspaceButton(Gtk.Button):
         else:
             context.remove_class("special")
 
+        self._apply_accent_classes(workspace.name)
+
         if workspace.active:
             context.add_class("active")
         else:
@@ -151,6 +156,16 @@ class WorkspaceButton(Gtk.Button):
 
         self._workspace = workspace
 
+    def _apply_accent_classes(self, workspace_name: str) -> None:
+        context = self.get_style_context()
+        for css_class in list(context.list_classes()):
+            if css_class == "ws-accent" or css_class.startswith(_ACCENT_CLASS_PREFIX):
+                context.remove_class(css_class)
+        accent_class = accent_class_for_workspace(workspace_name)
+        if accent_class is None:
+            return
+        context.add_class("ws-accent")
+        context.add_class(accent_class)
     def update_audio_state(self, audio_state: WorkspaceAudioState | None) -> None:
         """Apply CSS classes reflecting audio status of this workspace."""
         context = self.get_style_context()
@@ -276,6 +291,7 @@ class WorkspaceWidget(Gtk.Box):
         self._event_bus.subscribe(WINDOW_OPENED, self._on_workspace_changed)
         self._event_bus.subscribe(WINDOW_CLOSED, self._on_workspace_changed)
         self._event_bus.subscribe(AUDIO_CHANGED, self._on_audio_changed)
+        self._event_bus.subscribe(WORKSPACE_ACCENTS_CHANGED, self._on_accents_changed)
         self.connect("destroy", self._on_destroy)
 
     def render(self, workspaces: Iterable[Workspace]) -> None:
@@ -297,9 +313,16 @@ class WorkspaceWidget(Gtk.Box):
             block_widget.render(block_map[block_index], self.buttons)
             self.reorder_child(block_widget, position)
 
-        special_workspaces = tuple(workspace for workspace in workspaces if workspace.is_special)
+        # Extra strip: Hypr specials + named/hashed workspaces (e.g. gaming, id -1337).
+        # Named workspaces are not is_special (that flag is only for special:* toggle),
+        # but they are excluded from numbered blocks (id < 1).
+        extra_workspaces = tuple(
+            workspace
+            for workspace in workspaces
+            if workspace.is_special or workspace.id < 1
+        )
         normal_count = len(self.block_order)
-        for offset, workspace in enumerate(special_workspaces):
+        for offset, workspace in enumerate(extra_workspaces):
             button = self._button_for(workspace.id)
             button.update(workspace)
             if button.get_parent() is not self:
@@ -310,9 +333,9 @@ class WorkspaceWidget(Gtk.Box):
             if block_index not in block_map:
                 self.remove(block_widget)
                 del self.block_widgets[block_index]
-        visible_special_ids = {workspace.id for workspace in special_workspaces}
+        visible_extra_ids = {workspace.id for workspace in extra_workspaces}
         for workspace_id, button in tuple(self.buttons.items()):
-            if workspace_id < 0 and workspace_id not in visible_special_ids:
+            if workspace_id < 0 and workspace_id not in visible_extra_ids:
                 self.remove(button)
                 del self.buttons[workspace_id]
 
@@ -509,6 +532,12 @@ class WorkspaceWidget(Gtk.Box):
     def _on_workspace_changed(self, snapshot: HyprlandSnapshot) -> None:
         GLib.idle_add(self.render, snapshot.workspaces)
 
+    def _on_accents_changed(self, *_args) -> None:
+        for button in self.buttons.values():
+            button._workspace = None
+        if self._all_workspaces:
+            GLib.idle_add(self.render, self._all_workspaces)
+
     def _on_audio_changed(self, snapshot: AudioSnapshot) -> None:
         self._audio_snapshot = snapshot
         GLib.idle_add(self._apply_audio_snapshot, snapshot)
@@ -525,3 +554,4 @@ class WorkspaceWidget(Gtk.Box):
         self._event_bus.unsubscribe(WINDOW_OPENED, self._on_workspace_changed)
         self._event_bus.unsubscribe(WINDOW_CLOSED, self._on_workspace_changed)
         self._event_bus.unsubscribe(AUDIO_CHANGED, self._on_audio_changed)
+        self._event_bus.unsubscribe(WORKSPACE_ACCENTS_CHANGED, self._on_accents_changed)

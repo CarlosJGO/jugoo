@@ -276,7 +276,7 @@ class HyprlandService:
 
         snapshot = self.snapshot
         workspace_name: str | None = None
-        is_special = requested_id < 0
+        is_special = False
         if snapshot is not None:
             for workspace in snapshot.workspaces:
                 if workspace.id == requested_id:
@@ -286,6 +286,11 @@ class HyprlandService:
                         if not self._get_visible_special_workspace_names():
                             return
                     break
+        if workspace_name is None:
+            from ...ui.workspace_accents import is_hypr_special_name
+
+            # Fallback when the strip asked for an id not in the last snapshot.
+            is_special = requested_id < 0 and is_hypr_special_name(str(requested_id))
 
         if is_special and workspace_name and self._special_workspace_is_visible(workspace_name):
             return
@@ -448,11 +453,16 @@ class HyprlandService:
 
     @staticmethod
     def _workspace(item: dict[str, Any]) -> WorkspaceRecord:
+        from ...ui.workspace_accents import is_hypr_special_name
+
         workspace_id = int(item["id"])
+        name = str(item.get("name", item["id"]))
         return WorkspaceRecord(
             id=workspace_id,
-            name=str(item.get("name", item["id"])),
-            is_special=workspace_id < 0,
+            name=name,
+            # Named workspaces (e.g. gaming) can hash to negative ids; only
+            # Hypr ``special:…`` scratchpads are true specials for toggle.
+            is_special=is_hypr_special_name(name),
         )
 
     @staticmethod
@@ -556,6 +566,7 @@ class HyprlandService:
         )
         application = application_for_window(window)
         fullscreen = int(item.get("fullscreen", 0) or 0)
+        maximized = int(item.get("maximized", 0) or 0)
         return ActiveWindow(
             address=address,
             app_class=window.app_class,
@@ -563,6 +574,7 @@ class HyprlandService:
             title=window.title,
             icon=application.icon,
             fullscreen=fullscreen,
+            maximized=maximized,
         )
 
     def _dispatch_workspace(

@@ -442,8 +442,8 @@ def test_assistant_geometry_differs_from_toast() -> None:
         NOTIFICATIONS_WHISPER_WIDTH,
     )
 
-    assert ASSISTANT_CARD_WIDTH == 360
-    assert ASSISTANT_CARD_MAX_HEIGHT == 240
+    assert ASSISTANT_CARD_WIDTH == 420
+    assert ASSISTANT_CARD_MAX_HEIGHT == 420
     assert ASSISTANT_CARD_WIDTH != NOTIFICATIONS_TOAST_WIDTH
     assert ASSISTANT_CARD_MAX_HEIGHT != NOTIFICATIONS_TOAST_MAX_HEIGHT
     assert ASSISTANT_CARD_MAX_HEIGHT > NOTIFICATIONS_TOAST_MAX_HEIGHT
@@ -1103,6 +1103,30 @@ def test_toast_manager_fullscreen_uses_whisper() -> None:
 
         mgr.destroy()
         service.close()
+
+
+def test_active_window_true_fullscreen_not_maximize_consume() -> None:
+    true_fullscreen = ActiveWindow(
+        address="0x1",
+        app_class="firefox",
+        application_name="Firefox",
+        title="YouTube",
+        icon="firefox",
+        fullscreen=1,
+        maximized=0,
+    )
+    maximize_consume = ActiveWindow(
+        address="0x2",
+        app_class="firefox",
+        application_name="Firefox",
+        title="YouTube",
+        icon="firefox",
+        fullscreen=1,
+        maximized=1,
+    )
+
+    assert true_fullscreen.is_fullscreen is True
+    assert maximize_consume.is_fullscreen is False
 
 
 if __name__ == "__main__":

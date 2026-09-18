@@ -530,6 +530,9 @@ class LocalTextGenerator:
         temperature: float | None = None,
         top_p: float | None = None,
         repeat_penalty: float | None = None,
+        timeout_sec: float | None = None,
+        wrap_instruct: bool = True,
+        extra_flags: tuple[str, ...] = (),
     ) -> str | None:
         binary = self._which(self._config.ai_binary)
         if not binary:
@@ -548,6 +551,8 @@ class LocalTextGenerator:
             temperature=temperature,
             top_p=top_p,
             repeat_penalty=repeat_penalty,
+            wrap_instruct=wrap_instruct,
+            extra_flags=extra_flags,
         )
         self.last_argv = list(argv)
         self.last_stdout = None
@@ -566,8 +571,13 @@ class LocalTextGenerator:
             self.last_error = f"spawn_failed:{exc}"
             return None
         self._proc = proc
+        wait_sec = (
+            float(timeout_sec)
+            if timeout_sec is not None
+            else float(self._config.ai_timeout_sec)
+        )
         try:
-            stdout, stderr = proc.communicate(timeout=self._config.ai_timeout_sec)
+            stdout, stderr = proc.communicate(timeout=max(5.0, wait_sec))
         except subprocess.TimeoutExpired:
             _kill_process_group(proc)
             self.last_error = "timeout"
@@ -601,11 +611,13 @@ class LocalTextGenerator:
             return None
         self.last_error = None
         return validated
+
     def close(self) -> None:
         proc = self._proc
         if proc is not None:
             _kill_process_group(proc)
             self._proc = None
+
     def _argv(
         self,
         binary: str,
@@ -617,6 +629,8 @@ class LocalTextGenerator:
         temperature: float | None = None,
         top_p: float | None = None,
         repeat_penalty: float | None = None,
+        wrap_instruct: bool = True,
+        extra_flags: tuple[str, ...] = (),
     ) -> list[str]:
         tokens = self._config.ai_max_tokens if max_tokens is None else max_tokens
         argv = [
@@ -643,18 +657,25 @@ class LocalTextGenerator:
             "--no-jinja",
             "--no-perf",
         ]
+        for flag in extra_flags:
+            if flag and flag not in argv:
+                argv.append(flag)
         if temperature is not None:
             argv.extend(["--temp", f"{float(temperature):.3f}"])
         if top_p is not None:
             argv.extend(["--top-p", f"{float(top_p):.3f}"])
         if repeat_penalty is not None:
             argv.extend(["--repeat-penalty", f"{float(repeat_penalty):.3f}"])
-        argv.extend(
-            [
-                "-p",
-                _instruct_prompt(prompt, system_prompt=system_prompt),
-            ]
-        )
+        if wrap_instruct:
+            prompt_text = _instruct_prompt(prompt, system_prompt=system_prompt)
+            argv.extend(["-p", prompt_text])
+        else:
+            # Native chat path: model template + -sys/-p (no hand-rolled ChatML).
+            if "--no-jinja" in argv:
+                argv.remove("--no-jinja")
+            if system_prompt:
+                argv.extend(["-sys", system_prompt.strip()])
+            argv.extend(["-p", prompt.strip()])
         return argv
 
 def generate_briefing_text(

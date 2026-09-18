@@ -195,12 +195,12 @@ class NotificationsWidget(ShellModule):
     def _on_fullscreen_changed(self, snapshot: object) -> None:
         if not isinstance(snapshot, HyprlandSnapshot):
             return
-        GLib.idle_add(self._apply_fullscreen, bool(snapshot.active_window.fullscreen))
+        GLib.idle_add(self._apply_fullscreen, snapshot.active_window.is_fullscreen)
 
     def _on_active_window_changed(self, active_window: object) -> None:
         if not isinstance(active_window, ActiveWindow):
             return
-        GLib.idle_add(self._apply_fullscreen, bool(active_window.fullscreen))
+        GLib.idle_add(self._apply_fullscreen, active_window.is_fullscreen)
 
     def _sync_fullscreen_from_hyprland(self) -> bool:
         hyprland = getattr(self._shell_window, "hyprland", None)
@@ -209,7 +209,7 @@ class NotificationsWidget(ShellModule):
         snapshot = getattr(hyprland, "snapshot", None)
         if not isinstance(snapshot, HyprlandSnapshot):
             return False
-        self._apply_fullscreen(bool(snapshot.active_window.fullscreen))
+        self._apply_fullscreen(snapshot.active_window.is_fullscreen)
         return False
 
     def _apply_fullscreen(self, active: bool) -> bool:

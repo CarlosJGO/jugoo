@@ -188,7 +188,7 @@ class SettingsManager:
         self._hooks["apariencia.ui_font"] = self._apply_ui_font
         self._hooks["popups.volume_osd_hide_ms"] = self._apply_volume_osd
         self._hooks["comportamiento.workspace_hover_delay_ms"] = self._apply_workspace_hover
-
+        self._hooks["widgets.workspace_accent_colors_json"] = self._apply_workspace_accents
     def _apply_all(self, *, initial: bool) -> None:
         for definition in self._store.catalog:
             value = self._store.get(definition.key)
@@ -245,6 +245,15 @@ class SettingsManager:
     ) -> None:
         if self._workspace_hover_setter is not None:
             self._workspace_hover_setter(int(value))
+
+    def _apply_workspace_accents(
+        self, _manager: SettingsManager, _definition: SettingDef, value: Any
+    ) -> None:
+        from ..ui.workspace_accents import set_current_accent_colors
+        from ..widgets.barra.workspace import WORKSPACE_ACCENTS_CHANGED
+
+        set_current_accent_colors(str(value or ""))
+        self._event_bus.emit(WORKSPACE_ACCENTS_CHANGED, None)
 
     def _apply_night_mode(self) -> NightModeStatus:
         return self._night.configure(

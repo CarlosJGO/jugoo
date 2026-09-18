@@ -21,12 +21,14 @@ def _recording_executor(commands: list[list[str]]) -> None:
 def verify_power_service_dry_run() -> None:
     service = PowerService(dry_run=True, executor=_recording_executor)
 
-    expected_first = {
-        ACTION_LOCK: ["loginctl", "lock-session"],
-        ACTION_SUSPEND: ["systemctl", "suspend"],
-        ACTION_LOGOUT: None,  # depends on env; checked below
-        ACTION_REBOOT: ["systemctl", "reboot"],
-        ACTION_SHUTDOWN: ["systemctl", "poweroff"],
+    expected = {
+        ACTION_LOCK: [["loginctl", "lock-session"]],
+        ACTION_SUSPEND: [
+            ["loginctl", "lock-session"],
+            ["systemctl", "suspend"],
+        ],
+        ACTION_REBOOT: [["systemctl", "reboot"]],
+        ACTION_SHUTDOWN: [["systemctl", "poweroff"]],
     }
 
     for action, method_name in (
@@ -41,13 +43,13 @@ def verify_power_service_dry_run() -> None:
         getattr(service, method_name)()
         assert service.last_action == action, f"expected {action}, got {service.last_action}"
         assert service.last_commands, f"expected command chain for {action}"
-        first = service.last_commands[0]
         if action == ACTION_LOGOUT:
+            first = service.last_commands[0]
             assert first[0] in ("loginctl", "hyprctl"), first
             if first[0] == "loginctl":
                 assert first[1] in ("terminate-session", "terminate-user"), first
         else:
-            assert first == expected_first[action], first
+            assert service.last_commands == expected[action], service.last_commands
 
 
 def verify_mock_executor() -> None:
@@ -68,13 +70,53 @@ def verify_suspend_locks_before_sleep() -> None:
     def mock_executor(command) -> None:
         executed.append(list(command))
 
-    service = PowerService(executor=mock_executor)
+    service = PowerService(executor=mock_executor, wait_for_lock=False)
     service.suspend()
     assert executed == [
         ["loginctl", "lock-session"],
         ["systemctl", "suspend"],
     ]
     assert service.last_action == ACTION_SUSPEND
+    assert service.last_commands == executed
+
+
+def verify_fire_and_forget_detection() -> None:
+    from shell.servicios.energia.power import _is_fire_and_forget
+
+    assert _is_fire_and_forget(["systemctl", "suspend"])
+    assert _is_fire_and_forget(["systemctl", "poweroff"])
+    assert _is_fire_and_forget(["systemctl", "reboot"])
+    assert not _is_fire_and_forget(["loginctl", "lock-session"])
+    assert not _is_fire_and_forget(["systemctl", "status"])
+
+
+def verify_missing_locker_skips_wait() -> None:
+    """If hyprlock is not installed, suspend must not stall waiting for it."""
+    import shell.servicios.energia.power as power_mod
+
+    executed: list[list[str]] = []
+
+    def mock_executor(command) -> None:
+        executed.append(list(command))
+
+    original_which = power_mod.shutil.which
+
+    def fake_which(name: str):
+        if name == "hyprlock":
+            return None
+        return original_which(name)
+
+    power_mod.shutil.which = fake_which  # type: ignore[method-assign]
+    try:
+        service = power_mod.PowerService(executor=mock_executor, wait_for_lock=True)
+        service.suspend()
+    finally:
+        power_mod.shutil.which = original_which  # type: ignore[method-assign]
+
+    assert executed == [
+        ["loginctl", "lock-session"],
+        ["systemctl", "suspend"],
+    ]
 
 
 def verify_logout_prefers_session_id(monkeypatch_env: dict[str, str] | None = None) -> None:
@@ -103,10 +145,43 @@ def verify_logout_prefers_session_id(monkeypatch_env: dict[str, str] | None = No
                 os.environ[key] = value
 
 
+def verify_lock_spawn_uses_random_bg_wrapper() -> None:
+    import shell.servicios.energia.power as power_mod
+
+    captured: list[list[str]] = []
+
+    original_which = power_mod.shutil.which
+    original_popen = power_mod.subprocess.Popen
+
+    def fake_which(name: str):
+        if name == "hyprlock":
+            return "/usr/bin/hyprlock"
+        if name == "hyprlock-random-bg":
+            return "/home/carlosjgo/.local/bin/hyprlock-random-bg"
+        return None
+
+    def fake_popen(argv, **kwargs):
+        captured.append(list(argv))
+        return object()
+
+    power_mod.shutil.which = fake_which  # type: ignore[method-assign]
+    power_mod.subprocess.Popen = fake_popen  # type: ignore[method-assign]
+    try:
+        power_mod._spawn_hyprlock()
+    finally:
+        power_mod.shutil.which = original_which  # type: ignore[method-assign]
+        power_mod.subprocess.Popen = original_popen  # type: ignore[method-assign]
+
+    assert captured == [["/home/carlosjgo/.local/bin/hyprlock-random-bg"]], captured
+
+
 if __name__ == "__main__":
     verify_power_service_dry_run()
     verify_mock_executor()
     verify_suspend_locks_before_sleep()
+    verify_fire_and_forget_detection()
+    verify_missing_locker_skips_wait()
+    verify_lock_spawn_uses_random_bg_wrapper()
     verify_logout_prefers_session_id({"XDG_SESSION_ID": "42"})
     verify_logout_prefers_session_id({"USER": "aidyc"})
     verify_logout_prefers_session_id(None)

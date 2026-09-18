@@ -43,6 +43,11 @@ def briefing_path() -> Path:
     return xdg_data_dir() / "briefing.json"
 
 
+def ai_chat_path() -> Path:
+    """Rolling conversation memory for the under-bar AI ask prompt."""
+    return xdg_data_dir() / "ai_chat.json"
+
+
 def reminder_state_path() -> Path:
     """Per-task reminder cooldown / mention bookkeeping (not user task data)."""
     return xdg_data_dir() / "reminder_state.json"

@@ -22,6 +22,7 @@ from .config import (
     TOP_MARGIN,
 )
 from .controllers.applications import ApplicationsController
+from .controllers.ai_prompt import AiPromptController
 from .controllers.bar_retract import BarRetractController
 from .controllers.control_center import ControlCenterController
 from .controllers.pickers import PickersController
@@ -244,6 +245,11 @@ class ShellApplication(Gtk.Window):
             close_launcher=self.applications_controller.close_launcher,
             hyprland=self.hyprland,
         )
+        self.ai_prompt_controller = AiPromptController(
+            self,
+            self.notification_service,
+            close_other_overlays=self._close_overlays_for_ai_prompt,
+        )
         self.settings_controller = SettingsController(
             open_settings=self.applications_controller.open_settings,
             close_center=self.applications_controller.close_control_center,
@@ -295,14 +301,25 @@ class ShellApplication(Gtk.Window):
         self.power_widget.toggle_menu()
 
     def toggle_launcher(self) -> None:
+        self.ai_prompt_controller.close()
         self.pickers_controller.close_pickers()
         self.applications_controller.toggle_launcher()
 
+    def toggle_ai_prompt(self) -> None:
+        self.ai_prompt_controller.toggle()
+
+    def _close_overlays_for_ai_prompt(self) -> None:
+        self.pickers_controller.close_pickers()
+        self.applications_controller.close_control_center()
+        self.applications_controller.close_launcher()
+
     def toggle_clipboard_picker(self) -> None:
+        self.ai_prompt_controller.close()
         self.applications_controller.close_control_center()
         self.pickers_controller.toggle_clipboard()
 
     def toggle_emoji_picker(self) -> None:
+        self.ai_prompt_controller.close()
         self.applications_controller.close_control_center()
         self.pickers_controller.toggle_emoji()
 
@@ -310,6 +327,7 @@ class ShellApplication(Gtk.Window):
         self.media_controller.toggle_popup()
 
     def toggle_settings(self) -> None:
+        self.ai_prompt_controller.close()
         self.pickers_controller.close_pickers()
         self.settings_controller.toggle()
 
@@ -354,6 +372,7 @@ class ShellApplication(Gtk.Window):
         self.settings_manager.close()
         self.event_bus.close()
         self.volume_osd_controller.close()
+        self.ai_prompt_controller.close()
         self.bar_retract_controller.close()
         self.audio_service.close()
         self.network_service.close()

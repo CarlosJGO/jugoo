@@ -31,6 +31,15 @@ from ...settings.task_taxonomy import (
     serialize_categories,
     serialize_priorities,
 )
+from ...ui.workspace_accents import (
+    DEFAULT_ACCENT_COLORS,
+    discover_accent_keys,
+    display_label_for_key,
+    normalize_hex,
+    parse_accent_colors,
+    resolve_accent_color,
+    serialize_accent_colors,
+)
 from .controls import SettingRow
 from .font_picker import FontFamilyPicker
 
@@ -38,6 +47,7 @@ _CUSTOM_EDITOR_KEYS = frozenset(
     {
         "apariencia.ui_font",
         "general.profile_fields_json",
+        "widgets.workspace_accent_colors_json",
         "widgets.task_categories_json",
         "widgets.task_priorities_json",
     }
@@ -98,6 +108,8 @@ def build_category_page(
                 )
             elif definition.key == "general.profile_fields_json":
                 page.pack_start(_profile_fields_editor(manager, on_change), False, False, 0)
+            elif definition.key == "widgets.workspace_accent_colors_json":
+                page.pack_start(_workspace_accent_colors_editor(manager, on_change), False, False, 0)
             elif definition.key == "widgets.task_categories_json":
                 page.pack_start(_task_categories_editor(manager, on_change), False, False, 0)
             elif definition.key == "widgets.task_priorities_json":
@@ -229,6 +241,114 @@ def _profile_fields_editor(
 
     add_button.connect("clicked", _add)
     box.pack_start(add_button, False, False, 0)
+    _rebuild()
+    return box
+
+
+def _workspace_accent_colors_editor(
+    manager: SettingsManager,
+    on_change: Callable[[str, object], None],
+) -> Gtk.Widget:
+    """Color editor for special/named workspaces discovered from Hypr + defaults."""
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+    box.get_style_context().add_class("settings-task-taxonomy")
+
+    hint = Gtk.Label(
+        label=(
+            "Cada workspace especial o con nombre (special, minimizados, gaming…) "
+            "usa su propio color en la barra. Edita el hex y se aplica al momento."
+        ),
+        xalign=0,
+    )
+    hint.get_style_context().add_class("settings-row-desc")
+    hint.set_line_wrap(True)
+    box.pack_start(hint, False, False, 0)
+
+    list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    box.pack_start(list_box, False, False, 0)
+
+    def _current() -> dict[str, str]:
+        return parse_accent_colors(str(manager.get("widgets.workspace_accent_colors_json") or ""))
+
+    def _persist(colors: dict[str, str]) -> None:
+        # Keep defaults for known keys so reset stays meaningful.
+        merged = {**DEFAULT_ACCENT_COLORS, **colors}
+        on_change("widgets.workspace_accent_colors_json", serialize_accent_colors(merged))
+
+    def _keys() -> tuple[str, ...]:
+        live_names: list[str] = []
+        try:
+            import json
+            import subprocess
+
+            result = subprocess.run(
+                ["hyprctl", "workspaces", "-j"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=1.5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                payload = json.loads(result.stdout)
+                if isinstance(payload, list):
+                    for item in payload:
+                        if isinstance(item, dict) and item.get("name") is not None:
+                            live_names.append(str(item["name"]))
+        except (OSError, json.JSONDecodeError, subprocess.TimeoutExpired, ValueError):
+            pass
+        overrides = _current()
+        return discover_accent_keys(live_names=tuple(live_names) + tuple(overrides))
+
+    def _rebuild() -> None:
+        for child in list(list_box.get_children()):
+            list_box.remove(child)
+            child.destroy()
+        overrides = _current()
+        for key in _keys():
+            list_box.pack_start(_color_row(key, overrides), False, False, 0)
+        list_box.show_all()
+
+    def _color_row(key: str, overrides: dict[str, str]) -> Gtk.Widget:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.get_style_context().add_class("settings-task-taxonomy-row")
+
+        swatch = Gtk.EventBox()
+        swatch.set_size_request(18, 18)
+        swatch.set_valign(Gtk.Align.CENTER)
+        color = resolve_accent_color(key, {**DEFAULT_ACCENT_COLORS, **overrides})
+        css = Gtk.CssProvider()
+        css.load_from_data(
+            f"eventbox {{ background-color: {color}; border-radius: 4px; }}".encode("utf-8")
+        )
+        swatch.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        row.pack_start(swatch, False, False, 0)
+
+        label = Gtk.Label(label=display_label_for_key(key), xalign=0)
+        label.set_hexpand(True)
+        label.get_style_context().add_class("settings-row-title")
+        row.pack_start(label, True, True, 0)
+
+        entry = Gtk.Entry()
+        entry.set_placeholder_text("#RRGGBB")
+        entry.set_text(color)
+        entry.set_width_chars(9)
+        entry.get_style_context().add_class("settings-entry")
+        row.pack_start(entry, False, False, 0)
+
+        def _commit(*_args) -> None:
+            updated = _current()
+            normalized = normalize_hex(entry.get_text())
+            if normalized is None:
+                entry.set_text(resolve_accent_color(key, {**DEFAULT_ACCENT_COLORS, **updated}))
+                return
+            updated[key] = normalized
+            _persist(updated)
+            _rebuild()
+
+        entry.connect("activate", _commit)
+        entry.connect("focus-out-event", lambda *_a: (_commit(), False)[1])
+        return row
+
     _rebuild()
     return box
 

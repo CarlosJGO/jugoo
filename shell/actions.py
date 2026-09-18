@@ -33,6 +33,11 @@ class ShellAction:
 # Canonical action ids — keep this list small on purpose.
 ACTIONS: tuple[ShellAction, ...] = (
     ShellAction(
+        "ask",
+        "Open AI prompt under the bar (Enter sends, Escape cancels)",
+        legacy_flags=("--toggle-ask",),
+    ),
+    ShellAction(
         "launcher",
         "Toggle application launcher / Search",
         legacy_flags=("--toggle-launcher",),
@@ -187,6 +192,7 @@ def dispatch_action(name: str, shell) -> str | None:
         return f"unknown action {name!r}; try: jugoo action list"
 
     handlers: dict[str, Callable[[], None]] = {
+        "ask": lambda: shell.toggle_ai_prompt(),
         "launcher": lambda: shell.toggle_launcher(),
         "clipboard": lambda: shell.toggle_clipboard_picker(),
         "emoji": lambda: shell.toggle_emoji_picker(),

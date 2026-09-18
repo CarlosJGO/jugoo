@@ -6,6 +6,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
+from .ui.workspace_accents import accent_key_for_workspace, is_hypr_special_name
+
 
 @dataclass(frozen=True)
 class Window:
@@ -56,6 +58,11 @@ class ActiveWindow:
     title: str
     icon: str
     fullscreen: int = 0
+    maximized: int = 0
+
+    @property
+    def is_fullscreen(self) -> bool:
+        return bool(int(self.fullscreen or 0)) and not bool(int(self.maximized or 0))
 
 
 @dataclass(frozen=True)
@@ -563,6 +570,15 @@ def compose_workspaces(
         for workspace_id, windows in windows_by_workspace.items()
         if workspace_id < 0 and windows
     )
+    # Named workspaces (gaming) can hash to negative ids — also surface
+    # non-numeric named positives that aren't in the persistent numeric strip.
+    special_ids.update(
+        workspace_id
+        for workspace_id, record in known.items()
+        if accent_key_for_workspace(record.name) is not None
+        and windows_by_workspace.get(workspace_id)
+        and workspace_id not in regular_ids
+    )
 
     return tuple(
         _workspace_model(
@@ -577,14 +593,24 @@ def compose_workspaces(
         _workspace_model(
             known.get(
                 workspace_id,
-                WorkspaceRecord(workspace_id, str(workspace_id), workspace_id < 0),
+                WorkspaceRecord(
+                    workspace_id,
+                    str(workspace_id),
+                    is_hypr_special_name(str(workspace_id)),
+                ),
             ),
             windows_by_workspace[workspace_id],
             workspace_id == active_workspace_id,
             focused_window_address,
             icon_for_window,
         )
-        for workspace_id in sorted(special_ids, key=lambda item: (known.get(item, WorkspaceRecord(item, str(item), True)).name, item))
+        for workspace_id in sorted(
+            special_ids,
+            key=lambda item: (
+                known.get(item, WorkspaceRecord(item, str(item), True)).name,
+                item,
+            ),
+        )
     )
 
 

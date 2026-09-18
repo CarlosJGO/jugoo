@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Callable
 
 import gi
@@ -385,6 +386,18 @@ class PowerWidget(ShellModule):
         }.get(action)
         if handler is None:
             return
+        # Suspend waits for hyprlock; keep the GTK loop responsive.
+        if action == ACTION_SUSPEND:
+            threading.Thread(
+                target=self._run_power_handler,
+                args=(action, handler),
+                daemon=True,
+                name="jugoo-suspend",
+            ).start()
+            return
+        self._run_power_handler(action, handler)
+
+    def _run_power_handler(self, action: str, handler: Callable[[], None]) -> None:
         try:
             handler()
         except Exception as error:

@@ -8,6 +8,7 @@ from typing import Any, Callable, Literal
 
 from .. import config as shell_config
 from .task_taxonomy import default_categories_json, default_priorities_json
+from ..ui.workspace_accents import default_accent_colors_json
 
 SettingType = Literal["bool", "int", "float", "string", "choice", "path"]
 ApplyMode = Literal["live", "reload", "restart"]
@@ -244,6 +245,20 @@ def build_settings_catalog() -> tuple[SettingDef, ...]:
             step=1,
             tier="A",
             section="Apps ancladas",
+        ),
+        SettingDef(
+            key="widgets.workspace_accent_colors_json",
+            category=CategoryId.WIDGETS,
+            label="Colores de workspaces especiales",
+            description=(
+                "Color de cada workspace especial o con nombre (special, minimizados, gaming…). "
+                "Se detectan desde Hypr y la sesión activa."
+            ),
+            value_type="string",
+            default=default_accent_colors_json(),
+            apply=APPLY_LIVE,
+            tier="A",
+            section="Workspaces",
         ),
         SettingDef(
             key="widgets.task_categories_json",

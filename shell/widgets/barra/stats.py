@@ -391,9 +391,9 @@ class StatsWidget(ShellModule):
         _apply_temperature_class(self._cpu_bar_fill, stats.cpu.temperature_level)
 
     def _update_memory(self, stats: SystemStats) -> None:
-        used = stats.memory.applications_bytes
+        used = stats.memory.used_bytes
         total = stats.memory.total_bytes
-        if used is None or not total:
+        if used is None or total in (None, 0):
             self._memory_percent_label.set_text(f"RAM {UNKNOWN_VALUE}%")
             self._memory_value_label.set_text(UNKNOWN_VALUE)
         else:
