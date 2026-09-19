@@ -1,0 +1,13 @@
+[SddmGreeterTheme]
+Name=Jugoo
+Description=Official Jugoo SDDM theme
+Author=Jugoo
+Copyright=(c) Jugoo
+License=MIT
+Type=sddm-theme
+Version=1.0
+MainScript=Main.qml
+ConfigFile=theme.conf
+Theme-Id=jugoo
+Theme-API=2.0
+QtVersion=6

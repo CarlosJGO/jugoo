@@ -195,3 +195,32 @@ jugoo --reload-theme
 
 El mismo tema genera `~/.config/hypr/config/jugoo_theme_generated.lua`, de modo
 que bordes, grupos, blur y opacidad de Hyprland mantienen la misma identidad.
+
+---
+
+## Cómo ejecutar la shell
+
+En una máquina nueva (paquetes, identidad `jugoo`, binds/reglas Hyprland y tema):
+
+```sh
+cd ~/.config/jugoo   # o la ruta donde clonaste el repo
+python3 acomodador.py
+```
+
+Arranque normal (con el wrapper instalado):
+
+```sh
+jugoo
+```
+
+Desarrollo, desde la raíz del checkout:
+
+```sh
+python3 -m shell
+```
+
+Lista de acciones para binds de Hyprland:
+
+```sh
+jugoo action list
+```

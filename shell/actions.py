@@ -102,6 +102,16 @@ ACTIONS: tuple[ShellAction, ...] = (
         legacy_flags=("--reload-theme",),
         recommend_global_bind=False,
     ),
+    ShellAction(
+        "sddm-apply",
+        "Apply Jugoo SDDM theme from settings (Polkit)",
+        recommend_global_bind=False,
+    ),
+    ShellAction(
+        "sddm-restore",
+        "Restore previous SDDM theme selection (Polkit)",
+        recommend_global_bind=False,
+    ),
 )
 
 _BY_NAME = {action.name: action for action in ACTIONS}
@@ -206,6 +216,8 @@ def dispatch_action(name: str, shell) -> str | None:
         "session": lambda: shell.toggle_session(),
         "tasks": lambda: shell.open_tasks_panel(),
         "reload-theme": lambda: shell.reload_theme(),
+        "sddm-apply": lambda: shell.apply_sddm_theme(),
+        "sddm-restore": lambda: shell.restore_sddm_theme(),
     }
     handler = handlers.get(name)
     if handler is None:

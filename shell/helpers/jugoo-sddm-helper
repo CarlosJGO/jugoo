@@ -1,0 +1,385 @@
+#!/usr/bin/env python3
+"""Privileged Jugoo SDDM helper. Fixed operations only: apply | restore | status | install-helper.
+
+Must not be a general shell. Invoked via pkexec.
+"""
+
+from __future__ import annotations
+
+import argparse
+import configparser
+import json
+import os
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+
+THEME_ID = "jugoo"
+THEME_DIR = Path("/usr/share/sddm/themes") / THEME_ID
+DROPIN_DIR = Path("/etc/sddm.conf.d")
+DROPIN_PATH = DROPIN_DIR / "10-jugoo.conf"
+STATE_DIR = Path("/var/lib/jugoo/sddm")
+STATE_PATH = STATE_DIR / "state.json"
+SDDM_CONF = Path("/etc/sddm.conf")
+SDDM_CONF_BACKUP = STATE_DIR / "sddm.conf.bak"
+HELPER_DEST = Path("/usr/lib/jugoo/jugoo-sddm-helper")
+POLICY_DEST = Path("/usr/share/polkit-1/actions/com.jugoo.sddm.policy")
+REQUIRED_THEME_FILES = ("Main.qml", "metadata.desktop", "theme.conf")
+
+
+def main(argv: list[str] | None = None) -> int:
+    if os.geteuid() != 0:
+        _emit({"ok": False, "message": "jugoo-sddm-helper must run as root (via pkexec)"})
+        return 1
+
+    parser = argparse.ArgumentParser(prog="jugoo-sddm-helper")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    apply_p = sub.add_parser("apply", help="Install staged theme and activate it")
+    apply_p.add_argument("staging", type=Path)
+
+    sub.add_parser("restore", help="Restore previous SDDM theme selection")
+    sub.add_parser("status", help="Print management status as JSON")
+
+    install_p = sub.add_parser("install-helper", help="Install helper + polkit policy")
+    install_p.add_argument("helper_source", type=Path)
+    install_p.add_argument("policy_source", type=Path)
+
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "apply":
+            return cmd_apply(args.staging)
+        if args.command == "restore":
+            return cmd_restore()
+        if args.command == "status":
+            return cmd_status()
+        if args.command == "install-helper":
+            return cmd_install_helper(args.helper_source, args.policy_source)
+    except Exception as error:  # noqa: BLE001
+        _emit({"ok": False, "message": str(error)})
+        return 1
+    _emit({"ok": False, "message": f"unknown command {args.command!r}"})
+    return 1
+
+
+def cmd_install_helper(helper_source: Path, policy_source: Path) -> int:
+    helper_source = helper_source.resolve()
+    policy_source = policy_source.resolve()
+    if not helper_source.is_file():
+        raise FileNotFoundError(str(helper_source))
+    if not policy_source.is_file():
+        raise FileNotFoundError(str(policy_source))
+    HELPER_DEST.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(helper_source, HELPER_DEST)
+    HELPER_DEST.chmod(0o755)
+    POLICY_DEST.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(policy_source, POLICY_DEST)
+    POLICY_DEST.chmod(0o644)
+    _emit({"ok": True, "message": "helper and polkit policy installed"})
+    return 0
+
+
+def cmd_apply(staging: Path) -> int:
+    staging = staging.resolve()
+    _validate_staging(staging)
+
+    state = _load_state()
+    if "previous_current" not in state:
+        state["previous_current"] = _read_effective_current()
+        state["sddm_conf_had_current"] = _sddm_conf_has_current()
+        _save_state(state)
+
+    # Install theme first. Never touch Current until the tree is complete.
+    _install_theme_atomic(staging)
+
+    if not _theme_looks_complete(THEME_DIR):
+        raise RuntimeError("installed theme failed validation; Current left unchanged")
+
+    _backup_sddm_conf_once()
+    _strip_current_from_sddm_conf()
+    _write_dropin()
+
+    effective = _read_effective_current()
+    if effective != THEME_ID:
+        # Roll back activation without deleting a good theme tree mid-flight.
+        _remove_dropin()
+        _restore_sddm_conf_from_backup()
+        raise RuntimeError(
+            f"activation failed: effective Current={effective!r}, expected {THEME_ID!r}"
+        )
+
+    _emit(
+        {
+            "ok": True,
+            "message": "Jugoo SDDM theme applied",
+            "effective_current": effective,
+            "previous_current": state.get("previous_current", ""),
+        }
+    )
+    return 0
+
+
+def cmd_restore() -> int:
+    state = _load_state()
+    previous = str(state.get("previous_current", ""))
+
+    _remove_dropin()
+    _restore_sddm_conf_from_backup()
+
+    # If backup was absent but we had stripped Current, write previous back.
+    if previous and not SDDM_CONF_BACKUP.is_file():
+        _ensure_current_in_sddm_conf(previous)
+
+    effective = _read_effective_current()
+    _emit(
+        {
+            "ok": True,
+            "message": "SDDM theme selection restored",
+            "effective_current": effective,
+            "previous_current": previous,
+        }
+    )
+    return 0
+
+
+def cmd_status() -> int:
+    state = _load_state()
+    _emit(
+        {
+            "ok": True,
+            "message": "status",
+            "effective_current": _read_effective_current(),
+            "theme_installed": _theme_looks_complete(THEME_DIR),
+            "dropin_present": DROPIN_PATH.is_file(),
+            "previous_current": state.get("previous_current", ""),
+            "managed": _read_effective_current() == THEME_ID and DROPIN_PATH.is_file(),
+        }
+    )
+    return 0
+
+
+def _validate_staging(staging: Path) -> None:
+    if not staging.is_dir():
+        raise FileNotFoundError(f"staging not a directory: {staging}")
+    # Refuse path escape — staging must live under a real directory the user owns.
+    for name in REQUIRED_THEME_FILES:
+        path = staging / name
+        if not path.is_file():
+            raise FileNotFoundError(f"staging missing {name}")
+    # Disallow unexpected symlinks that could point outside.
+    for path in staging.rglob("*"):
+        if path.is_symlink():
+            raise RuntimeError(f"staging must not contain symlinks: {path}")
+
+
+def _install_theme_atomic(staging: Path) -> None:
+    THEME_DIR.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=str(THEME_DIR.parent)) as tmp:
+        dest = Path(tmp) / THEME_ID
+        shutil.copytree(staging, dest)
+        if not _theme_looks_complete(dest):
+            raise RuntimeError("staged theme incomplete; aborting before activation")
+        # Replace existing theme directory.
+        backup = Path(tmp) / f"{THEME_ID}.old"
+        if THEME_DIR.exists():
+            THEME_DIR.rename(backup)
+        try:
+            dest.rename(THEME_DIR)
+        except Exception:
+            if backup.exists() and not THEME_DIR.exists():
+                backup.rename(THEME_DIR)
+            raise
+
+
+def _theme_looks_complete(directory: Path) -> bool:
+    return all((directory / name).is_file() for name in REQUIRED_THEME_FILES)
+
+
+def _write_dropin() -> None:
+    DROPIN_DIR.mkdir(parents=True, exist_ok=True)
+    DROPIN_PATH.write_text(
+        "# Managed by Jugoo. Do not edit.\n[Theme]\nCurrent=jugoo\n",
+        encoding="utf-8",
+    )
+    DROPIN_PATH.chmod(0o644)
+
+
+def _remove_dropin() -> None:
+    try:
+        DROPIN_PATH.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _backup_sddm_conf_once() -> None:
+    if SDDM_CONF_BACKUP.is_file() or not SDDM_CONF.is_file():
+        return
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(SDDM_CONF, SDDM_CONF_BACKUP)
+
+
+def _restore_sddm_conf_from_backup() -> None:
+    if not SDDM_CONF_BACKUP.is_file():
+        return
+    SDDM_CONF.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(SDDM_CONF_BACKUP, SDDM_CONF)
+
+
+def _sddm_conf_has_current() -> bool:
+    return _read_theme_current(SDDM_CONF) is not None
+
+
+def _strip_current_from_sddm_conf() -> None:
+    """Remove only Theme.Current so the Jugoo drop-in can take effect.
+
+    Line-oriented edit: [Autologin] and every other key stay byte-stable.
+    /etc/sddm.conf has higher precedence than drop-ins (sddm.conf(5)), so
+    Current must not remain there or the drop-in would never win.
+    """
+    if not SDDM_CONF.is_file():
+        return
+    original = SDDM_CONF.read_text(encoding="utf-8")
+    rewritten = _strip_theme_current_text(original)
+    if rewritten != original:
+        SDDM_CONF.write_text(rewritten, encoding="utf-8")
+
+
+def _strip_theme_current_text(text: str) -> str:
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    in_theme = False
+    theme_has_other = False
+    theme_header: str | None = None
+    theme_body: list[str] = []
+
+    def flush_theme() -> None:
+        nonlocal theme_header, theme_body, theme_has_other
+        if theme_header is None:
+            return
+        if theme_has_other:
+            out.append(theme_header)
+            out.extend(theme_body)
+        theme_header = None
+        theme_body = []
+        theme_has_other = False
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            flush_theme()
+            in_theme = stripped.casefold() == "[theme]"
+            if in_theme:
+                theme_header = line
+                continue
+            out.append(line)
+            continue
+        if in_theme:
+            if stripped.lower().startswith("current") and (
+                "=" in stripped or stripped.lower() == "current"
+            ):
+                # Drop Current=… only.
+                continue
+            if stripped and not stripped.startswith("#") and not stripped.startswith(";"):
+                theme_has_other = True
+            theme_body.append(line)
+            continue
+        out.append(line)
+    flush_theme()
+    return "".join(out)
+
+
+def _ensure_current_in_sddm_conf(current: str) -> None:
+    if SDDM_CONF.is_file():
+        text = SDDM_CONF.read_text(encoding="utf-8")
+        if _read_theme_current(SDDM_CONF) is not None:
+            # Replace existing Current value in place.
+            lines = []
+            in_theme = False
+            for line in text.splitlines(keepends=True):
+                stripped = line.strip()
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    in_theme = stripped.casefold() == "[theme]"
+                    lines.append(line)
+                    continue
+                if in_theme and stripped.lower().startswith("current") and "=" in stripped:
+                    nl = "\n" if line.endswith("\n") else ""
+                    lines.append(f"Current={current}{nl}")
+                    continue
+                lines.append(line)
+            SDDM_CONF.write_text("".join(lines), encoding="utf-8")
+            return
+        # Append a Theme section.
+        suffix = "" if text.endswith("\n") or not text else "\n"
+        SDDM_CONF.write_text(
+            f"{text}{suffix}\n[Theme]\nCurrent={current}\n",
+            encoding="utf-8",
+        )
+        return
+    SDDM_CONF.parent.mkdir(parents=True, exist_ok=True)
+    SDDM_CONF.write_text(f"[Theme]\nCurrent={current}\n", encoding="utf-8")
+
+
+def _load_state() -> dict:
+    if not STATE_PATH.is_file():
+        return {}
+    try:
+        data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_state(state: dict) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    STATE_PATH.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _read_effective_current() -> str:
+    paths: list[Path] = []
+    for directory in (Path("/usr/lib/sddm/sddm.conf.d"), Path("/etc/sddm.conf.d")):
+        if directory.is_dir():
+            paths.extend(sorted(p for p in directory.glob("*.conf") if p.is_file()))
+    if SDDM_CONF.is_file():
+        paths.append(SDDM_CONF)
+    current = ""
+    for path in paths:
+        value = _read_theme_current(path)
+        if value is not None:
+            current = value.strip()
+    return current
+
+
+def _read_theme_current(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    parser = configparser.ConfigParser()
+    parser.optionxform = str  # type: ignore[assignment, method-assign]
+    try:
+        parser.read(path, encoding="utf-8")
+    except configparser.Error:
+        return None
+    if not parser.has_section("Theme") or not parser.has_option("Theme", "Current"):
+        return None
+    return parser.get("Theme", "Current")
+
+
+def _emit(payload: dict) -> None:
+    line = json.dumps(payload, sort_keys=True)
+    print(line, flush=True)
+    # When pkexec inherits the TTY (CLI auth), stdout may be mixed with Polkit
+    # prompts — callers can also read this side channel.
+    try:
+        result_path = os.environ.get("JUGOO_SDDM_RESULT", "").strip()
+    except AttributeError:
+        # Tests may stub ``os`` with a minimal object that only provides geteuid.
+        return
+    if result_path:
+        try:
+            Path(result_path).write_text(line + "\n", encoding="utf-8")
+        except OSError:
+            pass
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

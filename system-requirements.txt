@@ -1,11 +1,23 @@
-##aqui van las cosas que no trae el sistema operativo y que son necesarias para que funcione jugoo o extras necesarios para que funcione mejor
+## Dependencias del sistema para Jugoo (Arch / CachyOS)
+## Instálalas con: python3 acomodador.py
+## o a mano con las líneas `sudo pacman -S` de abajo.
 
-# Arch / CachyOS
-sudo pacman -S python-gobject python-cairo wtype
+# Runtime GTK / Python
+sudo pacman -S python-gobject python-cairo gtk3 gtk-layer-shell wtype
 
-# Keyboard cat: read /dev/input keyboards (no extra Python package).
-# After this, log out/in so the session picks up the new group.
+# Polkit authentication agent (obligatorio en Hyprland para pkexec / SDDM).
+# Sin esto, pkexec falla con «Not authorized» / journal «No session for cookie»
+# aunque el usuario esté en wheel y sudo funcione.
+sudo pacman -S hyprpolkitagent
+# systemctl --user enable --now hyprpolkitagent.service
+# (acomodador.py lo activa; o en hyprland: exec-once = systemctl --user start hyprpolkitagent)
+
+# Keyboard cat: leer /dev/input (sin paquete Python extra).
+# Tras esto, cierra sesión para que el grupo surta efecto.
 # sudo usermod -aG input "$USER"
 
-# Optional: visual workspace overview / Super+Tab
-yay -S quickshell-overview-git
+# Opcional: reproductor multimedia integrado
+# sudo pacman -S strawberry
+
+# Opcional AUR: overview visual / Super+Tab
+# yay -S quickshell-overview-git

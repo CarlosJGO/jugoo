@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/software/polkit/policyconfig-1.dtd">
+<policyconfig>
+  <vendor>Jugoo</vendor>
+  <vendor_url>https://github.com/carlosjgo/jugoo</vendor_url>
+
+  <action id="com.jugoo.sddm.apply">
+    <description>Apply or restore the Jugoo SDDM theme</description>
+    <message>Authentication is required to install or restore the Jugoo login theme</message>
+    <icon_name>preferences-desktop-theme</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/jugoo/jugoo-sddm-helper</annotate>
+  </action>
+</policyconfig>

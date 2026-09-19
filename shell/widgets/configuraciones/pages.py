@@ -141,8 +141,111 @@ def build_category_page(
         note.get_style_context().add_class("settings-page-note")
         note.set_line_wrap(True)
         page.pack_start(note, False, False, 0)
+        page.pack_start(_sddm_actions_editor(manager), False, False, 0)
 
     return page
+
+
+def _sddm_actions_editor(manager: SettingsManager) -> Gtk.Widget:
+    """Explicit Aplicar / Restaurar — privileged SDDM changes never auto-fire."""
+    from gi.repository import GLib
+
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+    box.get_style_context().add_class("settings-sddm-actions")
+
+    status = Gtk.Label(xalign=0)
+    status.get_style_context().add_class("settings-page-note")
+    status.set_line_wrap(True)
+    status.set_max_width_chars(52)
+
+    def refresh_status(*_args) -> None:
+        try:
+            from ...servicios.sddm import SddmService
+
+            snap = SddmService().status(
+                {"sddm.enabled": manager.get("sddm.enabled")}
+            )
+            status.set_text(snap.message)
+        except Exception as error:  # noqa: BLE001
+            status.set_text(f"SDDM: {error}")
+
+    refresh_status()
+    box.pack_start(status, False, False, 0)
+
+    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    row.set_halign(Gtk.Align.START)
+
+    apply_btn = Gtk.Button(label="Aplicar SDDM")
+    apply_btn.set_tooltip_text(
+        "Instala/activa el tema Jugoo según las opciones (pide privilegios)."
+    )
+    apply_btn.get_style_context().add_class("settings-browse-button")
+
+    restore_btn = Gtk.Button(label="Restaurar SDDM")
+    restore_btn.set_tooltip_text(
+        "Vuelve al tema SDDM anterior y deja de administrarlo."
+    )
+    restore_btn.get_style_context().add_class("settings-browse-button")
+
+    def set_busy(busy: bool, message: str | None = None) -> None:
+        apply_btn.set_sensitive(not busy)
+        restore_btn.set_sensitive(not busy)
+        if message is not None:
+            status.set_text(message)
+
+    def on_done(result, restore: bool = False) -> bool:
+        if restore and result.ok:
+            manager.set("sddm.enabled", False)
+        set_busy(False)
+        status.set_text(result.message if result.ok else f"Error: {result.message}")
+        if result.ok:
+            refresh_status()
+            if result.effective_current:
+                status.set_text(
+                    f"{result.message} (actual: {result.effective_current})"
+                )
+        return False
+
+    def on_apply(_button: Gtk.Button) -> None:
+        from ...servicios.sddm import SddmService
+
+        service = SddmService()
+        set_busy(True, "Aplicando SDDM… espera el diálogo de autenticación.")
+        started = service.apply_async(
+            service.settings_snapshot(manager.get),
+            lambda result: GLib.idle_add(on_done, result, False),
+        )
+        if not started:
+            set_busy(False)
+
+    def on_restore(_button: Gtk.Button) -> None:
+        from ...servicios.sddm import SddmService
+
+        set_busy(True, "Restaurando SDDM… espera el diálogo de autenticación.")
+        started = SddmService().restore_async(
+            lambda result: GLib.idle_add(on_done, result, True),
+        )
+        if not started:
+            set_busy(False)
+
+    apply_btn.connect("clicked", on_apply)
+    restore_btn.connect("clicked", on_restore)
+    row.pack_start(apply_btn, False, False, 0)
+    row.pack_start(restore_btn, False, False, 0)
+    box.pack_start(row, False, False, 0)
+
+    hint = Gtk.Label(
+        label=(
+            "Los controles de arriba solo guardan preferencias. "
+            "Aplicar pide autenticación (Polkit) en segundo plano; "
+            "la shell no se bloquea."
+        ),
+        xalign=0,
+    )
+    hint.get_style_context().add_class("settings-row-hint")
+    hint.set_line_wrap(True)
+    box.pack_start(hint, False, False, 0)
+    return box
 
 
 def _profile_fields_editor(

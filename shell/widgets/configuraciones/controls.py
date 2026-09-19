@@ -161,12 +161,15 @@ class SettingRow(Gtk.Box):
         self._on_change(self._definition.key, str(installed))
 
     def _on_browse(self, entry: Gtk.Entry) -> None:
-        from ...ui.image_files import choose_file_path
+        from ...ui.image_files import choose_file_path, choose_image_path
 
         parent = self.get_toplevel()
         window = parent if isinstance(parent, Gtk.Window) else None
         title = f"Seleccionar — {self._definition.label}"
-        path = choose_file_path(window, title=title)
+        if self._definition.key == "sddm.background_path":
+            path = choose_image_path(window, title=title)
+        else:
+            path = choose_file_path(window, title=title)
         if path is None:
             return
         entry.set_text(str(path))

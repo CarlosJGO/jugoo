@@ -337,6 +337,46 @@ class ShellApplication(Gtk.Window):
     def reload_theme(self) -> None:
         self.theme_manager.reload_current()
 
+    def apply_sddm_theme(self) -> None:
+        """Kick off SDDM apply off the GTK thread (Polkit must not freeze the shell)."""
+        from gi.repository import GLib
+
+        from .servicios.sddm import SddmService
+
+        service = SddmService()
+
+        def on_done(result) -> bool:
+            print(f"Jugoo SDDM apply: {result.message}", flush=True)
+            return False
+
+        started = service.apply_async(
+            service.settings_snapshot(self.settings_manager.get),
+            lambda result: GLib.idle_add(on_done, result),
+        )
+        if started:
+            print("Jugoo SDDM: aplicando en segundo plano…", flush=True)
+        else:
+            print("Jugoo SDDM: operación ya en curso", flush=True)
+
+    def restore_sddm_theme(self) -> None:
+        from gi.repository import GLib
+
+        from .servicios.sddm import SddmService
+
+        def on_done(result) -> bool:
+            if result.ok:
+                self.settings_manager.set("sddm.enabled", False)
+            print(f"Jugoo SDDM restore: {result.message}", flush=True)
+            return False
+
+        started = SddmService().restore_async(
+            lambda result: GLib.idle_add(on_done, result),
+        )
+        if started:
+            print("Jugoo SDDM: restaurando en segundo plano…", flush=True)
+        else:
+            print("Jugoo SDDM: operación ya en curso", flush=True)
+
     def _theme_choices(self) -> tuple[tuple[str, str], ...]:
         return tuple(
             (name, name.replace("-", " ").replace("_", " ").title())
@@ -498,6 +538,17 @@ def main() -> None:
 
         print(format_actions_help())
         raise SystemExit(0)
+
+    # SDDM Polkit must run in this process (not forwarded to the GTK primary),
+    # otherwise the shell freezes and the CLI hangs waiting for it.
+    # Compare argv[2] as a str — sys.argv[2:3] is a list and never equals a tuple.
+    if len(sys.argv) >= 3 and sys.argv[1] == "action" and sys.argv[2] in {
+        "sddm-apply",
+        "sddm-restore",
+    }:
+        from .servicios.sddm.cli import run_sddm_cli
+
+        raise SystemExit(run_sddm_cli(sys.argv[2]))
 
     init_window_identity()
     app = ShellGtkApplication()
