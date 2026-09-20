@@ -31,6 +31,7 @@ from ...window_identity import (
     monitor_containing_point,
     popup_window_size,
     reposition_popup,
+    reposition_popup_live,
     register_shell_popup,
     schedule_popup_position,
 )
@@ -127,7 +128,7 @@ class _BlockPager(Gtk.ScrolledWindow):
 
     @property
     def animating(self) -> bool:
-        return self._tick_id != 0
+        return self._tick_id != 0 or self.transition_active
 
     @property
     def stable_page(self) -> _BlockPage | None:
@@ -139,6 +140,10 @@ class _BlockPager(Gtk.ScrolledWindow):
         if self._to_page is not None:
             return self._to_page
         return self._stable
+
+    @property
+    def transition_active(self) -> bool:
+        return self._to_page is not None and self._from_page is not None
 
     def snap(self, page: _BlockPage) -> None:
         """Show ``page`` instantly (no animation)."""
@@ -153,17 +158,17 @@ class _BlockPager(Gtk.ScrolledWindow):
         self.set_size_request(self._width, page.height)
         self._track.show_all()
 
-    def transition(self, to_page: _BlockPage) -> None:
-        """Slide current stable block to ``to_page``. Does not retarget mid-slide."""
+    def begin_transition(self, to_page: _BlockPage) -> bool:
+        """Mount FROM|TO without starting a clock (driven by the window timeline)."""
         if self.animating:
-            return
+            return False
 
         from_page = self._stable
         if from_page is None:
             self.snap(to_page)
-            return
+            return False
         if from_page is to_page:
-            return
+            return False
 
         self._stop_tick()
         self._detach_track()
@@ -184,6 +189,25 @@ class _BlockPager(Gtk.ScrolledWindow):
         self._anim_from_x = 0.0
         self._anim_to_x = float(self._width)
         self._track.show_all()
+        return True
+
+    def apply_progress(self, t: float) -> None:
+        """Apply shared eased progress ``t`` in [0, 1] to offset and height."""
+        if self._to_page is None:
+            return
+        x = _lerp(self._anim_from_x, self._anim_to_x, t)
+        h = _lerp(self._h_from, self._h_to, t)
+        self._set_offset(x)
+        self.set_size_request(self._width, max(1, int(round(h))))
+
+    def finish_transition(self) -> None:
+        """Settle AFTER the shared timeline reaches t=1."""
+        self._settle()
+
+    def transition(self, to_page: _BlockPage) -> None:
+        """Legacy entry: begin + own clock (prefer window-driven timeline)."""
+        if not self.begin_transition(to_page):
+            return
         self._start_animation()
 
     def _attach_page(self, page: _BlockPage) -> None:
@@ -329,21 +353,34 @@ class NotificationGroupWindow(Gtk.Window):
         # Latest destination requested while a slide is in progress (coalesce).
         self._queued_snapshots: list[NotificationSnapshot] | None = None
         self._width = NOTIFICATION_POPUP_WIDTH
+        self._window_height = NOTIFICATION_POPUP_MAX_HEIGHT + 16
+        # Last placed screen coords (X stays fixed while Y animates between parents).
+        self._placed_x: int | None = None
+        self._placed_y: int | None = None
+        # Shared transition timeline (content slide + window Y).
+        self._shared_tick_id = 0
+        self._shared_using_frame_clock = False
+        self._shared_start_us = 0
+        self._y_from = 0.0
+        self._y_to = 0.0
+        self._y_pivot_t = 0.0
+        self._y_active = False
+        self._content_driving = False
+        self._shared_arm_id = 0
 
         self.set_name("shell-notification-group-window")
         register_shell_popup(self, shell_window)
         configure_toplevel(self, title=TITLE_NOTIFICATION_GROUP)
         configure_interactive_popup(self)
-        window_height = NOTIFICATION_POPUP_MAX_HEIGHT + 16
-        self.set_default_size(self._width, window_height)
-        self.set_size_request(self._width, window_height)
+        self.set_default_size(self._width, self._window_height)
+        self.set_size_request(self._width, self._window_height)
 
         self.connect("focus-in-event", self._on_focus_in)
         self.connect("delete-event", self._on_delete)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         outer.get_style_context().add_class("notification-group-window-content")
-        outer.set_size_request(self._width, window_height)
+        outer.set_size_request(self._width, self._window_height)
         dress_window(self, WindowRole.NOTIFICATION_GROUP, outer)
 
         scrolled = Gtk.ScrolledWindow()
@@ -440,7 +477,11 @@ class NotificationGroupWindow(Gtk.Window):
         page = self._page_for(new_snapshots)
         self._queued_snapshots = None
         self._apply_visible_state(new_snapshots, new_key)
-        self._pager.transition(page)
+        if self._pager.begin_transition(page):
+            self._content_driving = True
+            self._arm_shared_timeline()
+        else:
+            self._content_driving = False
 
     def set_group(
         self,
@@ -513,11 +554,15 @@ class NotificationGroupWindow(Gtk.Window):
         if self._fade_source_id:
             GLib.source_remove(self._fade_source_id)
             self._fade_source_id = 0
+        self._stop_shared_tick()
+        self._content_driving = False
+        self._y_active = False
         self.hide()
         self.set_opacity(1.0)
 
     def destroy_group(self) -> None:
         self._queued_snapshots = None
+        self._stop_shared_tick()
         self.hide_group()
         self._group_key = None
         self._snapshots = []
@@ -530,28 +575,273 @@ class NotificationGroupWindow(Gtk.Window):
         anchor: Gtk.Widget,
         popup_window: Gtk.Window,
     ) -> None:
+        """Snap instantly beside the history popup, centered on ``anchor``."""
+        self.follow_parent(anchor, popup_window, animate=False)
+
+    def follow_parent(
+        self,
+        anchor: Gtk.Widget,
+        popup_window: Gtk.Window,
+        *,
+        animate: bool,
+    ) -> None:
+        """Keep X; move Y so the window center tracks the parent row center."""
+        self.bind_anchor(
+            anchor,
+            popup_window,
+            notifications_position=getattr(popup_window, "position", None),
+        )
+        placement = self._compute_placement(anchor, popup_window)
+        if placement is None:
+            return
+        target_x, target_y = placement
+
+        if not animate or not self.get_visible() or self._placed_y is None:
+            self._y_active = False
+            if self._placed_x is None:
+                self._placed_x = target_x
+            self._place_window(self._placed_x, target_y, live=False)
+            return
+
+        x = self._placed_x if self._placed_x is not None else target_x
+        self._placed_x = x
+        current_y = self._y_current() if self._y_active else float(self._placed_y)
+
+        if abs(current_y - target_y) < 0.5 and not self._content_driving:
+            self._y_active = False
+            self._place_window(x, target_y, live=False)
+            return
+
+        # Retarget Y on the shared timeline (same start/duration as content).
+        self._y_from = current_y
+        self._y_to = float(target_y)
+        if self._shared_tick_id and self._content_driving:
+            self._y_pivot_t = self._shared_raw_t()
+        else:
+            self._y_pivot_t = 0.0
+        self._y_active = True
+        self._arm_shared_timeline()
+
+    def _compute_placement(
+        self,
+        anchor: Gtk.Widget,
+        popup_window: Gtk.Window,
+    ) -> tuple[int, int] | None:
+        """Return (x, y): X beside history popup; Y centered on parent, panel-clamped."""
         group_width = self._width
-        group_height = NOTIFICATION_POPUP_MAX_HEIGHT + 16
         gap = 6
 
         parent_rect = self._resolve_parent_popup_rect(anchor, popup_window)
         if parent_rect is None:
-            return
+            return None
         notifications_left, notifications_top, notifications_width = parent_rect
         monitor = monitor_containing_point(notifications_left, notifications_top)
         if monitor is None:
-            return
+            return None
 
         left = notifications_left - gap - group_width
         notifications_right = notifications_left + notifications_width
         if left < monitor.x:
             left = notifications_right + gap
-        top = notifications_top
-
         left = max(monitor.x, min(left, monitor.x + monitor.width - group_width))
-        top = max(monitor.y, min(top, monitor.y + monitor.height - group_height))
 
-        reposition_popup(self, title=TITLE_NOTIFICATION_GROUP, x=left, y=top)
+        panel_top, panel_bottom = self._panel_vertical_bounds(
+            monitor=monitor,
+            notifications_top=notifications_top,
+            popup_window=popup_window,
+        )
+        window_height = self._fit_window_height(panel_top, panel_bottom)
+
+        geometry = anchor_button_geometry(anchor)
+        if geometry is None:
+            ideal_y = notifications_top
+        else:
+            parent_center_y = geometry.top + geometry.height // 2
+            ideal_y = parent_center_y - window_height // 2
+
+        top = self._clamp_y(ideal_y, window_height, panel_top, panel_bottom)
+        return left, top
+
+    def _panel_vertical_bounds(
+        self,
+        *,
+        monitor,
+        notifications_top: int,
+        popup_window: Gtk.Window,
+    ) -> tuple[int, int]:
+        """Available vertical band: below the bar / history top, above monitor bottom."""
+        del popup_window  # reserved for future padding-aware bounds
+        bar_bottom = self._shell_bar_bottom()
+        panel_top = max(monitor.y, notifications_top)
+        if bar_bottom is not None:
+            panel_top = max(panel_top, bar_bottom)
+        panel_bottom = monitor.y + monitor.height
+        if panel_bottom <= panel_top:
+            panel_bottom = panel_top + 1
+        return panel_top, panel_bottom
+
+    def _shell_bar_bottom(self) -> int | None:
+        shell = self._shell_window
+        if not shell.get_realized():
+            return None
+        gdk_window = shell.get_window()
+        if gdk_window is None:
+            return None
+        origin = gdk_window.get_origin()
+        if len(origin) == 3:
+            _ok, root_x, root_y = origin
+        else:
+            root_x, root_y = origin
+        height = max(1, int(shell.get_allocated_height()))
+        return int(root_y) + height
+
+    def _fit_window_height(self, panel_top: int, panel_bottom: int) -> int:
+        available = max(1, panel_bottom - panel_top)
+        target = min(self._window_height, available)
+        requested = self.get_size_request().height
+        if requested != target:
+            self.set_size_request(self._width, target)
+            self.set_default_size(self._width, target)
+        return target
+
+    @staticmethod
+    def _clamp_y(
+        y: float,
+        window_height: int,
+        panel_top: int,
+        panel_bottom: int,
+    ) -> int:
+        min_y = panel_top
+        max_y = panel_bottom - window_height
+        if max_y < min_y:
+            return min_y
+        return int(max(min_y, min(y, max_y)))
+
+    def _place_window(self, x: int, y: int, *, live: bool) -> None:
+        nx, ny = int(x), int(y)
+        if (
+            live
+            and self._placed_x == nx
+            and self._placed_y == ny
+        ):
+            return
+        self._placed_x = nx
+        self._placed_y = ny
+        if live:
+            reposition_popup_live(
+                self,
+                title=TITLE_NOTIFICATION_GROUP,
+                x=nx,
+                y=ny,
+            )
+        else:
+            reposition_popup(
+                self,
+                title=TITLE_NOTIFICATION_GROUP,
+                x=nx,
+                y=ny,
+            )
+
+    def _shared_raw_t(self) -> float:
+        duration = float(max(1, NOTIFICATION_GROUP_SLIDE_DURATION_MS))
+        elapsed_ms = (GLib.get_monotonic_time() - self._shared_start_us) / 1000.0
+        return min(1.0, max(0.0, elapsed_ms / duration))
+
+    def _shared_eased_t(self) -> float:
+        return _ease_in_out_cubic(self._shared_raw_t())
+
+    def _y_current(self) -> float:
+        if not self._y_active:
+            return float(self._placed_y or 0)
+        t = self._shared_eased_t()
+        return self._y_at(t)
+
+    def _y_at(self, t: float) -> float:
+        pivot = self._y_pivot_t
+        if pivot <= 0.0:
+            return _lerp(self._y_from, self._y_to, t)
+        if t <= pivot:
+            return self._y_from
+        span = max(1e-6, 1.0 - pivot)
+        u = (t - pivot) / span
+        return _lerp(self._y_from, self._y_to, u)
+
+    def _arm_shared_timeline(self) -> None:
+        """Start the shared clock on idle so content + Y are armed in the same frame."""
+        if self._shared_tick_id or self._shared_arm_id:
+            return
+        self._shared_arm_id = GLib.idle_add(self._start_armed_shared)
+
+    def _start_armed_shared(self) -> bool:
+        self._shared_arm_id = 0
+        self._ensure_shared_timeline()
+        return False
+
+    def _ensure_shared_timeline(self) -> None:
+        if self._shared_tick_id:
+            return
+        if not self._content_driving and not self._y_active:
+            return
+        if NOTIFICATION_GROUP_SLIDE_DURATION_MS <= 0:
+            self._apply_shared_progress(1.0)
+            self._finish_shared_timeline()
+            return
+        self._shared_start_us = GLib.get_monotonic_time()
+        self._shared_using_frame_clock = True
+        self._shared_tick_id = self.add_tick_callback(self._on_shared_frame)
+        if self._shared_tick_id == 0:
+            self._shared_using_frame_clock = False
+            self._shared_tick_id = GLib.timeout_add(
+                _SLIDE_TICK_MS,
+                self._on_shared_timeout,
+            )
+
+    def _stop_shared_tick(self) -> None:
+        if self._shared_arm_id:
+            GLib.source_remove(self._shared_arm_id)
+            self._shared_arm_id = 0
+        if not self._shared_tick_id:
+            return
+        if self._shared_using_frame_clock:
+            self.remove_tick_callback(self._shared_tick_id)
+        else:
+            GLib.source_remove(self._shared_tick_id)
+        self._shared_tick_id = 0
+        self._shared_using_frame_clock = False
+
+    def _on_shared_frame(self, _widget: Gtk.Widget, _clock: Gdk.FrameClock) -> bool:
+        return self._advance_shared()
+
+    def _on_shared_timeout(self) -> bool:
+        return self._advance_shared()
+
+    def _advance_shared(self) -> bool:
+        raw = self._shared_raw_t()
+        t = _ease_in_out_cubic(raw)
+        self._apply_shared_progress(t)
+        if raw < 1.0:
+            return True
+        self._shared_tick_id = 0
+        self._shared_using_frame_clock = False
+        self._finish_shared_timeline()
+        return False
+
+    def _apply_shared_progress(self, t: float) -> None:
+        if self._content_driving and self._pager.transition_active:
+            self._pager.apply_progress(t)
+        if self._y_active and self._placed_x is not None:
+            y = self._y_at(t)
+            self._place_window(self._placed_x, int(round(y)), live=True)
+
+    def _finish_shared_timeline(self) -> None:
+        had_content = self._content_driving and self._pager.transition_active
+        self._content_driving = False
+        if self._y_active and self._placed_x is not None:
+            self._place_window(self._placed_x, int(round(self._y_to)), live=False)
+        self._y_active = False
+        self._y_pivot_t = 0.0
+        if had_content:
+            self._pager.finish_transition()
 
     def _on_pager_settled(self) -> None:
         queued = self._queued_snapshots
@@ -561,10 +851,11 @@ class NotificationGroupWindow(Gtk.Window):
         key = grouping_key(queued[0])
         if key == self._group_key and _fingerprint(queued) == _fingerprint(self._snapshots):
             return
-        # Continue toward the latest parent without rebuilding if cached.
         page = self._page_for(queued)
         self._apply_visible_state(queued, key)
-        self._pager.transition(page)
+        if self._pager.begin_transition(page):
+            self._content_driving = True
+            self._arm_shared_timeline()
 
     def _apply_visible_state(
         self,

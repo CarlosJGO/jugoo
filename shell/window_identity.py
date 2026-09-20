@@ -329,6 +329,13 @@ def reposition_popup(window: Gtk.Window, *, title: str, x: int, y: int) -> None:
         schedule_hyprland_popup_move(title, int(x), int(y))
 
 
+def reposition_popup_live(window: Gtk.Window, *, title: str, x: int, y: int) -> None:
+    """Per-frame move during animation: one compositor call, no retry storm."""
+    window.move(int(x), int(y))
+    if is_wayland_session():
+        _hyprland_move_popup(title, int(x), int(y))
+
+
 def schedule_hyprland_popup_move(title: str, x: int, y: int) -> None:
     """Move a floating shell popup through Hyprland after map."""
 

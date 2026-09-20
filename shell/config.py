@@ -181,7 +181,7 @@ NOTIFICATION_POPUP_LIST_SPACING = 8
 
 # Stacked group window: whole-block page slide when changing parent.
 # Deliberately long so rapid parent changes feel like continuous navigation.
-NOTIFICATION_GROUP_SLIDE_DURATION_MS = 900
+NOTIFICATION_GROUP_SLIDE_DURATION_MS = 700
 
 # Timeouts (milliseconds). 0 = persist until manually dismissed.
 NOTIFICATIONS_DEFAULT_TIMEOUT_MS = 5000

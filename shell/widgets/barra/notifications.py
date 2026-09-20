@@ -417,7 +417,7 @@ class NotificationsWidget(ShellModule):
             next_ids = tuple(snapshot.id for snapshot in group_snapshots)
             if current_ids != next_ids:
                 window.show_group(group_snapshots, animate=False)
-            window.position_left_of_popup(anchor, popup)
+            window.follow_parent(anchor, popup, animate=False)
             return
 
         animate = was_visible and bool(window.group_key)
@@ -427,7 +427,8 @@ class NotificationsWidget(ShellModule):
             self._outside_click.set_extra_windows((window,))
             window.present_group()
         else:
-            window.position_left_of_popup(anchor, popup)
+            # Content slide + window Y follow start together (700ms, same easing).
+            window.follow_parent(anchor, popup, animate=animate)
 
     def _close_group_window(self) -> None:
         if self._group_window is not None:

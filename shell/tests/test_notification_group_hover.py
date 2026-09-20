@@ -7,6 +7,7 @@ from unittest import mock
 
 from shell.config import NOTIFICATION_GROUP_SLIDE_DURATION_MS
 from shell.widgets.notificaciones.notification_group_window import (
+    NotificationGroupWindow,
     _ease_in_out_cubic,
     _fingerprint,
     _lerp,
@@ -15,7 +16,7 @@ from shell.widgets.notificaciones.notification_popup import NotificationGroupRow
 
 
 def test_slide_duration_is_deliberately_long() -> None:
-    assert NOTIFICATION_GROUP_SLIDE_DURATION_MS >= 800
+    assert NOTIFICATION_GROUP_SLIDE_DURATION_MS == 700
 
 
 def test_hover_opens_group_immediately() -> None:
@@ -64,6 +65,16 @@ def test_fingerprint_stable_for_same_ids() -> None:
     assert _fingerprint(snaps) == (1, 2)  # type: ignore[arg-type]
 
 
+def test_clamp_y_respects_panel_band() -> None:
+    clamp = NotificationGroupWindow._clamp_y
+    # Ideal above the bar → pinned to panel_top
+    assert clamp(-50, window_height=200, panel_top=40, panel_bottom=800) == 40
+    # Ideal below → pinned so bottom stays in panel
+    assert clamp(700, window_height=200, panel_top=40, panel_bottom=800) == 600
+    # Ideal inside → unchanged
+    assert clamp(100, window_height=200, panel_top=40, panel_bottom=800) == 100
+
+
 def test_lerp_and_ease_still_continuous() -> None:
     assert _lerp(400.0, 100.0, 1.0) == 100.0
     samples = [_ease_in_out_cubic(t / 10) for t in range(11)]
@@ -75,5 +86,6 @@ if __name__ == "__main__":
     test_hover_opens_group_immediately()
     test_coalesce_keeps_only_latest_destination()
     test_fingerprint_stable_for_same_ids()
+    test_clamp_y_respects_panel_band()
     test_lerp_and_ease_still_continuous()
     print("ok")
