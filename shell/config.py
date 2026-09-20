@@ -173,11 +173,15 @@ NOTIFICATIONS_PAUSED_DEFAULT = False
 
 # Popup list.
 NOTIFICATION_POPUP_OFFSET = 10
-NOTIFICATION_POPUP_WIDTH = 440
+NOTIFICATION_POPUP_WIDTH = 360
 NOTIFICATION_POPUP_MAX_HEIGHT = 540
 NOTIFICATION_POPUP_ICON_SIZE = 20
 NOTIFICATION_POPUP_ROW_BODY_LINES = 4
 NOTIFICATION_POPUP_LIST_SPACING = 8
+
+# Stacked group window: whole-block page slide when changing parent.
+# Deliberately long so rapid parent changes feel like continuous navigation.
+NOTIFICATION_GROUP_SLIDE_DURATION_MS = 900
 
 # Timeouts (milliseconds). 0 = persist until manually dismissed.
 NOTIFICATIONS_DEFAULT_TIMEOUT_MS = 5000
@@ -215,7 +219,6 @@ ASSISTANT_SLIDE_PX = 10
 # "app" = todas las de una app juntas. EXCEPTIONS flips the default per app key.
 NOTIFICATIONS_GROUPING_MODE = "summary"
 NOTIFICATIONS_GROUPING_EXCEPTIONS = ""
-NOTIFICATION_GROUP_HOVER_DELAY_MS = 300
 
 # Sound (non-blocking; shell works without the file).
 NOTIFICATIONS_SOUND_ENABLED = True

@@ -1996,7 +1996,7 @@ box.notification-popup-content {
         inset 0 -1px 0 alpha(@shell_special, 0.22),
         inset -1px 0 0 alpha(@shell_text_primary, 0.12),
         0 6px 18px @shell_shadow;
-    min-width: 440px;
+    min-width: 360px;
 }
 
 box.notification-popup-header {
@@ -2226,6 +2226,22 @@ label.notification-group-row-badge {
     padding: 2px 6px;
     min-width: 18px;
     min-height: 18px;
+}
+
+box.notification-group-row-tools {
+    min-width: 0;
+}
+
+label.notification-group-row-tools-label {
+    color: @shell_text_secondary;
+    font-size: 11px;
+    font-weight: 600;
+    opacity: 0.9;
+}
+
+scrolledwindow.notification-group-pager {
+    background-color: transparent;
+    border: 0;
 }
 
 window#shell-notification-group-window {

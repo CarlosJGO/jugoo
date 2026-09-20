@@ -11,7 +11,7 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 gi.require_version("Pango", "1.0")
 
-from gi.repository import Gdk, Gtk, GLib, Pango
+from gi.repository import Gdk, Gtk, Pango
 
 from ...config import (
     NOTIFICATION_POPUP_ICON_SIZE,
@@ -20,10 +20,14 @@ from ...config import (
     NOTIFICATION_POPUP_OFFSET,
     NOTIFICATION_POPUP_ROW_BODY_LINES,
     NOTIFICATION_POPUP_WIDTH,
-    NOTIFICATION_GROUP_HOVER_DELAY_MS,
 )
 from ...models import NotificationSnapshot
-from ...popup_handle import pointer_inside_widget, present_popup, hide_popup
+from ...popup_handle import (
+    hide_popup,
+    is_pointer_leaving_surface,
+    pointer_inside_widget,
+    present_popup,
+)
 from ...servicios.notificaciones.notifications import NotificationService
 from ...ui.disfraces import WindowRole, dress_window
 from ...ui.notification_icon import apply_notification_icon
@@ -259,6 +263,10 @@ class NotificationPopup(Gtk.Window):
         on_toggle_paused: Callable[[], None],
         on_toggle_app_sound_mute: Callable[[str], None],
         on_toggle_app_blocked: Callable[[str], None],
+        on_preload_group_pages: Callable[
+            [list[list[NotificationSnapshot]]], None
+        ]
+        | None = None,
     ) -> None:
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
 
@@ -276,6 +284,7 @@ class NotificationPopup(Gtk.Window):
         self._on_toggle_paused = on_toggle_paused
         self._on_toggle_app_sound_mute = on_toggle_app_sound_mute
         self._on_toggle_app_blocked = on_toggle_app_blocked
+        self._on_preload_group_pages = on_preload_group_pages
         self._anchor_button: Gtk.Widget | None = None
         self._fixed_popup_top: int | None = None
         self._position: tuple[int, int, int] | None = None
@@ -389,6 +398,8 @@ class NotificationPopup(Gtk.Window):
         if not snapshots:
             self._list_box.pack_start(self._empty_label, False, False, 0)
             self._empty_label.show_all()
+            if self._on_preload_group_pages is not None:
+                self._on_preload_group_pages([])
             self._scrolled.queue_resize()
             if self.get_visible() and self._anchor_button is not None:
                 schedule_popup_position(self._position_after_show)
@@ -397,7 +408,8 @@ class NotificationPopup(Gtk.Window):
         self._empty_label.hide()
 
         # Merge by grouping key across the full history (interleaved arrivals OK).
-        for group in group_notification_snapshots(snapshots):
+        groups = list(group_notification_snapshots(snapshots))
+        for group in groups:
             representative = group[0]
             app_key = self._service.app_key_for(representative)
             row = NotificationGroupRow(
@@ -414,6 +426,9 @@ class NotificationPopup(Gtk.Window):
                 on_open_group_window=self._on_open_group_window,
             )
             self._list_box.pack_start(row, False, False, 0)
+
+        if self._on_preload_group_pages is not None:
+            self._on_preload_group_pages([group for group in groups if len(group) > 1])
 
         self._list_box.show_all()
         self._scrolled.queue_resize()
@@ -572,7 +587,6 @@ class NotificationGroupRow(Gtk.EventBox):
         )
         self._popover: Gtk.Popover | None = None
         self._popover_leave_timeout_id = 0
-        self._group_hover_timeout_id = 0
         self._hover_opened = False
 
         self.add_events(
@@ -596,6 +610,21 @@ class NotificationGroupRow(Gtk.EventBox):
             content.get_style_context().add_class("notification-group-row-low")
         self.add(content)
 
+        self._face = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self._face.set_hexpand(True)
+        self._tools = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._tools.set_hexpand(True)
+        self._tools.get_style_context().add_class("notification-group-row-tools")
+
+        self._stack = Gtk.Stack()
+        self._stack.set_homogeneous(True)
+        self._stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self._stack.set_transition_duration(120)
+        self._stack.set_hexpand(True)
+        self._stack.add_named(self._face, "face")
+        self._stack.add_named(self._tools, "tools")
+        self._stack.set_visible_child_name("face")
+
         icon_slot = Gtk.Box()
         icon_slot.set_size_request(
             NOTIFICATION_POPUP_ICON_SIZE + 4,
@@ -611,7 +640,7 @@ class NotificationGroupRow(Gtk.EventBox):
         icon.set_halign(Gtk.Align.CENTER)
         icon.set_valign(Gtk.Align.CENTER)
         icon_slot.pack_start(icon, True, True, 0)
-        content.pack_start(icon_slot, False, False, 0)
+        self._face.pack_start(icon_slot, False, False, 0)
 
         meta = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         meta.set_hexpand(True)
@@ -644,14 +673,27 @@ class NotificationGroupRow(Gtk.EventBox):
             summary.set_ellipsize(Pango.EllipsizeMode.END)
             meta.pack_start(summary, False, False, 0)
 
-        content.pack_start(meta, True, True, 0)
+        self._face.pack_start(meta, True, True, 0)
 
         if len(self._group_snapshots) > 1:
             badge = Gtk.Label(label=str(len(self._group_snapshots)))
             badge.get_style_context().add_class("notification-group-row-badge")
-            content.pack_start(badge, False, False, 0)
+            self._face.pack_start(badge, False, False, 0)
 
-        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        gear_button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
+        gear_button.get_style_context().add_class("notification-item-action")
+        gear_button.set_tooltip_text("Opciones")
+        gear_button.add(
+            Gtk.Image.new_from_icon_name("preferences-system-symbolic", Gtk.IconSize.MENU)
+        )
+        gear_button.connect("clicked", self._on_gear_clicked)
+        self._face.pack_start(gear_button, False, False, 0)
+
+        tools_label = Gtk.Label(label="Opciones", xalign=0)
+        tools_label.get_style_context().add_class("notification-group-row-tools-label")
+        tools_label.set_hexpand(True)
+        self._tools.pack_start(tools_label, True, True, 0)
+
         sound_button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
         sound_button.get_style_context().add_class("notification-item-action")
         sound_icon = (
@@ -669,7 +711,7 @@ class NotificationGroupRow(Gtk.EventBox):
             "clicked",
             lambda _btn, key=app_key: on_toggle_app_sound_mute(key),
         )
-        actions.pack_start(sound_button, False, False, 0)
+        self._tools.pack_start(sound_button, False, False, 0)
 
         block_button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
         block_button.get_style_context().add_class("notification-item-action")
@@ -688,7 +730,7 @@ class NotificationGroupRow(Gtk.EventBox):
             "clicked",
             lambda _btn, key=app_key: on_toggle_app_blocked(key),
         )
-        actions.pack_start(block_button, False, False, 0)
+        self._tools.pack_start(block_button, False, False, 0)
 
         if not self._representative.read:
             read_button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
@@ -701,7 +743,7 @@ class NotificationGroupRow(Gtk.EventBox):
                 "clicked",
                 lambda _btn: on_mark_group_read(group_snapshots),
             )
-            actions.pack_start(read_button, False, False, 0)
+            self._tools.pack_start(read_button, False, False, 0)
 
         dismiss_button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
         dismiss_button.set_tooltip_text("Eliminar")
@@ -713,49 +755,58 @@ class NotificationGroupRow(Gtk.EventBox):
             "clicked",
             lambda _btn: on_dismiss_group(group_snapshots),
         )
-        actions.pack_start(dismiss_button, False, False, 0)
-        content.pack_start(actions, False, False, 0)
+        self._tools.pack_start(dismiss_button, False, False, 0)
+
+        back_button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
+        back_button.get_style_context().add_class("notification-item-action")
+        back_button.set_tooltip_text("Volver")
+        back_button.add(
+            Gtk.Image.new_from_icon_name("go-previous-symbolic", Gtk.IconSize.MENU)
+        )
+        back_button.connect("clicked", self._on_tools_back_clicked)
+        self._tools.pack_start(back_button, False, False, 0)
+
+        content.pack_start(self._stack, True, True, 0)
+
+    def _on_gear_clicked(self, _button: Gtk.Button) -> None:
+        self._stack.set_visible_child_name("tools")
+
+    def _on_tools_back_clicked(self, _button: Gtk.Button) -> None:
+        self._stack.set_visible_child_name("face")
+
+    def _tools_visible(self) -> bool:
+        return self._stack.get_visible_child_name() == "tools"
 
     def _on_enter_notify(self, _widget: Gtk.Widget, event: Gdk.EventCrossing) -> bool:
-        if event.window != self.get_window():
+        mode = getattr(event, "mode", None)
+        if mode in (Gdk.CrossingMode.GRAB, Gdk.CrossingMode.UNGRAB):
+            return False
+        # Moving among children still counts as being inside the card.
+        if getattr(event, "detail", None) == Gdk.NotifyType.INFERIOR:
+            return False
+        if self._tools_visible():
             return False
         if len(self._group_snapshots) > 1:
-            self._schedule_group_window_open()
+            self._open_group_window()
+            self._hover_opened = True
         return False
 
     def _on_leave_notify(self, _widget: Gtk.Widget, event: Gdk.EventCrossing) -> bool:
-        if event.window != self.get_window():
+        if not is_pointer_leaving_surface(event):
+            return False
+        if pointer_inside_widget(self):
             return False
         self._hover_opened = False
-        self._cancel_group_window_open()
         if self._popover is not None and self._popover.get_visible():
             self._popover.hide()
         return False
 
-    def _on_motion_notify(self, _widget: Gtk.Widget, event: Gdk.EventMotion) -> bool:
-        if event.window != self.get_window():
+    def _on_motion_notify(self, _widget: Gtk.Widget, _event: Gdk.EventMotion) -> bool:
+        if self._tools_visible():
             return False
         if len(self._group_snapshots) > 1 and not self._hover_opened:
-            self._schedule_group_window_open()
-        return False
-
-    def _schedule_group_window_open(self) -> None:
-        if self._group_hover_timeout_id:
-            return
-        self._group_hover_timeout_id = GLib.timeout_add(
-            NOTIFICATION_GROUP_HOVER_DELAY_MS,
-            self._open_group_window_after_hover,
-        )
-
-    def _cancel_group_window_open(self) -> None:
-        if self._group_hover_timeout_id:
-            GLib.source_remove(self._group_hover_timeout_id)
-            self._group_hover_timeout_id = 0
-
-    def _open_group_window_after_hover(self) -> bool:
-        self._group_hover_timeout_id = 0
-        self._hover_opened = True
-        self._open_group_window()
+            self._open_group_window()
+            self._hover_opened = True
         return False
 
     def _on_row_clicked(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:

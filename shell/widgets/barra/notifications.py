@@ -145,6 +145,7 @@ class NotificationsWidget(ShellModule):
             on_toggle_paused=self._toggle_paused,
             on_toggle_app_sound_mute=self._toggle_app_sound_mute,
             on_toggle_app_blocked=self._toggle_app_blocked,
+            on_preload_group_pages=self._preload_group_pages,
         )
 
     def _on_destroy(self, *_args) -> None:
@@ -242,6 +243,7 @@ class NotificationsWidget(ShellModule):
         popup = self._popup.maybe
         if popup is not None and popup.get_visible():
             popup.refresh()
+        self._sync_group_window()
         return False
 
     def _handle_notification_received(self, snapshot: NotificationSnapshot) -> bool:
@@ -371,36 +373,73 @@ class NotificationsWidget(ShellModule):
             ),
         )
 
+    def _ensure_group_window(self):
+        from ..notificaciones.notification_group_window import NotificationGroupWindow
+
+        created = False
+        if self._group_window is None:
+            self._group_window = NotificationGroupWindow(
+                self._shell_window,
+                self._service,
+                on_invoke_action=self._invoke_action,
+                on_dismiss=self._dismiss,
+                on_open_app=self._open_app,
+            )
+            created = True
+        return self._group_window, created
+
+    def _preload_group_pages(
+        self,
+        groups: list[list[NotificationSnapshot]],
+    ) -> None:
+        """Warm block pages when the history panel opens / refreshes."""
+        if not groups:
+            return
+        window, _created = self._ensure_group_window()
+        window.preload_groups(groups)
+
     def _open_group_window(
         self,
         group_snapshots: list[NotificationSnapshot],
         anchor: Gtk.Widget,
         popup: Gtk.Window,
     ) -> None:
-        from ..notificaciones.notification_group_window import NotificationGroupWindow
-
-        if self._group_window is not None:
-            self._group_window.hide_group()
-
-        window = NotificationGroupWindow(
-            self._shell_window,
-            self._service,
-            group_snapshots,
-            on_invoke_action=self._invoke_action,
-            on_dismiss=self._dismiss,
-            on_open_app=self._open_app,
-            anchor=anchor,
-            popup_window=popup,
+        window, created = self._ensure_group_window()
+        window.bind_anchor(
+            anchor,
+            popup,
             notifications_position=popup.position,
         )
-        self._group_window = window
-        self._outside_click.set_extra_windows((window,))
-        window.present_group()
+        was_visible = bool(window.get_visible())
+        same_parent = was_visible and window.same_group(group_snapshots)
+        if same_parent:
+            current_ids = window.snapshot_ids
+            next_ids = tuple(snapshot.id for snapshot in group_snapshots)
+            if current_ids != next_ids:
+                window.show_group(group_snapshots, animate=False)
+            window.position_left_of_popup(anchor, popup)
+            return
+
+        animate = was_visible and bool(window.group_key)
+        window.show_group(group_snapshots, animate=animate)
+
+        if created or not was_visible:
+            self._outside_click.set_extra_windows((window,))
+            window.present_group()
+        else:
+            window.position_left_of_popup(anchor, popup)
 
     def _close_group_window(self) -> None:
         if self._group_window is not None:
-            self._group_window.hide_group()
+            self._group_window.destroy_group()
             self._group_window = None
+
+    def _sync_group_window(self) -> None:
+        window = self._group_window
+        if window is None or not window.get_visible():
+            return
+        if not window.sync_from_history():
+            self._close_group_window()
 
     def _toggle_paused(self) -> None:
         self._service.toggle_paused()
