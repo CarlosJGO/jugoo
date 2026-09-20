@@ -95,6 +95,7 @@ class TaskMonthGrid(Gtk.Box):
 
         self._grid = Gtk.Grid(row_spacing=2, column_spacing=2)
         self._grid.get_style_context().add_class("clock-calendar-days")
+        self._grid.set_column_homogeneous(True)
         self.pack_start(self._grid, False, False, 0)
         self._rebuild_days()
 
