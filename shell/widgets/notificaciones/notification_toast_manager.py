@@ -90,8 +90,16 @@ class NotificationToastManager:
             # If already visible, update existing card in place
             self._toasts[snapshot.id].show_notification(snapshot)
             return
-        self._queue.enqueue(snapshot.id)
+        if self._fullscreen:
+            self._enqueue_whisper(snapshot.id)
+        else:
+            self._queue.enqueue(snapshot.id)
         self._promote()
+
+    def _enqueue_whisper(self, notification_id: int) -> None:
+        """One HUD chip: keep the current visible (first) and only the newest pending (last)."""
+        for dropped_id in self._queue.replace_pending_with(notification_id):
+            self._snapshots.pop(dropped_id, None)
 
     def clear_presentations(self) -> None:
         """Hide visible toasts and drop the pending queue without touching history."""

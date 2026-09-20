@@ -43,6 +43,20 @@ class ToastPresentationQueue:
             return
         self._pending.append(notification_id)
 
+    def replace_pending_with(self, notification_id: int) -> tuple[int, ...]:
+        """Drop every pending id, then enqueue ``notification_id``.
+
+        Used by fullscreen whisper so a burst only keeps the newest pending
+        (first visible + last arrived). Returns dropped pending ids.
+        """
+        dropped = tuple(
+            item for item in self._pending if item != notification_id
+        )
+        self._pending.clear()
+        if not self.is_tracked(notification_id):
+            self._pending.append(notification_id)
+        return dropped
+
     def promote(self) -> tuple[tuple[int, int], ...]:
         """Fill empty slots from the pending FIFO queue."""
         promoted: list[tuple[int, int]] = []

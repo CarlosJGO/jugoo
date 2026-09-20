@@ -2489,6 +2489,20 @@ label.notification-whisper-summary {
     opacity: 0.92;
 }
 
+label.notification-whisper-sep {
+    color: @shell_text_muted;
+    font-size: 11px;
+    opacity: 0.55;
+}
+
+label.notification-whisper-message {
+    color: @shell_text_secondary;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    opacity: 0.88;
+}
+
 /* ==========================================================================
    Assistant card (Jugoo speaking — distinct from toast notifications)
    ========================================================================== */

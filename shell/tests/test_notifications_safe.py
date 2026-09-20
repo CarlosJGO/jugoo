@@ -213,6 +213,71 @@ def test_toast_queue_does_not_duplicate_tracked_ids() -> None:
     assert queue.visible_count() == 1
 
 
+def test_toast_queue_replace_pending_keeps_latest() -> None:
+    queue = ToastPresentationQueue(1)
+    queue.enqueue(1)
+    queue.promote()
+    assert queue.visible_ids == (1,)
+
+    dropped = queue.replace_pending_with(2)
+    assert dropped == ()
+    assert queue.pending_ids == (2,)
+
+    dropped = queue.replace_pending_with(3)
+    assert dropped == (2,)
+    assert queue.pending_ids == (3,)
+    assert queue.visible_ids == (1,)
+
+    queue.release(1)
+    promoted = queue.promote()
+    assert promoted == ((0, 3),)
+    assert queue.visible_ids == (3,)
+    assert queue.pending_count() == 0
+
+
+def test_format_whisper_chip_text_includes_body_snippet() -> None:
+    from shell.widgets.notificaciones.notification_whisper import format_whisper_chip_text
+
+    titled = NotificationSnapshot(
+        id=1,
+        app_name="WhatsApp",
+        app_icon="",
+        summary="Alice",
+        body="hola, ¿vienes?",
+        actions=(),
+        urgency=1,
+        timestamp=0.0,
+        expire_timeout_ms=5000,
+    )
+    assert format_whisper_chip_text(titled) == ("Alice", "hola, ¿vienes?")
+
+    body_has_summary = NotificationSnapshot(
+        id=2,
+        app_name="WhatsApp",
+        app_icon="",
+        summary="Alice",
+        body="Alice: hola",
+        actions=(),
+        urgency=1,
+        timestamp=0.0,
+        expire_timeout_ms=5000,
+    )
+    assert format_whisper_chip_text(body_has_summary) == ("WhatsApp", "Alice: hola")
+
+    no_body = NotificationSnapshot(
+        id=3,
+        app_name="App",
+        app_icon="",
+        summary="Solo título",
+        body="",
+        actions=(),
+        urgency=1,
+        timestamp=0.0,
+        expire_timeout_ms=5000,
+    )
+    assert format_whisper_chip_text(no_body) == ("Solo título", "")
+
+
 def test_service_expire_keeps_unread_count() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         history_path = Path(tmpdir) / "notifications.json"
@@ -1077,20 +1142,26 @@ def test_toast_manager_fullscreen_uses_whisper() -> None:
         assert mgr.visible_count == 0
         assert mgr._layer.placement == "whisper"
 
-        a = _add(service._store, summary="Whisper A")
-        b = _add(service._store, summary="Whisper B")
+        a = _add(service._store, summary="Whisper A", body="primer mensaje")
+        b = _add(service._store, summary="Whisper B", body="intermedio")
+        c = _add(service._store, summary="Whisper C", body="ultimo mensaje")
         mgr.enqueue(a)
         mgr.enqueue(b)
+        mgr.enqueue(c)
         assert mgr.visible_count == 1
         assert mgr.pending_count == 1
+        assert mgr.pending_notification_ids == (c.id,)
         assert isinstance(mgr._toasts[a.id], NotificationWhisper)
         assert a.id in mgr._toasts
         assert b.id not in mgr._toasts
+        assert c.id not in mgr._toasts
 
         mgr._toasts[a.id].dismiss("timeout")
         assert a.id not in mgr._toasts
-        assert b.id in mgr._toasts
-        assert isinstance(mgr._toasts[b.id], NotificationWhisper)
+        assert b.id not in mgr._toasts
+        assert c.id in mgr._toasts
+        assert isinstance(mgr._toasts[c.id], NotificationWhisper)
+        assert mgr._toasts[c.id]._message.get_text() == "ultimo mensaje"
 
         mgr.set_fullscreen(False)
         assert mgr.fullscreen is False
@@ -1142,6 +1213,8 @@ if __name__ == "__main__":
     test_toast_queue_fifo_promotion_on_release()
     test_toast_queue_clear_drops_pending_without_losing_ids()
     test_toast_queue_does_not_duplicate_tracked_ids()
+    test_toast_queue_replace_pending_keeps_latest()
+    test_format_whisper_chip_text_includes_body_snippet()
     test_service_expire_keeps_unread_count()
     test_store_replace_by_id()
     test_store_mark_all_read()

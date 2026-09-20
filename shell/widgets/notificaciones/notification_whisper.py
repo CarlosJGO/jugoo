@@ -27,8 +27,28 @@ from ...ui.notification_icon import apply_notification_icon
 WhisperDismissReason = Literal["timeout", "click", "cancel"]
 
 
+def format_whisper_chip_text(snapshot: NotificationSnapshot) -> tuple[str, str]:
+    """Return ``(title, message_snippet)`` for the compact HUD chip.
+
+    Title is summary/app; message is a collapsed body preview when it adds
+    information beyond the title.
+    """
+    summary = " ".join((snapshot.summary or "").split())
+    body = " ".join((snapshot.body or "").split())
+    app = " ".join((snapshot.app_name or "").split())
+    title = summary or app or "Notificación"
+    if not body:
+        return title, ""
+    if body.casefold() == title.casefold():
+        return title, ""
+    if summary and body.casefold().startswith(summary.casefold()):
+        # Body already carries the summary (e.g. "Alice: hola") — show body as message.
+        return (app or title), body
+    return title, body
+
+
 class NotificationWhisper(Gtk.EventBox):
-    """Single-line capsule: icon + summary. Built for minimal fullscreen intrusion."""
+    """Single-line capsule: icon + title + message snippet. Minimal fullscreen intrusion."""
 
     def __init__(
         self,
@@ -82,14 +102,32 @@ class NotificationWhisper(Gtk.EventBox):
         )
         self._chip.pack_start(self._icon, False, False, 0)
 
-        self._summary = Gtk.Label(xalign=0)
-        self._summary.get_style_context().add_class("notification-whisper-summary")
-        self._summary.set_hexpand(True)
-        self._summary.set_single_line_mode(True)
-        self._summary.set_ellipsize(Pango.EllipsizeMode.END)
-        self._summary.set_valign(Gtk.Align.CENTER)
-        self._chip.pack_start(self._summary, True, True, 0)
+        self._text = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._text.set_hexpand(True)
+        self._text.set_valign(Gtk.Align.CENTER)
 
+        self._title = Gtk.Label(xalign=0)
+        self._title.get_style_context().add_class("notification-whisper-summary")
+        self._title.set_single_line_mode(True)
+        self._title.set_ellipsize(Pango.EllipsizeMode.END)
+        self._title.set_max_width_chars(18)
+        self._title.set_valign(Gtk.Align.CENTER)
+        self._text.pack_start(self._title, False, False, 0)
+
+        self._sep = Gtk.Label(label="·")
+        self._sep.get_style_context().add_class("notification-whisper-sep")
+        self._sep.set_valign(Gtk.Align.CENTER)
+        self._text.pack_start(self._sep, False, False, 0)
+
+        self._message = Gtk.Label(xalign=0)
+        self._message.get_style_context().add_class("notification-whisper-message")
+        self._message.set_hexpand(True)
+        self._message.set_single_line_mode(True)
+        self._message.set_ellipsize(Pango.EllipsizeMode.END)
+        self._message.set_valign(Gtk.Align.CENTER)
+        self._text.pack_start(self._message, True, True, 0)
+
+        self._chip.pack_start(self._text, True, True, 0)
         self.add(self._chip)
 
     def do_get_preferred_height(self):
@@ -129,13 +167,28 @@ class NotificationWhisper(Gtk.EventBox):
             pixel_size=NOTIFICATIONS_WHISPER_ICON_SIZE,
         )
 
-        text = (snapshot.summary or "").strip() or (snapshot.app_name or "Notificación")
-        self._summary.set_text(text)
+        title, message = format_whisper_chip_text(snapshot)
+        self._title.set_text(title)
+        if message:
+            self._message.set_text(message)
+            self._sep.show()
+            self._message.show()
+        else:
+            self._message.set_text("")
+            self._sep.hide()
+            self._message.hide()
 
-        tip_parts = [p for p in (snapshot.app_name, snapshot.body) if p]
-        self.set_tooltip_text("\n".join(tip_parts) if tip_parts else text)
+        tip_parts = [p for p in (snapshot.app_name, snapshot.summary, snapshot.body) if p]
+        tips: list[str] = []
+        for part in tip_parts:
+            if not tips or tips[-1] != part:
+                tips.append(part)
+        self.set_tooltip_text("\n".join(tips) if tips else title)
 
         self.show_all()
+        if not message:
+            self._sep.hide()
+            self._message.hide()
         timeout_ms = self._resolve_timeout_ms(snapshot)
         if timeout_ms > 0:
             self._hide_source_id = GLib.timeout_add(timeout_ms, self._auto_hide)
