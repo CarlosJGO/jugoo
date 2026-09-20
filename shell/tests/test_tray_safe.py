@@ -93,6 +93,14 @@ def test_tray_service_starts_in_recovery_enabled_state() -> None:
     assert service._watcher_watch_id == 0
 
 
+def test_tray_service_refreshes_on_property_changes() -> None:
+    service = SystemTrayService()
+    assert service._should_refresh_signal("NewIcon") is True
+    assert service._should_refresh_signal("NewToolTip") is True
+    assert service._should_refresh_signal("g-properties-changed") is True
+    assert service._should_refresh_signal("SomeOtherSignal") is False
+
+
 if __name__ == "__main__":
     test_parse_service_address()
     test_parse_sni_methods_from_introspection()

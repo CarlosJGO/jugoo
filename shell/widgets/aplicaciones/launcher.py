@@ -303,6 +303,10 @@ class AppLauncherWindow(PickerOverlay):
 
     def on_activate(self) -> None:
         if self._mode == SEARCH_DESTINATION:
+            # If no row is selected, select the first one
+            if self._list.get_selected_row() is None and self._list.get_children():
+                first_row = self._list.get_children()[0]
+                self._list.select_row(first_row)
             self._launch_selected()
 
     def on_selection_moved(self) -> None:

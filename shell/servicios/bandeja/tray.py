@@ -96,6 +96,7 @@ class _TrayItemState:
     snapshot: TrayItemSnapshot
     methods: frozenset[str] = field(default_factory=frozenset)
     signal_id: int = 0
+    properties_signal_id: int = 0
     watch_id: int = 0
     name_vanished_id: int = 0
 
@@ -516,6 +517,11 @@ class SystemTrayService:
             methods,
         )
         signal_id = proxy.connect("g-signal", self._on_item_proxy_signal, address)
+        properties_signal_id = proxy.connect(
+            "g-properties-changed",
+            self._on_item_proxy_properties_changed,
+            address,
+        )
 
         def _on_bus_name_vanished(_connection: Gio.DBusConnection, _name: str) -> None:
             state = self._items.get(address)
@@ -548,6 +554,7 @@ class SystemTrayService:
             snapshot=snapshot,
             methods=methods,
             signal_id=signal_id,
+            properties_signal_id=properties_signal_id,
             watch_id=watch_id,
             name_vanished_id=name_vanished_id,
         )
@@ -572,6 +579,8 @@ class SystemTrayService:
             return False
         if state.signal_id:
             state.proxy.disconnect(state.signal_id)
+        if state.properties_signal_id:
+            state.proxy.disconnect(state.properties_signal_id)
         if state.name_vanished_id:
             state.proxy.disconnect(state.name_vanished_id)
         if state.watch_id:
@@ -594,6 +603,16 @@ class SystemTrayService:
         )
         self._notify_listener()
 
+    @staticmethod
+    def _should_refresh_signal(signal: str) -> bool:
+        return signal in {
+            "NewIcon",
+            "NewToolTip",
+            "NewStatus",
+            "NewAttentionIcon",
+            "g-properties-changed",
+        }
+
     def _on_item_proxy_signal(
         self,
         _proxy: Gio.DBusProxy,
@@ -602,7 +621,43 @@ class SystemTrayService:
         _params: GLib.Variant,
         address: str,
     ) -> None:
-        if signal in {"NewIcon", "NewToolTip", "NewStatus", "NewAttentionIcon"}:
+        if self._should_refresh_signal(signal):
+            GLib.idle_add(self._refresh_item, address)
+
+    def _on_item_proxy_properties_changed(
+        self,
+        _proxy: Gio.DBusProxy,
+        changed_properties: GLib.Variant | None,
+        _invalidated_properties: GLib.Variant | None,
+        address: str,
+    ) -> None:
+        if changed_properties is None:
+            GLib.idle_add(self._refresh_item, address)
+            return
+
+        try:
+            payload = changed_properties.unpack()
+        except (TypeError, ValueError):
+            GLib.idle_add(self._refresh_item, address)
+            return
+
+        names: set[str] = set()
+        if isinstance(payload, dict):
+            names = set(payload)
+        elif isinstance(payload, tuple) and payload:
+            first = payload[0]
+            if isinstance(first, dict):
+                names = set(first)
+
+        if not names or set({
+            "IconPixmap",
+            "IconName",
+            "AttentionIconName",
+            "Status",
+            "ToolTip",
+            "Menu",
+            "ItemIsMenu",
+        }).intersection(names):
             GLib.idle_add(self._refresh_item, address)
 
     def _call_item_method(
