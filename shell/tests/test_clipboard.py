@@ -198,7 +198,7 @@ def test_v1_history_loads_and_migrates(tmp_path: Path) -> None:
                 "items": [
                     {
                         "id": "1789000023781-413",
-                        "text": "/home/carlosjgo/.local/share/waybar-shell/settings.json",
+                        "text": "/home/user/.local/share/waybar-shell/settings.json",
                         "copied_at": 1789000023.7816327,
                     }
                 ],

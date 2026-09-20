@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import time
+from pathlib import Path
 from typing import Callable, Sequence
 
 PowerExecutor = Callable[[Sequence[str]], None]
@@ -35,7 +36,20 @@ POWER_ACTIONS = (
 _LOCK_WAIT_TIMEOUT_S = 2.0
 _LOCK_PAINT_SLACK_S = 0.15
 _LOCKER_BIN = "hyprlock"
-_LOCKER_WRAPPER_BIN = "/home/carlosjgo/.local/bin/hyprlock-random-bg"
+_LOCKER_WRAPPER_NAME = "hyprlock-random-bg"
+
+
+def _locker_wrapper_path() -> str | None:
+    """Optional custom locker in ``$XDG_BIN_HOME`` / ``~/.local/bin`` / ``PATH``."""
+    candidates: list[Path] = []
+    xdg_bin = os.environ.get("XDG_BIN_HOME")
+    if xdg_bin:
+        candidates.append(Path(xdg_bin) / _LOCKER_WRAPPER_NAME)
+    candidates.append(Path.home() / ".local" / "bin" / _LOCKER_WRAPPER_NAME)
+    for path in candidates:
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+    return shutil.which(_LOCKER_WRAPPER_NAME)
 
 
 class PowerError(RuntimeError):
@@ -189,7 +203,7 @@ def _wait_for_lock_screen(timeout_s: float = _LOCK_WAIT_TIMEOUT_S) -> None:
 
 def _spawn_hyprlock() -> None:
     """Fallback when loginctl did not bring hyprlock up in time."""
-    binary = _LOCKER_WRAPPER_BIN if os.path.exists(_LOCKER_WRAPPER_BIN) else shutil.which(_LOCKER_BIN)
+    binary = _locker_wrapper_path() or shutil.which(_LOCKER_BIN)
     if binary is None:
         return
     try:

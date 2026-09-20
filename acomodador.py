@@ -91,9 +91,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    expected = (
+        Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "jugoo"
+    ).resolve()
+    checkout = project_root().resolve()
     print("Jugoo acomodador")
-    print(f"  checkout: {project_root()}")
+    print(f"  checkout: {checkout}")
     print(f"  hypr:     {HYPR_CONFIG_HOME}")
+    if checkout != expected:
+        print()
+        print(
+            f"⚠ Recomendado clonar en {expected} (XDG config).\n"
+            f"  Actual: {checkout}\n"
+            "  El wrapper `jugoo` y varios paths asumen ese layout."
+        )
     print()
 
     if not args.skip_packages:

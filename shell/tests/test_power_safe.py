@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from shell.servicios.energia.power import (
     ACTION_LOCK,
@@ -149,30 +150,24 @@ def verify_lock_spawn_uses_random_bg_wrapper() -> None:
     import shell.servicios.energia.power as power_mod
 
     captured: list[list[str]] = []
+    wrapper = str(Path.home() / ".local" / "bin" / "hyprlock-random-bg")
 
-    original_which = power_mod.shutil.which
+    original_wrapper = power_mod._locker_wrapper_path
     original_popen = power_mod.subprocess.Popen
-
-    def fake_which(name: str):
-        if name == "hyprlock":
-            return "/usr/bin/hyprlock"
-        if name == "hyprlock-random-bg":
-            return "/home/carlosjgo/.local/bin/hyprlock-random-bg"
-        return None
 
     def fake_popen(argv, **kwargs):
         captured.append(list(argv))
         return object()
 
-    power_mod.shutil.which = fake_which  # type: ignore[method-assign]
+    power_mod._locker_wrapper_path = lambda: wrapper  # type: ignore[method-assign]
     power_mod.subprocess.Popen = fake_popen  # type: ignore[method-assign]
     try:
         power_mod._spawn_hyprlock()
     finally:
-        power_mod.shutil.which = original_which  # type: ignore[method-assign]
+        power_mod._locker_wrapper_path = original_wrapper  # type: ignore[method-assign]
         power_mod.subprocess.Popen = original_popen  # type: ignore[method-assign]
 
-    assert captured == [["/home/carlosjgo/.local/bin/hyprlock-random-bg"]], captured
+    assert captured == [[wrapper]], captured
 
 
 if __name__ == "__main__":

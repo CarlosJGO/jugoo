@@ -198,16 +198,59 @@ que bordes, grupos, blur y opacidad de Hyprland mantienen la misma identidad.
 
 ---
 
-## Cómo ejecutar la shell
+## Instalación
 
-En una máquina nueva (paquetes, identidad `jugoo`, binds/reglas Hyprland y tema):
+Jugoo se diseña como un checkout bajo la config de usuario XDG. **Clónalo
+dentro de `~/.config`** (o `$XDG_CONFIG_HOME`) con el nombre `jugoo`:
 
 ```sh
-cd ~/.config/jugoo   # o la ruta donde clonaste el repo
+mkdir -p ~/.config
+cd ~/.config
+git clone <url-del-repo> jugoo
+cd jugoo
+```
+
+La ruta esperada es:
+
+```text
+~/.config/jugoo
+```
+
+Si usas otro directorio, `acomodador.py` avisa: el wrapper `jugoo` y varios
+artefactos (tema Hyprland, identidad XDG) asumen ese layout.
+
+### Requisitos
+
+- Arch / CachyOS (pacman)
+- Hyprland
+- Python 3 con GTK3 / layer-shell (ver [`system-requirements.txt`](system-requirements.txt))
+
+### Primera configuración
+
+Desde la raíz del checkout:
+
+```sh
 python3 acomodador.py
 ```
 
-Arranque normal (con el wrapper instalado):
+Eso instala paquetes necesarios, la identidad XDG (`jugoo` en `~/.local/bin`),
+snippets de Hyprland y exporta el tema. Opciones útiles:
+
+```sh
+python3 acomodador.py --dry-run        # ver qué haría, sin escribir
+python3 acomodador.py --skip-packages  # solo identidad + Hyprland
+python3 acomodador.py --with-optional  # incluye paquetes opcionales
+```
+
+Después recarga Hyprland:
+
+```sh
+hyprctl reload
+```
+
+### Arranque
+
+Con el wrapper instalado:
 
 ```sh
 jugoo
@@ -223,4 +266,10 @@ Lista de acciones para binds de Hyprland:
 
 ```sh
 jugoo action list
+```
+
+Recarga del tema visual (con la shell abierta, o vía CLI):
+
+```sh
+jugoo --reload-theme
 ```
