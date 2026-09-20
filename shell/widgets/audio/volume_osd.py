@@ -41,9 +41,16 @@ def volume_osd_headline(state: SystemVolumeState) -> str:
 
 
 def volume_osd_bar_text(state: SystemVolumeState) -> str:
-    filled = 0 if state.is_muted else int(round(state.percent / 100 * _BAR_SEGMENTS))
-    filled = max(0, min(_BAR_SEGMENTS, filled))
-    return ("█" * filled) + ("░" * (_BAR_SEGMENTS - filled))
+    if state.is_muted:
+        return "🔇"
+    # Base fill for 100% using volume directly (can exceed 1.0)
+    overflow = max(0.0, state.volume - 1.0)
+    overflow_segments = max(0, min(3, int(round(overflow * _BAR_SEGMENTS))))
+    # Main fill: always _BAR_SEGMENTS segments for the 100% base,
+    # plus overflow segments indicated with a different marker
+    main_filled = _BAR_SEGMENTS
+    overflow_markers = "▶" * overflow_segments
+    return "█" * main_filled + overflow_markers
 
 
 def volume_osd_bar_fraction(state: SystemVolumeState) -> float:
@@ -132,6 +139,10 @@ class VolumeOsd(Gtk.Window):
             style.add_class("volume-osd-muted")
         else:
             style.remove_class("volume-osd-muted")
+        if state.volume > 1.0:
+            style.add_class("volume-osd-over")
+        else:
+            style.remove_class("volume-osd-over")
 
     def show_osd(self) -> None:
         """Show without activating or taking keyboard/pointer focus."""

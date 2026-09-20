@@ -68,7 +68,7 @@ def test_volume_osd_headline_and_mute() -> None:
     assert volume_osd_headline(muted) == f"{volume_osd_glyph(muted)} Silenciado"
     assert volume_osd_bar_fraction(muted) == 0.0
     assert "█" in volume_osd_bar_text(playing)
-    assert volume_osd_bar_text(muted) == "░" * 20
+    assert volume_osd_bar_text(muted) == "🔇"
 
 
 def test_audio_service_includes_system_volume_in_snapshot() -> None:

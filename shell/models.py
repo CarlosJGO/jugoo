@@ -139,7 +139,7 @@ class SystemVolumeState:
 
     @property
     def percent(self) -> int:
-        return int(round(max(0.0, min(1.0, self.volume)) * 100))
+        return int(round(max(0.0, self.volume) * 100))
 
 
 @dataclass(frozen=True)

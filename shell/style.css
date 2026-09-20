@@ -2877,6 +2877,12 @@ progressbar.volume-osd-bar progress {
     min-height: 10px;
 }
 
+progressbar.volume-osd-bar.volume-osd-over progress {
+    background-color: @shell_warning;
+    border-radius: 999px;
+    min-height: 10px;
+}
+
 label.volume-osd-bar-text {
     color: @shell_text_secondary;
     font-family: monospace;
