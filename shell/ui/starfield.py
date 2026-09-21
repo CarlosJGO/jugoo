@@ -24,6 +24,44 @@ _BASE_DENSITY = 0.045
 CornerRadii = float | tuple[float, float, float, float]
 
 
+class _BackgroundAnimationScheduler:
+    """One shared GTK tick drives all starfield hosts instead of one timer per host."""
+
+    _instance: "_BackgroundAnimationScheduler | None" = None
+
+    def __init__(self) -> None:
+        self._targets: set["StarfieldBackground"] = set()
+        self._source_id = 0
+        self._time_ms = 0
+
+    @classmethod
+    def instance(cls) -> "_BackgroundAnimationScheduler":
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def attach(self, target: "StarfieldBackground") -> None:
+        self._targets.add(target)
+        if self._source_id == 0 and GLib is not None:
+            self._source_id = GLib.timeout_add(_TICK_MS, self._tick)
+
+    def detach(self, target: "StarfieldBackground") -> None:
+        self._targets.discard(target)
+        if not self._targets and self._source_id and GLib is not None:
+            GLib.source_remove(self._source_id)
+            self._source_id = 0
+
+    def _tick(self) -> bool:
+        self._time_ms += _TICK_MS
+        for target in tuple(self._targets):
+            if target.get_mapped():
+                target._on_animated_frame(self._time_ms)
+        if not self._targets and GLib is not None:
+            GLib.source_remove(self._source_id)
+            self._source_id = 0
+        return True
+
+
 @dataclass(frozen=True)
 class _Star:
     x: float
@@ -113,7 +151,7 @@ class StarfieldBackground(Gtk.EventBox):
         self._matrix: tuple[_MatrixGlyph, ...] = ()
         self._layout_key = (0, 0)
         self._elapsed_ms = 0
-        self._tick_id = 0
+        self._animation_registered = False
         self.set_app_paintable(True)
         self.set_above_child(False)
         self.set_visible_window(True)
@@ -130,39 +168,40 @@ class StarfieldBackground(Gtk.EventBox):
         self.queue_draw()
 
     def _on_map(self, *_args) -> None:
-        self._ensure_tick()
+        self._register_animation()
 
     def _on_unmap(self, *_args) -> None:
-        self._stop_tick()
+        self._unregister_animation()
 
     def _on_destroy(self, *_args) -> None:
-        self._stop_tick()
+        self._unregister_animation()
         if self._event_bus is not None:
             self._event_bus.unsubscribe(THEME_CHANGED, self._on_theme_changed)
 
-    def _ensure_tick(self) -> None:
+    def _register_animation(self) -> None:
         theme = active_theme()
         if theme is not None and not theme.animation.enabled:
-            self._stop_tick()
-            return
-        if self._tick_id:
-            return
-        self._tick_id = GLib.timeout_add(_TICK_MS, self._on_tick)
-
-    def _stop_tick(self) -> None:
-        if self._tick_id:
-            GLib.source_remove(self._tick_id)
-            self._tick_id = 0
-
-    def _on_tick(self) -> bool:
-        theme = active_theme()
-        if theme is not None and not theme.animation.enabled:
-            self._tick_id = 0
+            self._unregister_animation()
             self.queue_draw()
-            return False
-        self._elapsed_ms += _TICK_MS
+            return
+        if self._animation_registered:
+            return
+        _BackgroundAnimationScheduler.instance().attach(self)
+        self._animation_registered = True
+
+    def _unregister_animation(self) -> None:
+        if not self._animation_registered:
+            return
+        _BackgroundAnimationScheduler.instance().detach(self)
+        self._animation_registered = False
+
+    def _on_animated_frame(self, time_ms: int) -> None:
+        theme = active_theme()
+        if theme is not None and not theme.animation.enabled:
+            self.queue_draw()
+            return
+        self._elapsed_ms = time_ms
         self.queue_draw()
-        return True
 
     def _on_size_allocate(self, _widget: Gtk.Widget, allocation) -> None:
         key = (max(0, int(allocation.width)), max(0, int(allocation.height)))
@@ -172,6 +211,13 @@ class StarfieldBackground(Gtk.EventBox):
         self._stars = _generate_stars(key[0], key[1])
         self._matrix = _generate_matrix(key[0], key[1])
         self._ensure_tick()
+
+    def _ensure_tick(self) -> None:
+        theme = active_theme()
+        if theme is not None and not theme.animation.enabled:
+            self._unregister_animation()
+            return
+        self._register_animation()
 
     def _on_draw(self, _widget: Gtk.Widget, cr: cairo.Context) -> bool:
         width = float(self.get_allocated_width())
@@ -318,10 +364,12 @@ def _paint_matrix_background(
     t = elapsed_ms / 1000.0
     cr.select_font_face("monospace", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
     for glyph in glyphs:
+        if glyph.x > width + 20 or glyph.y > height + 20:
+            continue
         flicker = 0.2 + 0.8 * (0.5 + 0.5 * math.sin(t * glyph.speed + glyph.phase))
         alpha = max(0.12, min(1.0, glyph.alpha * flicker))
         cr.set_font_size(glyph.size)
-        cr.set_source_rgba(glow[0] * 0.55 + 0.45, glow[1], glow[2] * 0.7 + 0.3, alpha)
+        cr.set_source_rgba(0.2 + 0.8 * glow[0], 0.75 + 0.25 * glow[1], 0.35 + 0.65 * glow[2], alpha)
         cr.move_to(glyph.x, glyph.y)
         cr.show_text(glyph.char)
 
@@ -386,21 +434,22 @@ def _generate_stars(width: int, height: int) -> tuple[_Star, ...]:
 def _generate_matrix(width: int, height: int) -> tuple[_MatrixGlyph, ...]:
     rng = random.Random(0xC0D3E0 ^ (width * 65537) ^ (height * 131071))
     chars = "01ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-    columns = max(14, int(width / 18))
+    columns = max(8, min(20, int(width / 26)))
+    stack_cap = max(8, min(18, int(height / 16)))
     glyphs: list[_MatrixGlyph] = []
     for column in range(columns):
-        x = 7.0 + column * rng.uniform(14.0, 18.0)
-        stack = rng.randint(12, max(16, int(height / 12)))
+        x = 8.0 + column * (max(12.0, width / max(columns, 1) * 0.9))
+        stack = rng.randint(7, stack_cap)
         for row in range(stack):
-            y = float(row * rng.uniform(14.0, 18.0))
+            y = float(row * rng.uniform(12.0, 18.0))
             glyphs.append(
                 _MatrixGlyph(
                     x=x,
                     y=y,
                     char=rng.choice(chars),
-                    size=rng.uniform(10.0, 15.0),
-                    alpha=rng.uniform(0.18, 0.9),
-                    speed=rng.uniform(0.8, 2.4),
+                    size=rng.uniform(9.0, 12.5),
+                    alpha=rng.uniform(0.18, 0.8),
+                    speed=rng.uniform(0.7, 1.8),
                     phase=rng.uniform(0.0, math.tau),
                 )
             )
