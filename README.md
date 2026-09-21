@@ -1,207 +1,61 @@
-> [!abstract] Identidad
->
-> **Jugoo** es el nombre de mi desktop shell personal para Hyprland (hecho en [[CachyOs]]).
->
-> No nació como un proyecto con ese nombre. Empezó como una modificación de Waybar y, poco a poco, terminó convirtiéndose en algo mucho más grande: una interfaz propia para mi escritorio.
-
----
-
-## ¿Por qué "Jugoo"?
-
-El nombre **Jugoo** tiene un significado personal.
-
-### JGO — Yo
-
-Las letras **JGO** vienen de mis iniciales.
-
-Representan **a mí** y, por extensión, el hecho de que este proyecto es algo construido desde mi propia forma de hacer las cosas: obsesiva, detallista y con la intención de que realmente se sienta mío.
-
-### U — Universe
-
-La **U** representa **Universe**.
-
-Durante el proceso de elegir el nombre apareció una idea que terminó encajando perfectamente con lo que estaba construyendo:
-
-> **"Mi propio universo."**
-
-Jugoo no es solamente una barra. Es un pequeño universo que estoy construyendo alrededor de mi escritorio: ventanas, workspaces, música, estadísticas, reloj, interacciones, servicios y todas las pequeñas cosas que hacen que el entorno se sienta propio.
-
-Pero la palabra *Universe* también representa algo más amplio.
-
-Mi vida ha ido cambiando de órbita. Empezar a programar, entrar cada vez más en este mundo, pasarme a Linux, construir proyectos y conocer personas importantes fueron agregando cosas nuevas a ese universo.
-
-### O — Orbit - Porque las cosas cambian aunque el pasado nunca muera
-
-La **O** representa **Orbit**.
-
-La idea nació de una sensación que terminó acompañando gran parte de esta etapa:
-
-> **"Mi órbita cambió."**
-
-Hay momentos, decisiones, personas y experiencias que alteran la trayectoria que uno llevaba. Algunas cosas aparecen y te hacen tomar una dirección distinta; otras desaparecen y obligan a reajustar el rumbo.
-
-Pero una órbita no tiene por qué representar algo fijo.
-
-Puede cambiar.
-
-Puede alejarse de algo, acercarse a otra cosa o simplemente encontrar una trayectoria diferente.
-
-Por eso la **O** ya no representa a una persona o una referencia concreta. Representa **el movimiento, los cambios y las nuevas trayectorias que forman parte de mi propia historia**.
-
-Y eso hace que la letra siga teniendo un significado personal, pero uno que pertenece completamente a mí.
-
----
-
-## La idea detrás del nombre
-
-**Jugoo** puede entenderse como:
-
-> **JGO + Universe + Orbit.**
-
-Pero más allá de las letras, representa una idea:
-
-> **Construir mi propio universo y encontrar mi propia órbita.**
-
-Una parte de ese universo nació de la programación.
-
-Otra parte nació de empezar a personalizar mi propio entorno.
-
-Y otra parte surgió de personas, decisiones y experiencias que cambiaron mi trayectoria.
-
-En algún momento describí esa sensación como una **órbita que cambió**.
-
-Algo apareció, mi trayectoria se alteró y terminé siguiendo una ruta posiblemente mejor, aunque también llena de asteroides.
-
-Jugoo nace dentro de esa nueva órbita.
-
----
-
-## Lo que quiero que represente
-
-Quiero que Jugoo sea:
-
-* **Personal** — que se sienta como algo mío.
-
-* **Bien hecho** — no solamente funcional, sino cuidado y trabajado hasta el detalle.
-
-* **Diferente** — no una simple copia de otra configuración.
-
-* **Con referencias** — pequeñas partes de mi historia escondidas dentro del proyecto.
-
-* **Evolutivo** — algo que pueda crecer conmigo.
-
-* **Un universo propio** — una colección de herramientas, interfaces e ideas alrededor de mi escritorio.
-
----
-
-## De dónde salió
-
-Originalmente, esto era esencialmente una configuración de **Waybar**.
-
-Con el tiempo comenzaron a aparecer:
-
-* widgets propios;
-* servicios independientes;
-* comunicación con Hyprland;
-* eventos internos;
-* integración multimedia;
-* estadísticas del sistema;
-* componentes GTK;
-* ventanas especiales;
-* lógica propia;
-* una arquitectura más organizada.
-
-Llegó un punto en el que llamarlo simplemente **"mi Waybar"** ya no tenía demasiado sentido.
-
-Había dejado de ser solamente una barra.
-
-Era una **desktop shell**.
-
-Y necesitaba un nombre.
-
----
-
-## El nombre que se quedó
-
-Probé distintas ideas relacionadas con órbitas, universos y conceptos espaciales.
-
-Pero ninguna terminaba de sentirse realmente mía.
-
-Hasta que apareció:
-
 # Jugoo
 
-Primero surgió a partir de **JGO**.
-
-Después apareció la **U**, que terminó representando **Universe**.
-
-Y finalmente la **O**, que encontró su significado en **Orbit**.
-
-JGO representa quién lo construye.
-
-Universe representa el mundo que estoy construyendo.
-
-Orbit representa el movimiento, los cambios y la trayectoria que me llevó hasta aquí.
-
-Y simplemente...
-
-**se quedó.**
-
----
-
-## Una nota para mi yo del futuro
-
-Si algún día vuelvo a abrir este proyecto después de mucho tiempo, quiero recordar que **Jugoo no empezó siendo solamente software**.
-
-Fue una forma de construir algo propio durante una etapa en la que muchas cosas estaban cambiando.
-
-No tenía que ser perfecto.
-
-Pero sí tenía que ser mío.
-
-> **Jugoo es mi pequeño universo.**
+> [!abstract] Identidad
 >
-> **Y yo decido su órbita.**
+> **Jugoo**, mi desktop shell personal para **Hyprland**, construida sobre CachyOS.
+>
+> Empezó como una modificación de Waybar y terminó convirtiéndose en una interfaz propia para mi escritorio: ventanas, workspaces, música, estadísticas, notificaciones y otros componentes del entorno.
+>
+> **Jugoo = JGO + Universe + Orbit.**
+>
+**JGO** representa a quien lo construye.
+**Universe**, el entorno que estoy creando.
+**Orbit**, las trayectorias que cambian cuando distintas cosas se encuentran.
 
-> Y todavía está en construcción.
+> *“Do you believe in gravity?”*
+
+Quizás algunas cosas simplemente tienen una forma de encontrarse.
+
+**Jugoo = JGO + Universe + Orbit.**
+
+>
+> En pocas palabras: **mi propio universo, en mi propia órbita.**
 
 ---
-
-## Datos
-
-**Nombre:** Jugoo
-
-**Tipo:** Desktop Shell
-
-**Entorno:** Hyprland
-
-**Origen:** Configuración de Waybar → proyecto independiente
-
-**Significado:** JGO + Universe + Orbit
-
-**Idea central:** Construir mi propio universo y encontrar mi propia órbita
 
 ## Tema visual
 
-Jugoo usa un tema semántico centralizado. El tema predeterminado está en
-[`themes/space.toml`](themes/space.toml): colores, opacidad, blur, radios y
-animaciones se cambian allí, sin editar widgets individuales.
+Jugoo utiliza un tema semántico centralizado en [`themes/space.toml`](themes/space.toml).
 
-Con la shell abierta, guarda el TOML para recargarlo automáticamente o ejecuta:
+Desde ahí se controlan colores, opacidad, blur, radios y animaciones de la shell.
+
+Con Jugoo abierta, guarda el TOML para recargar el tema automáticamente o ejecuta:
 
 ```sh
 jugoo --reload-theme
 ```
 
-El mismo tema genera `~/.config/hypr/config/jugoo_theme_generated.lua`, de modo
-que bordes, grupos, blur y opacidad de Hyprland mantienen la misma identidad.
+El tema también genera:
+
+```text
+~/.config/hypr/config/jugoo_theme_generated.lua
+```
+
+para mantener la identidad visual entre Jugoo y Hyprland.
 
 ---
 
 ## Instalación
 
-Jugoo se diseña como un checkout bajo la config de usuario XDG. **Clónalo
-dentro de `~/.config`** (o `$XDG_CONFIG_HOME`) con el nombre `jugoo`:
+Jugoo está diseñada para vivir dentro de la configuración XDG del usuario.
+
+Clona el repositorio en:
+
+```text
+~/.config/jugoo
+```
+
+Por ejemplo:
 
 ```sh
 mkdir -p ~/.config
@@ -210,66 +64,76 @@ git clone <url-del-repo> jugoo
 cd jugoo
 ```
 
-La ruta esperada es:
-
-```text
-~/.config/jugoo
-```
-
-Si usas otro directorio, `acomodador.py` avisa: el wrapper `jugoo` y varios
-artefactos (tema Hyprland, identidad XDG) asumen ese layout.
-
 ### Requisitos
 
-- Arch / CachyOS (pacman)
-- Hyprland
-- Python 3 con GTK3 / layer-shell (ver [`system-requirements.txt`](system-requirements.txt))
+* Arch / CachyOS
+* Hyprland
+* Python 3
+* GTK3 / layer-shell
 
-### Primera configuración
+Los paquetes necesarios están especificados en [`system-requirements.txt`](system-requirements.txt).
 
-Desde la raíz del checkout:
+### Configuración inicial
+
+Desde la raíz del proyecto:
 
 ```sh
 python3 acomodador.py
 ```
 
-Eso instala paquetes necesarios, la identidad XDG (`jugoo` en `~/.local/bin`),
-snippets de Hyprland y exporta el tema. Opciones útiles:
+El instalador configura la identidad XDG, instala los paquetes necesarios, prepara la integración con Hyprland y exporta el tema.
+
+Opciones:
 
 ```sh
-python3 acomodador.py --dry-run        # ver qué haría, sin escribir
-python3 acomodador.py --skip-packages  # solo identidad + Hyprland
-python3 acomodador.py --with-optional  # incluye paquetes opcionales
+python3 acomodador.py --dry-run
+python3 acomodador.py --skip-packages
+python3 acomodador.py --with-optional
 ```
 
-Después recarga Hyprland:
+Después:
 
 ```sh
 hyprctl reload
 ```
 
-### Arranque
+---
 
-Con el wrapper instalado:
+## Uso
+
+Iniciar Jugoo:
 
 ```sh
 jugoo
 ```
 
-Desarrollo, desde la raíz del checkout:
+Ejecutarla directamente desde el repositorio:
 
 ```sh
 python3 -m shell
 ```
 
-Lista de acciones para binds de Hyprland:
+Ver las acciones disponibles para Hyprland:
 
 ```sh
 jugoo action list
 ```
 
-Recarga del tema visual (con la shell abierta, o vía CLI):
+Recargar el tema:
 
 ```sh
 jugoo --reload-theme
 ```
+
+---
+
+## Datos
+
+|                 |                                 |
+| --------------- | ------------------------------- |
+| **Nombre**      | Jugoo                           |
+| **Tipo**        | Desktop Shell                   |
+| **Entorno**     | Hyprland                        |
+| **Origen**      | Waybar → proyecto independiente |
+| **Significado** | JGO + Universe + Orbit          |
+| **Tema**        | Space                           |
