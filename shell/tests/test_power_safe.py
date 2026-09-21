@@ -149,15 +149,16 @@ def verify_lock_spawn_uses_random_bg_wrapper() -> None:
     import shell.servicios.energia.power as power_mod
 
     captured: list[list[str]] = []
+    wrapper = "/tmp/fake-xdg-bin/hyprlock-random-bg"
 
     original_which = power_mod.shutil.which
     original_popen = power_mod.subprocess.Popen
 
     def fake_which(name: str):
+        if name == "hyprlock-random-bg":
+            return wrapper
         if name == "hyprlock":
             return "/usr/bin/hyprlock"
-        if name == "hyprlock-random-bg":
-            return "/home/carlosjgo/.local/bin/hyprlock-random-bg"
         return None
 
     def fake_popen(argv, **kwargs):
@@ -172,7 +173,55 @@ def verify_lock_spawn_uses_random_bg_wrapper() -> None:
         power_mod.shutil.which = original_which  # type: ignore[method-assign]
         power_mod.subprocess.Popen = original_popen  # type: ignore[method-assign]
 
-    assert captured == [["/home/carlosjgo/.local/bin/hyprlock-random-bg"]], captured
+    assert captured == [[wrapper]], captured
+
+
+def verify_lock_spawn_falls_back_to_xdg_bin_home() -> None:
+    import shell.servicios.energia.power as power_mod
+
+    captured: list[list[str]] = []
+    previous_bin = os.environ.get("XDG_BIN_HOME")
+    bin_home = "/tmp/fake-xdg-bin-home"
+    wrapper = f"{bin_home}/hyprlock-random-bg"
+
+    original_which = power_mod.shutil.which
+    original_exists = power_mod.os.path.isfile
+    original_access = power_mod.os.access
+    original_popen = power_mod.subprocess.Popen
+
+    def fake_which(name: str):
+        if name == "hyprlock":
+            return "/usr/bin/hyprlock"
+        return None
+
+    def fake_isfile(path: str) -> bool:
+        return path == wrapper
+
+    def fake_access(path: str, mode: int) -> bool:
+        return path == wrapper
+
+    def fake_popen(argv, **kwargs):
+        captured.append(list(argv))
+        return object()
+
+    os.environ["XDG_BIN_HOME"] = bin_home
+    power_mod.shutil.which = fake_which  # type: ignore[method-assign]
+    power_mod.os.path.isfile = fake_isfile  # type: ignore[method-assign]
+    power_mod.os.access = fake_access  # type: ignore[method-assign]
+    power_mod.subprocess.Popen = fake_popen  # type: ignore[method-assign]
+    try:
+        power_mod._spawn_hyprlock()
+    finally:
+        if previous_bin is None:
+            os.environ.pop("XDG_BIN_HOME", None)
+        else:
+            os.environ["XDG_BIN_HOME"] = previous_bin
+        power_mod.shutil.which = original_which  # type: ignore[method-assign]
+        power_mod.os.path.isfile = original_exists  # type: ignore[method-assign]
+        power_mod.os.access = original_access  # type: ignore[method-assign]
+        power_mod.subprocess.Popen = original_popen  # type: ignore[method-assign]
+
+    assert captured == [[wrapper]], captured
 
 
 if __name__ == "__main__":
@@ -182,6 +231,7 @@ if __name__ == "__main__":
     verify_fire_and_forget_detection()
     verify_missing_locker_skips_wait()
     verify_lock_spawn_uses_random_bg_wrapper()
+    verify_lock_spawn_falls_back_to_xdg_bin_home()
     verify_logout_prefers_session_id({"XDG_SESSION_ID": "42"})
     verify_logout_prefers_session_id({"USER": "aidyc"})
     verify_logout_prefers_session_id(None)
