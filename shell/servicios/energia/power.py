@@ -35,7 +35,7 @@ POWER_ACTIONS = (
 _LOCK_WAIT_TIMEOUT_S = 2.0
 _LOCK_PAINT_SLACK_S = 0.15
 _LOCKER_BIN = "hyprlock"
-_LOCKER_WRAPPER_BIN = "/home/o/.local/bin/hyprlock-random-bg"
+_LOCKER_WRAPPER_NAME = "hyprlock-random-bg"
 
 
 class PowerError(RuntimeError):
@@ -187,9 +187,27 @@ def _wait_for_lock_screen(timeout_s: float = _LOCK_WAIT_TIMEOUT_S) -> None:
         time.sleep(0.05)
 
 
+def _locker_wrapper_path() -> str | None:
+    """Resolve hyprlock-random-bg via PATH or XDG_BIN_HOME / ~/.local/bin."""
+    found = shutil.which(_LOCKER_WRAPPER_NAME)
+    if found:
+        return found
+    bin_home = os.environ.get("XDG_BIN_HOME")
+    candidates = []
+    if bin_home:
+        candidates.append(os.path.join(bin_home, _LOCKER_WRAPPER_NAME))
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    if home:
+        candidates.append(os.path.join(home, ".local", "bin", _LOCKER_WRAPPER_NAME))
+    for candidate in candidates:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
 def _spawn_hyprlock() -> None:
     """Fallback when loginctl did not bring hyprlock up in time."""
-    binary = _LOCKER_WRAPPER_BIN if os.path.exists(_LOCKER_WRAPPER_BIN) else shutil.which(_LOCKER_BIN)
+    binary = _locker_wrapper_path() or shutil.which(_LOCKER_BIN)
     if binary is None:
         return
     try:
