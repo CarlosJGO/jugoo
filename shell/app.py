@@ -38,6 +38,7 @@ from .servicios.aplicaciones.applications import ApplicationsService
 from .servicios.portapapeles.servicio import ClipboardService
 from .servicios.audio.audio import AudioService
 from .servicios.audio.audio_visualizer import AudioVisualizerService
+from .servicios.bluetooth.bluetooth import BluetoothService
 from .servicios.escritorio.hyprland import HyprlandService
 from .servicios.multimedia.media import MediaService
 from .servicios.red.network import NetworkService
@@ -52,6 +53,7 @@ from .servicios.tareas.vigilancia.sesion import ensure_task_watcher_service
 from .servicios.teclado.actividad import KeyboardActivityService
 from .settings.manager import SettingsManager
 from .widgets.barra.active_window import ActiveWindowWidget
+from .widgets.barra.bluetooth import BluetoothWidget
 from .widgets.barra.clock import ClockWidget
 from .widgets.barra.ethernet import EthernetWidget
 from .widgets.barra.keyboard_cat import KeyboardCatWidget
@@ -119,6 +121,7 @@ class ShellApplication(Gtk.Window):
             notifications=self.notification_service,
         )
         self.network_service = NetworkService(self.event_bus)
+        self.bluetooth_service = BluetoothService(self.event_bus)
         self.media_service = MediaService(self.event_bus)
         self.keyboard_activity = KeyboardActivityService(self.event_bus)
         self.audio_visualizer = AudioVisualizerService(
@@ -177,6 +180,7 @@ class ShellApplication(Gtk.Window):
         self.layout.left.add(self.keyboard_cat_widget)
 
         self.ethernet_widget = EthernetWidget(self.event_bus, self.network_service)
+        self.bluetooth_widget = BluetoothWidget(self.event_bus, self.bluetooth_service)
         self.tray_widget = SystemTrayWidget(self.tray_service)
         self.layout.right.add(self.tray_widget)
         self.notifications_widget = NotificationsWidget(
@@ -186,6 +190,7 @@ class ShellApplication(Gtk.Window):
         )
         self.layout.right.add(self.notifications_widget)
         self.layout.right.add(self.ethernet_widget)
+        self.layout.right.add(self.bluetooth_widget)
         self.stats_widget = StatsWidget(self.system_stats, self, self.event_bus)
         self.layout.right.add(self.stats_widget)
         self.tasks_widget = TasksWidget(self.event_bus, self.tasks_service, self)
@@ -199,7 +204,9 @@ class ShellApplication(Gtk.Window):
         self.control_center_controller = ControlCenterController(
             self.event_bus,
             self.network_service,
+            self.bluetooth_service,
             self.ethernet_widget,
+            self.bluetooth_widget,
             self.power_widget,
             self,
         )
@@ -269,6 +276,7 @@ class ShellApplication(Gtk.Window):
         self.volume_osd_controller.start()
         self.bar_retract_controller.start()
         self.network_service.start()
+        self.bluetooth_service.start()
         self.media_service.start()
         self.audio_visualizer.start()
         self.notification_service.start()
@@ -293,6 +301,27 @@ class ShellApplication(Gtk.Window):
 
     def toggle_control_center(self) -> None:
         self.control_center_controller.toggle_full_control_center()
+
+    def toggle_bluetooth_panel(self) -> None:
+        self.control_center_controller.toggle_bluetooth_panel()
+
+    def bluetooth_toggle(self) -> None:
+        self.bluetooth_service.toggle_powered()
+
+    def bluetooth_scan(self) -> None:
+        self.bluetooth_service.start_discovery()
+
+    def bluetooth_connect(self, address: str) -> None:
+        self.bluetooth_service.connect_device(address)
+
+    def bluetooth_disconnect(self, address: str) -> None:
+        self.bluetooth_service.disconnect_device(address)
+
+    def bluetooth_pair(self, address: str) -> None:
+        self.bluetooth_service.pair_device(address)
+
+    def bluetooth_remove(self, address: str) -> None:
+        self.bluetooth_service.remove_device(address)
 
     def toggle_notifications(self) -> None:
         self.notifications_widget.toggle_popup()
@@ -416,6 +445,7 @@ class ShellApplication(Gtk.Window):
         self.bar_retract_controller.close()
         self.audio_service.close()
         self.network_service.close()
+        self.bluetooth_service.close()
         self.media_service.close()
         self.audio_visualizer.close()
         self.notification_service.close()
@@ -465,9 +495,9 @@ class ShellGtkApplication(Gtk.Application):
     def do_command_line(self, command_line: Gio.ApplicationCommandLine) -> int:
         from .actions import (
             UNSUPPORTED,
-            dispatch_action,
+            dispatch_invocation,
             format_actions_help,
-            resolve_actions_from_argv,
+            resolve_action_calls,
         )
 
         arguments = [str(item) for item in command_line.get_arguments()[1:]]
@@ -478,8 +508,8 @@ class ShellGtkApplication(Gtk.Application):
             print(format_actions_help())
             return 0
 
-        names = resolve_actions_from_argv(arguments)
-        if not names:
+        calls = resolve_action_calls(arguments)
+        if not calls:
             self.activate()
             return 0
 
@@ -490,12 +520,12 @@ class ShellGtkApplication(Gtk.Application):
             return 1
 
         status = 0
-        for name in names:
-            if name in UNSUPPORTED:
-                print(f"jugoo: {UNSUPPORTED[name]}", file=sys.stderr)
+        for call in calls:
+            if call.name in UNSUPPORTED:
+                print(f"jugoo: {UNSUPPORTED[call.name]}", file=sys.stderr)
                 status = 2
                 continue
-            error = dispatch_action(name, shell)
+            error = dispatch_invocation(call, shell)
             if error:
                 print(f"jugoo: {error}", file=sys.stderr)
                 status = 2

@@ -1909,6 +1909,51 @@ button.ethernet-button.ethernet-state-connecting image.ethernet-icon {
 
 
 /* ==========================================================================
+   9b. Widgets — Bluetooth
+   ========================================================================== */
+
+box.bluetooth-widget {
+    padding: 2px 6px;
+    min-height: 24px;
+}
+
+button.bluetooth-button {
+    background: transparent;
+    border: 0;
+    border-radius: 10px;
+    box-shadow: none;
+    min-width: 24px;
+    min-height: 24px;
+    padding: 2px 4px;
+}
+
+button.bluetooth-button:hover {
+    background-color: @shell_hover_bg;
+}
+
+button.bluetooth-button image.bluetooth-icon {
+    color: @shell_text_primary;
+}
+
+button.bluetooth-button.bluetooth-state-connected image.bluetooth-icon {
+    color: @shell_success;
+}
+
+button.bluetooth-button.bluetooth-state-unavailable image.bluetooth-icon,
+button.bluetooth-button.bluetooth-state-disabled image.bluetooth-icon {
+    color: @shell_text_muted;
+}
+
+button.bluetooth-button.bluetooth-state-disconnected image.bluetooth-icon {
+    color: @shell_text_muted;
+}
+
+button.bluetooth-button.bluetooth-state-discovering image.bluetooth-icon {
+    color: @shell_accent;
+}
+
+
+/* ==========================================================================
    10. Widgets — Power menu
    ========================================================================== */
 
@@ -2797,6 +2842,23 @@ row.control-center-wifi-row-active {
 }
 
 label.control-center-wifi-ssid {
+    color: @shell_text_primary;
+}
+
+listbox.control-center-bluetooth-list {
+    background: transparent;
+}
+
+row.control-center-bluetooth-row {
+    border-radius: 8px;
+    margin: 2px 0;
+}
+
+row.control-center-bluetooth-row-active {
+    background-color: @shell_hover_bg_faint;
+}
+
+label.control-center-bluetooth-name {
     color: @shell_text_primary;
 }
 

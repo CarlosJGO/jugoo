@@ -12,6 +12,14 @@ sudo pacman -S hyprpolkitagent
 # systemctl --user enable --now hyprpolkitagent.service
 # (acomodador.py lo activa; o en hyprland: exec-once = systemctl --user start hyprpolkitagent)
 
+# Bluetooth (BlueZ): Jugoo habla con bluetoothd vía D-Bus (org.bluez).
+# Transferencia de archivos: Object Push vía org.bluez.obex (obexd, bus de sesión).
+# No se empaqueta BlueZ en el repo; debe venir del sistema.
+# Comprobar (sin alterar el servicio): `systemctl is-active bluetooth`, `bluetoothctl show`
+sudo pacman -S bluez bluez-utils bluez-obex
+# systemctl enable --now bluetooth.service   # solo si quieres activarlo a mano
+# systemctl --user enable --now obex.service # transferencia de archivos (enviar/recibir)
+
 # Keyboard cat: leer /dev/input (sin paquete Python extra).
 # Tras esto, cierra sesión para que el grupo surta efecto.
 # sudo usermod -aG input "$USER"

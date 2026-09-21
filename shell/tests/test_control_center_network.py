@@ -387,14 +387,16 @@ def test_network_panel_popup_uses_network_view() -> None:
     if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
         return
 
+    from shell.servicios.bluetooth.bluetooth import BluetoothService
     from shell.widgets.centro_control.popup import ControlCenterPopup
 
     shell = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
     service = NetworkService(EventBus())
+    bluetooth = BluetoothService(EventBus())
     anchor = Gtk.Button(label="Ethernet")
     shell.add(anchor)
 
-    popup = ControlCenterPopup(shell, service, view=ControlCenterView.NETWORK)
+    popup = ControlCenterPopup(shell, service, bluetooth, view=ControlCenterView.NETWORK)
     assert popup.view is ControlCenterView.NETWORK
     assert popup.get_title() == TITLE_NETWORK_PANEL
     assert popup.get_name() == "shell-network-panel"
@@ -413,14 +415,16 @@ def test_full_control_center_popup_uses_full_view() -> None:
     if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
         return
 
+    from shell.servicios.bluetooth.bluetooth import BluetoothService
     from shell.widgets.centro_control.popup import ControlCenterPopup
 
     shell = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
     service = NetworkService(EventBus())
+    bluetooth = BluetoothService(EventBus())
     anchor = Gtk.Button(label="Power")
     shell.add(anchor)
 
-    popup = ControlCenterPopup(shell, service, view=ControlCenterView.FULL)
+    popup = ControlCenterPopup(shell, service, bluetooth, view=ControlCenterView.FULL)
     assert popup.view is ControlCenterView.FULL
     assert popup.get_title() == TITLE_CONTROL_CENTER
     assert popup.get_name() == "shell-control-center"
@@ -438,7 +442,7 @@ def test_full_control_center_popup_uses_full_view() -> None:
 def _make_controller_stub(*, network_visible: bool = False, full_visible: bool = False):
     from shell.controllers.control_center import ControlCenterController
 
-    opened = {"network": False, "full": False}
+    opened = {"network": False, "full": False, "bluetooth": False}
 
     class Widget:
         def get_anchor_button(self):
@@ -450,6 +454,7 @@ def _make_controller_stub(*, network_visible: bool = False, full_visible: bool =
         "uninstall": lambda *args, **kwargs: None,
     })()
     controller._ethernet_widget = Widget()
+    controller._bluetooth_widget = Widget()
     controller._power_widget = type("Power", (), {
         "close_menu": lambda *_args, **_kwargs: None,
         "get_anchor_button": Widget().get_anchor_button,
@@ -466,6 +471,14 @@ def _make_controller_stub(*, network_visible: bool = False, full_visible: bool =
             "close_popup": lambda: None,
         })(),
     })()
+    controller._bluetooth_panel = type("PopupHandle", (), {
+        "is_visible": lambda self: False,
+        "maybe": None,
+        "get": lambda self: type("Popup", (), {
+            "open_for": lambda *_args: opened.__setitem__("bluetooth", True),
+            "close_popup": lambda: None,
+        })(),
+    })()
     controller._full_center = type("PopupHandle", (), {
         "is_visible": lambda self: full_visible,
         "maybe": None,
@@ -477,9 +490,11 @@ def _make_controller_stub(*, network_visible: bool = False, full_visible: bool =
     for name in (
         "close_popup",
         "toggle_network_panel",
+        "toggle_bluetooth_panel",
         "toggle_full_control_center",
         "_open_panel",
         "_handle_network_panel_requested",
+        "_handle_bluetooth_panel_requested",
         "_handle_full_control_center_requested",
     ):
         setattr(controller, name, getattr(ControlCenterController, name).__get__(controller))

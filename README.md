@@ -70,6 +70,7 @@ cd jugoo
 * Hyprland
 * Python 3
 * GTK3 / layer-shell
+* BlueZ (`bluez` / `bluez-utils` / `bluez-obex`) para Bluetooth — Jugoo usa BlueZ mediante D-Bus; BlueZ y obexd deben estar instalados y ejecutándose en el sistema para control y transferencia de archivos
 
 Los paquetes necesarios están especificados en [`system-requirements.txt`](system-requirements.txt).
 

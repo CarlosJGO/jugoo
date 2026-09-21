@@ -10,5 +10,6 @@ class ControlCenterView(str, Enum):
 
     FULL = "full"
     NETWORK = "network"
+    BLUETOOTH = "bluetooth"
     AUDIO = "audio"
     MEDIA = "media"

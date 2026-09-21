@@ -8,6 +8,7 @@ Preferred CLI::
 
     jugoo action launcher
     jugoo action list
+    jugoo action bluetooth-connect AA:BB:CC:DD:EE:FF
 
 Legacy flags (``--toggle-launcher``, …) remain and resolve to the same names.
 """
@@ -28,6 +29,16 @@ class ShellAction:
     legacy_flags: tuple[str, ...] = ()
     # If False, keep for CLI/compat but discourage new global binds.
     recommend_global_bind: bool = True
+    # When True, the next CLI token is treated as an address/path argument.
+    takes_target: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ActionInvocation:
+    """Resolved action plus optional target argument (e.g. Bluetooth address)."""
+
+    name: str
+    args: tuple[str, ...] = ()
 
 
 # Canonical action ids — keep this list small on purpose.
@@ -112,6 +123,38 @@ ACTIONS: tuple[ShellAction, ...] = (
         "Restore previous SDDM theme selection (Polkit)",
         recommend_global_bind=False,
     ),
+    ShellAction(
+        "bluetooth-toggle",
+        "Toggle Bluetooth adapter power",
+    ),
+    ShellAction(
+        "bluetooth-scan",
+        "Start Bluetooth device discovery",
+    ),
+    ShellAction(
+        "bluetooth-connect",
+        "Connect to a Bluetooth device (requires address)",
+        takes_target=True,
+        recommend_global_bind=False,
+    ),
+    ShellAction(
+        "bluetooth-disconnect",
+        "Disconnect a Bluetooth device (requires address)",
+        takes_target=True,
+        recommend_global_bind=False,
+    ),
+    ShellAction(
+        "bluetooth-pair",
+        "Pair a Bluetooth device (requires address)",
+        takes_target=True,
+        recommend_global_bind=False,
+    ),
+    ShellAction(
+        "bluetooth-remove",
+        "Forget / remove a paired Bluetooth device (requires address)",
+        takes_target=True,
+        recommend_global_bind=False,
+    ),
 )
 
 _BY_NAME = {action.name: action for action in ACTIONS}
@@ -120,6 +163,7 @@ _BY_FLAG = {
     for action in ACTIONS
     for flag in action.legacy_flags
 }
+_TARGET_ACTIONS = {action.name for action in ACTIONS if action.takes_target}
 
 # Known but intentionally unsupported — callers get a clear error, not a silent no-op.
 UNSUPPORTED: dict[str, str] = {
@@ -138,25 +182,26 @@ def known_action_names() -> tuple[str, ...]:
     return tuple(action.name for action in ACTIONS)
 
 
-def resolve_actions_from_argv(arguments: Sequence[str]) -> tuple[str, ...]:
-    """Return ordered unique action names requested by ``argv`` (without prog name).
+def resolve_action_calls(arguments: Sequence[str]) -> tuple[ActionInvocation, ...]:
+    """Return ordered unique action invocations from ``argv`` (without prog name).
 
     Accepts::
 
         action launcher
         action launcher clipboard
+        action bluetooth-connect AA:BB:CC:DD:EE:FF
         --toggle-launcher
-        --list-actions   (handled by caller; not returned here)
     """
     args = [str(item) for item in arguments]
-    names: list[str] = []
-    seen: set[str] = set()
+    calls: list[ActionInvocation] = []
+    seen: set[tuple[str, tuple[str, ...]]] = set()
 
-    def add(name: str) -> None:
-        if name in seen:
+    def add(name: str, call_args: tuple[str, ...] = ()) -> None:
+        key = (name, call_args)
+        if key in seen:
             return
-        seen.add(name)
-        names.append(name)
+        seen.add(key)
+        calls.append(ActionInvocation(name, call_args))
 
     i = 0
     while i < len(args):
@@ -164,8 +209,13 @@ def resolve_actions_from_argv(arguments: Sequence[str]) -> tuple[str, ...]:
         if token in {"action", "toggle"}:
             i += 1
             while i < len(args) and not args[i].startswith("-"):
-                add(args[i])
+                name = args[i]
                 i += 1
+                call_args: tuple[str, ...] = ()
+                if name in _TARGET_ACTIONS and i < len(args) and not args[i].startswith("-"):
+                    call_args = (args[i],)
+                    i += 1
+                add(name, call_args)
             continue
         if token in _BY_FLAG:
             add(_BY_FLAG[token])
@@ -176,7 +226,12 @@ def resolve_actions_from_argv(arguments: Sequence[str]) -> tuple[str, ...]:
             i += 1
             continue
         i += 1
-    return tuple(names)
+    return tuple(calls)
+
+
+def resolve_actions_from_argv(arguments: Sequence[str]) -> tuple[str, ...]:
+    """Return ordered unique action names (compatibility helper)."""
+    return tuple(call.name for call in resolve_action_calls(arguments))
 
 
 def format_actions_help() -> str:
@@ -184,22 +239,30 @@ def format_actions_help() -> str:
     for action in ACTIONS:
         bind = "bind OK" if action.recommend_global_bind else "prefer in-app"
         flags = ", ".join(action.legacy_flags) if action.legacy_flags else "—"
-        lines.append(f"  {action.name:<16} {action.description}")
-        lines.append(f"  {'':16} legacy: {flags}  [{bind}]")
+        label = f"{action.name} <address>" if action.takes_target else action.name
+        lines.append(f"  {label:<28} {action.description}")
+        lines.append(f"  {'':28} legacy: {flags}  [{bind}]")
     lines.append("")
     lines.append("Unsupported (do not bind to Jugoo):")
     for name, reason in UNSUPPORTED.items():
-        lines.append(f"  {name:<16} {reason}")
+        lines.append(f"  {name:<28} {reason}")
     return "\n".join(lines)
 
 
-def dispatch_action(name: str, shell) -> str | None:
+def dispatch_action(
+    name: str,
+    shell,
+    args: Sequence[str] = (),
+) -> str | None:
     """Run ``name`` on ``shell`` (ShellApplication). Return error message or None."""
     if name in UNSUPPORTED:
         return UNSUPPORTED[name]
     action = _BY_NAME.get(name)
     if action is None:
         return f"unknown action {name!r}; try: jugoo action list"
+
+    if action.takes_target and not args:
+        return f"action {name!r} requires a device address"
 
     handlers: dict[str, Callable[[], None]] = {
         "ask": lambda: shell.toggle_ai_prompt(),
@@ -218,9 +281,19 @@ def dispatch_action(name: str, shell) -> str | None:
         "reload-theme": lambda: shell.reload_theme(),
         "sddm-apply": lambda: shell.apply_sddm_theme(),
         "sddm-restore": lambda: shell.restore_sddm_theme(),
+        "bluetooth-toggle": lambda: shell.bluetooth_toggle(),
+        "bluetooth-scan": lambda: shell.bluetooth_scan(),
+        "bluetooth-connect": lambda: shell.bluetooth_connect(args[0]),
+        "bluetooth-disconnect": lambda: shell.bluetooth_disconnect(args[0]),
+        "bluetooth-pair": lambda: shell.bluetooth_pair(args[0]),
+        "bluetooth-remove": lambda: shell.bluetooth_remove(args[0]),
     }
     handler = handlers.get(name)
     if handler is None:
         return f"action {name!r} is not wired"
     handler()
     return None
+
+
+def dispatch_invocation(call: ActionInvocation, shell) -> str | None:
+    return dispatch_action(call.name, shell, call.args)

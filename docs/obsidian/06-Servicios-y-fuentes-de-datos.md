@@ -7,6 +7,7 @@
 | Audio | [`shell/servicios/audio/audio.py`](../../shell/servicios/audio/audio.py) | PipeWire/WirePlumber mediante comandos o eventos |
 | Visualizador | [`shell/servicios/audio/audio_visualizer.py`](../../shell/servicios/audio/audio_visualizer.py) | `pw-cat` y PCM |
 | Red | [`shell/servicios/red/network.py`](../../shell/servicios/red/network.py) | NetworkManager |
+| Bluetooth | [`shell/servicios/bluetooth/bluetooth.py`](../../shell/servicios/bluetooth/bluetooth.py) | BlueZ / `bluetoothd` vía D-Bus; archivos con OBEX (`obexd`) |
 | Multimedia | [`shell/servicios/multimedia/media.py`](../../shell/servicios/multimedia/media.py) | MPRIS por D-Bus |
 | Arte multimedia | [`shell/servicios/multimedia/media_artwork.py`](../../shell/servicios/multimedia/media_artwork.py) | URI/cache de carátulas |
 | Notificaciones | [`shell/servicios/notificaciones/notifications.py`](../../shell/servicios/notificaciones/notifications.py) | `org.freedesktop.Notifications` |

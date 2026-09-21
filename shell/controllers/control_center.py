@@ -6,13 +6,19 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 
-from gi.repository import Gio, GLib, Gtk
+from gi.repository import GLib, Gtk
 
 from ..eventbus import EventBus
 from ..popup_handle import PopupHandle, PopupOutsideDismiss
+from ..servicios.bluetooth.bluetooth import (
+    BLUETOOTH_CHANGED,
+    BLUETOOTH_CLICKED,
+    BluetoothService,
+)
 from ..servicios.red.network import NETWORK_CHANGED, NETWORK_ETHERNET_CLICKED, NetworkService
 from ..widgets.centro_control.popup import ControlCenterPopup
 from ..widgets.centro_control.views import ControlCenterView
+from ..widgets.barra.bluetooth import BluetoothWidget
 from ..widgets.barra.ethernet import EthernetWidget
 from ..widgets.barra.power import POWER_CONTROL_CENTER_REQUESTED, PowerWidget
 
@@ -24,13 +30,17 @@ class ControlCenterController:
         self,
         event_bus: EventBus,
         network_service: NetworkService,
+        bluetooth_service: BluetoothService,
         ethernet_widget: EthernetWidget,
+        bluetooth_widget: BluetoothWidget,
         power_widget: PowerWidget,
         shell_window: Gtk.Window,
     ) -> None:
         self._event_bus = event_bus
         self._service = network_service
+        self._bluetooth_service = bluetooth_service
         self._ethernet_widget = ethernet_widget
+        self._bluetooth_widget = bluetooth_widget
         self._power_widget = power_widget
         self._shell_window = shell_window
         self._outside_click = PopupOutsideDismiss()
@@ -38,13 +48,23 @@ class ControlCenterController:
             lambda: ControlCenterPopup(
                 shell_window,
                 network_service,
+                bluetooth_service,
                 view=ControlCenterView.NETWORK,
+            ),
+        )
+        self._bluetooth_panel = PopupHandle(
+            lambda: ControlCenterPopup(
+                shell_window,
+                network_service,
+                bluetooth_service,
+                view=ControlCenterView.BLUETOOTH,
             ),
         )
         self._full_center = PopupHandle(
             lambda: ControlCenterPopup(
                 shell_window,
                 network_service,
+                bluetooth_service,
                 view=ControlCenterView.FULL,
             ),
         )
@@ -52,15 +72,17 @@ class ControlCenterController:
         self._active_anchor: Gtk.Widget | None = None
 
         self._event_bus.subscribe(NETWORK_ETHERNET_CLICKED, self._on_network_panel_requested)
+        self._event_bus.subscribe(BLUETOOTH_CLICKED, self._on_bluetooth_panel_requested)
         self._event_bus.subscribe(
             POWER_CONTROL_CENTER_REQUESTED,
             self._on_full_control_center_requested,
         )
         self._event_bus.subscribe(NETWORK_CHANGED, self._on_network_changed)
+        self._event_bus.subscribe(BLUETOOTH_CHANGED, self._on_bluetooth_changed)
 
     def close_popup(self) -> None:
         self._outside_click.uninstall()
-        for handle in (self._network_panel, self._full_center):
+        for handle in (self._network_panel, self._bluetooth_panel, self._full_center):
             popup = handle.maybe
             if popup is not None:
                 popup.close_popup()
@@ -69,6 +91,9 @@ class ControlCenterController:
 
     def toggle_network_panel(self) -> None:
         self._toggle_panel(self._network_panel, self._ethernet_widget.get_anchor_button())
+
+    def toggle_bluetooth_panel(self) -> None:
+        self._toggle_panel(self._bluetooth_panel, self._bluetooth_widget.get_anchor_button())
 
     def toggle_full_control_center(self) -> None:
         self._power_widget.close_menu()
@@ -102,6 +127,13 @@ class ControlCenterController:
         self.toggle_network_panel()
         return False
 
+    def _on_bluetooth_panel_requested(self, _snapshot) -> None:
+        GLib.idle_add(self._handle_bluetooth_panel_requested)
+
+    def _handle_bluetooth_panel_requested(self) -> bool:
+        self.toggle_bluetooth_panel()
+        return False
+
     def _on_full_control_center_requested(self, _anchor_button) -> None:
         GLib.idle_add(self._handle_full_control_center_requested)
 
@@ -110,10 +142,13 @@ class ControlCenterController:
         return False
 
     def _on_network_changed(self, _snapshot) -> None:
-        GLib.idle_add(self._handle_network_changed)
+        GLib.idle_add(self._handle_state_changed)
 
-    def _handle_network_changed(self) -> bool:
-        for handle in (self._network_panel, self._full_center):
+    def _on_bluetooth_changed(self, _snapshot) -> None:
+        GLib.idle_add(self._handle_state_changed)
+
+    def _handle_state_changed(self) -> bool:
+        for handle in (self._network_panel, self._bluetooth_panel, self._full_center):
             popup = handle.maybe
             if popup is not None and popup.get_visible():
                 popup.refresh()

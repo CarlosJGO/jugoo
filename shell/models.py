@@ -374,6 +374,102 @@ class NetworkSnapshot:
 
 
 @dataclass(frozen=True)
+class BluetoothDeviceSnapshot:
+    """One BlueZ Device1 entry exposed to bar and control center."""
+
+    address: str
+    name: str
+    path: str
+    paired: bool = False
+    connected: bool = False
+    trusted: bool = False
+    icon: str = ""
+    device_type: str = ""
+    battery_percent: int | None = None
+    can_send_files: bool = False
+
+
+@dataclass(frozen=True)
+class BluetoothPairingChallenge:
+    """Pending BlueZ Agent request the UI may accept or reject."""
+
+    kind: str
+    device_address: str
+    device_name: str
+    passkey: int | None = None
+    hint: str = ""
+
+
+@dataclass(frozen=True)
+class BluetoothIncomingFile:
+    """Pending OBEX Object Push that the UI may accept or reject."""
+
+    name: str
+    size: int | None = None
+    suggested_path: str = ""
+
+
+@dataclass(frozen=True)
+class BluetoothTransferSnapshot:
+    """Active or recent OBEX transfer progress."""
+
+    direction: str = ""
+    name: str = ""
+    status: str = ""
+    size: int | None = None
+    transferred: int = 0
+    device_address: str = ""
+    error_message: str = ""
+
+    @property
+    def active(self) -> bool:
+        return self.status in {"queued", "active", "suspended"}
+
+    @property
+    def progress(self) -> float:
+        if not self.size or self.size <= 0:
+            return 0.0
+        return max(0.0, min(1.0, self.transferred / float(self.size)))
+
+
+@dataclass(frozen=True)
+class BluetoothSnapshot:
+    """Service-owned Bluetooth state exposed via EventBus."""
+
+    available: bool
+    powered: bool
+    discovering: bool
+    adapter_path: str = ""
+    adapter_address: str = ""
+    adapter_name: str = ""
+    devices: tuple[BluetoothDeviceSnapshot, ...] = ()
+    error_message: str = ""
+    pairing: BluetoothPairingChallenge | None = None
+    receiving: bool = False
+    discoverable: bool = False
+    obex_available: bool = False
+    incoming_file: BluetoothIncomingFile | None = None
+    transfer: BluetoothTransferSnapshot | None = None
+
+    @staticmethod
+    def empty(*, error_message: str = "") -> "BluetoothSnapshot":
+        return BluetoothSnapshot(
+            available=False,
+            powered=False,
+            discovering=False,
+            error_message=error_message,
+        )
+
+    @property
+    def connected_devices(self) -> tuple[BluetoothDeviceSnapshot, ...]:
+        return tuple(device for device in self.devices if device.connected)
+
+    @property
+    def paired_devices(self) -> tuple[BluetoothDeviceSnapshot, ...]:
+        return tuple(device for device in self.devices if device.paired)
+
+
+@dataclass(frozen=True)
 class NotificationAction:
     """One actionable button exposed by a desktop notification."""
 

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from shell.actions import (
+    ActionInvocation,
     UNSUPPORTED,
     dispatch_action,
     format_actions_help,
     known_action_names,
+    resolve_action_calls,
     resolve_actions_from_argv,
 )
 
@@ -96,6 +98,58 @@ def test_help_lists_core_actions() -> None:
     assert "window-switcher" in text
 
 
+def test_resolve_bluetooth_actions_with_address() -> None:
+    assert resolve_action_calls(["action", "bluetooth-toggle"]) == (
+        ActionInvocation("bluetooth-toggle"),
+    )
+    assert resolve_action_calls(
+        ["action", "bluetooth-connect", "AA:BB:CC:DD:EE:FF"]
+    ) == (ActionInvocation("bluetooth-connect", ("AA:BB:CC:DD:EE:FF",)),)
+    assert resolve_actions_from_argv(["action", "bluetooth-scan"]) == ("bluetooth-scan",)
+
+
+def test_dispatch_bluetooth_actions() -> None:
+    calls: list[tuple[str, tuple[str, ...]]] = []
+
+    class Shell:
+        def bluetooth_toggle(self) -> None:
+            calls.append(("bluetooth_toggle", ()))
+
+        def bluetooth_scan(self) -> None:
+            calls.append(("bluetooth_scan", ()))
+
+        def bluetooth_connect(self, address: str) -> None:
+            calls.append(("bluetooth_connect", (address,)))
+
+        def bluetooth_disconnect(self, address: str) -> None:
+            calls.append(("bluetooth_disconnect", (address,)))
+
+        def bluetooth_pair(self, address: str) -> None:
+            calls.append(("bluetooth_pair", (address,)))
+
+        def bluetooth_remove(self, address: str) -> None:
+            calls.append(("bluetooth_remove", (address,)))
+
+    shell = Shell()
+    assert dispatch_action("bluetooth-toggle", shell) is None
+    assert dispatch_action("bluetooth-scan", shell) is None
+    assert dispatch_action("bluetooth-connect", shell) == (
+        "action 'bluetooth-connect' requires a device address"
+    )
+    assert dispatch_action("bluetooth-connect", shell, ("AA:BB:CC:DD:EE:FF",)) is None
+    assert dispatch_action("bluetooth-disconnect", shell, ("AA:BB:CC:DD:EE:FF",)) is None
+    assert dispatch_action("bluetooth-pair", shell, ("AA:BB:CC:DD:EE:FF",)) is None
+    assert dispatch_action("bluetooth-remove", shell, ("AA:BB:CC:DD:EE:FF",)) is None
+    assert calls == [
+        ("bluetooth_toggle", ()),
+        ("bluetooth_scan", ()),
+        ("bluetooth_connect", ("AA:BB:CC:DD:EE:FF",)),
+        ("bluetooth_disconnect", ("AA:BB:CC:DD:EE:FF",)),
+        ("bluetooth_pair", ("AA:BB:CC:DD:EE:FF",)),
+        ("bluetooth_remove", ("AA:BB:CC:DD:EE:FF",)),
+    ]
+
+
 if __name__ == "__main__":
     test_resolve_preferred_action_form()
     test_resolve_legacy_flags()
@@ -106,4 +160,6 @@ if __name__ == "__main__":
     test_resolve_dedupes_and_preserves_order()
     test_window_switcher_is_unsupported_token()
     test_help_lists_core_actions()
+    test_resolve_bluetooth_actions_with_address()
+    test_dispatch_bluetooth_actions()
     print("ok")
