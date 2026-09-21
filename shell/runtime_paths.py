@@ -6,7 +6,13 @@ import os
 import shutil
 from pathlib import Path
 
-from .config import CLIPBOARD_HISTORY_PATH, CLIPBOARD_IMAGES_DIR, PINNED_APPS_PATH, TASKS_PATH
+from .config import (
+    CLIPBOARD_HISTORY_PATH,
+    CLIPBOARD_IMAGES_DIR,
+    DESKTOP_ICONS_PATH,
+    PINNED_APPS_PATH,
+    TASKS_PATH,
+)
 
 _APP_DIRECTORY = "waybar-shell"
 
@@ -64,6 +70,26 @@ def clipboard_images_dir() -> Path:
 
 def settings_path() -> Path:
     return xdg_data_dir() / "settings.json"
+
+
+def wallpaper_dir() -> Path:
+    """Installed desktop wallpaper copies (``current.<ext>``)."""
+    return xdg_data_dir() / "wallpapers"
+
+
+def desktop_icons_path() -> Path:
+    """User desktop shortcuts (independent of ``pinned-apps.json``)."""
+    return xdg_data_dir() / DESKTOP_ICONS_PATH
+
+
+def user_app_shortcuts_path() -> Path:
+    """User-managed application keybinds (JSON source of truth)."""
+    return xdg_data_dir() / "user-app-shortcuts.json"
+
+
+def aidyc_tasks_cache_path() -> Path:
+    """Local cache/links for AIDYC tasks (source of truth remains AIDYC)."""
+    return xdg_data_dir() / "aidyc_tasks_cache.json"
 
 
 def notification_icons_dir() -> Path:

@@ -1907,6 +1907,38 @@ button.ethernet-button.ethernet-state-connecting image.ethernet-icon {
     color: @shell_accent;
 }
 
+/* Battery indicator (auto-hides when no battery / visibility=never). */
+box.battery-widget {
+    margin: 0 2px;
+    padding: 2px 4px;
+    min-height: 24px;
+}
+
+box.battery-widget image.battery-icon {
+    color: @shell_text_primary;
+}
+
+box.battery-widget label.battery-percent {
+    color: @shell_text_primary;
+    font-size: 11px;
+    padding: 0 2px 0 0;
+}
+
+box.battery-widget.battery-charging image.battery-icon,
+box.battery-widget.battery-charging label.battery-percent {
+    color: @shell_accent;
+}
+
+box.battery-widget.battery-low image.battery-icon,
+box.battery-widget.battery-low label.battery-percent {
+    color: @shell_warning;
+}
+
+box.battery-widget.battery-critical image.battery-icon,
+box.battery-widget.battery-critical label.battery-percent {
+    color: @shell_danger;
+}
+
 
 /* ==========================================================================
    10. Widgets — Power menu
@@ -3072,11 +3104,17 @@ label.settings-font-preview {
 
 box.settings-banner,
 box.settings-intro,
-box.settings-layout-preview {
+box.settings-layout-preview,
+box.settings-wallpaper {
     background-color: alpha(@shell_accent, 0.08);
     border: 1px solid @shell_border_subtle;
     border-radius: 12px;
     padding: 10px 12px;
+}
+
+frame.settings-wallpaper-preview {
+    border: 1px solid @shell_border_subtle;
+    border-radius: 10px;
 }
 
 box.settings-layout-canvas {
@@ -3122,6 +3160,66 @@ drawingarea.settings-black-hole {
     color: @shell_accent;
     min-width: 22px;
     min-height: 22px;
+}
+
+box.settings-shortcuts-toolbar {
+    margin-top: 2px;
+}
+
+box.settings-shortcut-row {
+    min-height: 0;
+}
+
+label.settings-shortcut-keys {
+    color: @shell_text_primary;
+    font-family: monospace;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+label.settings-shortcut-source {
+    color: @shell_text_muted;
+    font-size: 11px;
+}
+
+label.settings-shortcut-note {
+    color: @shell_text_secondary;
+    font-size: 11px;
+    font-style: italic;
+}
+
+/* ==========================================================================
+   Desktop icons (Layer BOTTOM — FASE D)
+   Transparent host; only icon cells receive pointer input via GDK regions.
+   ========================================================================== */
+
+window#shell-desktop.desktop-layer,
+window.desktop-layer {
+    background-color: transparent;
+}
+
+eventbox.desktop-icon {
+    background-color: transparent;
+    border-radius: 10px;
+    padding: 4px;
+}
+
+eventbox.desktop-icon:hover,
+eventbox.desktop-icon.selected {
+    background-color: alpha(@shell_accent, 0.18);
+}
+
+label.desktop-icon-label {
+    color: @shell_text_primary;
+    font-size: 11px;
+    text-shadow: 0 1px 2px alpha(@shell_bg, 0.85);
+}
+
+box.settings-desktop-icons {
+    background-color: alpha(@shell_accent, 0.08);
+    border: 1px solid @shell_border_subtle;
+    border-radius: 12px;
+    padding: 10px 12px;
 }
 
 /* ==========================================================================

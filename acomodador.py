@@ -49,6 +49,7 @@ REQUIRED_PACKAGES = (
 
 OPTIONAL_PACKAGES = (
     "strawberry",
+    "swaybg",
 )
 
 MARKER_BEGIN = "-- >>> jugoo-acomodador begin"

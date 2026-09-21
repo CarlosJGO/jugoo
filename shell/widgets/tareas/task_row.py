@@ -30,6 +30,8 @@ class TaskRow(Gtk.Box):
         can_toggle: bool = True,
         category_label: str | None = None,
         priority_label: str | None = None,
+        meta_override: str | None = None,
+        on_snooze: Callable[[str], None] | None = None,
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.get_style_context().add_class("task-row")
@@ -68,7 +70,7 @@ class TaskRow(Gtk.Box):
         title.set_line_wrap(False)
         text.pack_start(title, False, False, 0)
         if not compact:
-            meta = Gtk.Label(label=meta_label(snapshot), xalign=0)
+            meta = Gtk.Label(label=meta_override or meta_label(snapshot), xalign=0)
             meta.get_style_context().add_class("task-row-meta")
             meta.set_ellipsize(Pango.EllipsizeMode.END)
             text.pack_start(meta, False, False, 0)
@@ -125,6 +127,15 @@ class TaskRow(Gtk.Box):
             edit.add(icon)
             edit.connect("clicked", lambda _btn: on_edit(snapshot))
             header.pack_start(edit, False, False, 0)
+
+        if on_snooze is not None:
+            snooze = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
+            snooze.set_tooltip_text("Posponer alerta 15 min")
+            snooze.get_style_context().add_class("task-row-edit")
+            icon = Gtk.Image.new_from_icon_name("alarm-symbolic", Gtk.IconSize.MENU)
+            snooze.add(icon)
+            snooze.connect("clicked", lambda _btn: on_snooze(snapshot.id))
+            header.pack_start(snooze, False, False, 0)
 
         self.pack_start(header, False, False, 0)
 

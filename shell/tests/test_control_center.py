@@ -32,8 +32,58 @@ def test_settings_controller_routes_to_general() -> None:
 def test_ordered_categories_keeps_general_first() -> None:
     order = ordered_categories(_FakeManager())  # type: ignore[arg-type]
     assert order[0] is CategoryId.GENERAL
-    assert len(order) == 3
     assert CategoryId.BARRA in order
+    assert CategoryId.NOTIFICACIONES in order
+
+
+def test_ordered_categories_inserts_atajos_before_avanzado() -> None:
+    class Manager:
+        def categories_present(self):
+            return (
+                CategoryId.GENERAL,
+                CategoryId.COMPORTAMIENTO,
+                CategoryId.AVANZADO,
+            )
+
+    order = ordered_categories(Manager())  # type: ignore[arg-type]
+    assert CategoryId.ATAJOS in order
+    assert order.count(CategoryId.ATAJOS) == 1
+    assert order.index(CategoryId.ATAJOS) < order.index(CategoryId.AVANZADO)
+    assert order == (
+        CategoryId.GENERAL,
+        CategoryId.COMPORTAMIENTO,
+        CategoryId.ATAJOS,
+        CategoryId.AVANZADO,
+    )
+
+
+def test_ordered_categories_atajos_not_duplicated_if_already_present() -> None:
+    class Manager:
+        def categories_present(self):
+            return (
+                CategoryId.GENERAL,
+                CategoryId.ATAJOS,
+                CategoryId.COMPORTAMIENTO,
+                CategoryId.AVANZADO,
+            )
+
+    order = ordered_categories(Manager())  # type: ignore[arg-type]
+    assert order.count(CategoryId.ATAJOS) == 1
+    # Already present: leave relative position (do not re-insert).
+    assert order.index(CategoryId.ATAJOS) < order.index(CategoryId.COMPORTAMIENTO)
+
+
+def test_ordered_categories_atajos_without_being_in_categories_present() -> None:
+    class Manager:
+        def categories_present(self):
+            return (CategoryId.GENERAL, CategoryId.BARRA, CategoryId.AVANZADO)
+
+    present = Manager().categories_present()
+    assert CategoryId.ATAJOS not in present
+    order = ordered_categories(Manager())  # type: ignore[arg-type]
+    assert CategoryId.ATAJOS in order
+    assert order.index(CategoryId.BARRA) < order.index(CategoryId.ATAJOS)
+    assert order.index(CategoryId.ATAJOS) < order.index(CategoryId.AVANZADO)
 
 
 def test_schema_contains_avatar_path_setting() -> None:
@@ -79,6 +129,9 @@ def test_search_destination_constant() -> None:
 if __name__ == "__main__":
     test_settings_controller_routes_to_general()
     test_ordered_categories_keeps_general_first()
+    test_ordered_categories_inserts_atajos_before_avanzado()
+    test_ordered_categories_atajos_not_duplicated_if_already_present()
+    test_ordered_categories_atajos_without_being_in_categories_present()
     test_schema_contains_avatar_path_setting()
     test_schema_contains_machine_and_profile_settings()
     test_profile_fields_round_trip()
