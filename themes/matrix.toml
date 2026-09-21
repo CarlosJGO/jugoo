@@ -1,0 +1,34 @@
+[meta]
+name = "Matrix"
+
+[colors]
+# Neon green terminal — the bar reads this as a clear, crisp matrix glow.
+background = "#020B07"
+surface = "#071B12"
+surface_alt = "#0E2A1F"
+surface_hover = "#123A2B"
+surface_active = "#1B4E3C"
+primary = "#4BE0A8"
+secondary = "#7DF9B3"
+accent = "#9AE66E"
+text = "#EAFBF3"
+text_muted = "#8BC3A7"
+text_disabled = "#587A68"
+border = "#1F5E47"
+border_active = "#5DDCB0"
+success = "#7FFFD4"
+warning = "#D2FF72"
+error = "#FF6B6B"
+info = "#6BE8FF"
+
+[effects]
+background = "matrix"
+blur = 9
+opacity = 0.96
+
+[shape]
+radius = 10
+
+[animation]
+enabled = true
+duration = 180

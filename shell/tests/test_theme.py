@@ -21,6 +21,7 @@ from shell.ui.theme import (
 
 ROOT = project_root()
 SPACE_PATH = ROOT / "themes" / "space.toml"
+MATRIX_PATH = ROOT / "themes" / "matrix.toml"
 STYLE_PATH = ROOT / "shell" / "style.css"
 COLOR_LITERAL = re.compile(r"#[0-9a-fA-F]{3,8}|rgba?\s*\(")
 
@@ -39,6 +40,11 @@ def test_space_theme_has_complete_semantic_contract() -> None:
 
 def test_theme_catalog_discovers_space() -> None:
     assert discover_themes(ROOT / "themes")["space"] == SPACE_PATH
+
+
+def test_theme_catalog_discovers_matrix() -> None:
+    themes = discover_themes(ROOT / "themes")
+    assert themes["matrix"] == MATRIX_PATH
 
 
 def test_invalid_theme_is_rejected_before_application() -> None:

@@ -36,6 +36,17 @@ class _Star:
     cool: float
 
 
+@dataclass(frozen=True)
+class _MatrixGlyph:
+    x: float
+    y: float
+    char: str
+    size: float
+    alpha: float
+    speed: float
+    phase: float
+
+
 def resolve_event_bus(widget: Gtk.Widget | None) -> EventBus | None:
     """Find the shell EventBus from a window or nested widget."""
     current: Gtk.Widget | None = widget
@@ -99,6 +110,7 @@ class StarfieldBackground(Gtk.EventBox):
         self._corner_radii = _normalize_radii(corner_radius)
         self._draw_rim = draw_rim
         self._stars: tuple[_Star, ...] = ()
+        self._matrix: tuple[_MatrixGlyph, ...] = ()
         self._layout_key = (0, 0)
         self._elapsed_ms = 0
         self._tick_id = 0
@@ -158,6 +170,7 @@ class StarfieldBackground(Gtk.EventBox):
             return
         self._layout_key = key
         self._stars = _generate_stars(key[0], key[1])
+        self._matrix = _generate_matrix(key[0], key[1])
         self._ensure_tick()
 
     def _on_draw(self, _widget: Gtk.Widget, cr: cairo.Context) -> bool:
@@ -167,46 +180,16 @@ class StarfieldBackground(Gtk.EventBox):
             return False
 
         theme = active_theme()
-        void_rgb, mist_rgb = _space_palette(theme)
-
+        background_name = _theme_background_name(theme)
         _path_rounded_rect(cr, 0.0, 0.0, width, height, self._corner_radii)
         cr.clip()
 
-        cr.set_source_rgb(*void_rgb)
-        cr.rectangle(0, 0, width, height)
-        cr.fill()
-
-        gradient = cairo.LinearGradient(0, 0, 0, height)
-        gradient.add_color_stop_rgba(0.0, *void_rgb, 1.0)
-        gradient.add_color_stop_rgba(0.55, *void_rgb, 1.0)
-        gradient.add_color_stop_rgba(1.0, *mist_rgb, 0.55)
-        cr.set_source(gradient)
-        cr.rectangle(0, 0, width, height)
-        cr.fill()
-
-        animate = theme is None or theme.animation.enabled
-        t = self._elapsed_ms / 1000.0
-        for star in self._stars:
-            if animate:
-                twinkle = star.base + star.amplitude * (
-                    0.5 + 0.5 * math.sin(t * star.speed + star.phase)
-                )
-            else:
-                twinkle = star.base
-            alpha = max(0.08, min(1.0, twinkle))
-            red = 0.92 - 0.18 * star.cool
-            green = 0.94 - 0.08 * star.cool
-            blue = 1.0
-            if alpha > 0.75 and star.radius >= 1.15:
-                cr.set_source_rgba(red, green, blue, alpha * 0.22)
-                cr.arc(star.x, star.y, star.radius * 2.4, 0, 2 * math.pi)
-                cr.fill()
-            cr.set_source_rgba(red, green, blue, alpha)
-            cr.arc(star.x, star.y, star.radius, 0, 2 * math.pi)
-            cr.fill()
+        if background_name == "matrix":
+            _paint_matrix_background(cr, width, height, theme, self._matrix, self._elapsed_ms)
+        else:
+            _paint_space_background(cr, width, height, theme, self._stars, self._elapsed_ms)
 
         if self._draw_rim:
-            # Hard edge on free sides (bottom + right) so the void doesn't look cropped.
             rim_r, rim_g, rim_b = _rim_rgb(theme)
             cr.set_line_width(2.0)
             cr.set_source_rgba(rim_r, rim_g, rim_b, 0.9)
@@ -215,7 +198,6 @@ class StarfieldBackground(Gtk.EventBox):
             cr.line_to(width - 1.0, 0.0)
             cr.stroke()
 
-        # Return False so the child layout still paints above.
         return False
 
 
@@ -264,6 +246,84 @@ def _path_rounded_rect(
     else:
         cr.line_to(x, y)
     cr.close_path()
+
+
+def _theme_background_name(theme: Theme | None) -> str:
+    if theme is None:
+        return "space"
+    return str(getattr(theme.effects, "background", "space")).lower()
+
+
+def _paint_space_background(
+    cr: cairo.Context,
+    width: float,
+    height: float,
+    theme: Theme | None,
+    stars: Sequence[_Star],
+    elapsed_ms: int,
+) -> None:
+    void_rgb, mist_rgb = _space_palette(theme)
+
+    cr.set_source_rgb(*void_rgb)
+    cr.rectangle(0, 0, width, height)
+    cr.fill()
+
+    gradient = cairo.LinearGradient(0, 0, 0, height)
+    gradient.add_color_stop_rgba(0.0, *void_rgb, 1.0)
+    gradient.add_color_stop_rgba(0.55, *void_rgb, 1.0)
+    gradient.add_color_stop_rgba(1.0, *mist_rgb, 0.55)
+    cr.set_source(gradient)
+    cr.rectangle(0, 0, width, height)
+    cr.fill()
+
+    animate = theme is None or theme.animation.enabled
+    t = elapsed_ms / 1000.0
+    for star in stars:
+        if animate:
+            twinkle = star.base + star.amplitude * (
+                0.5 + 0.5 * math.sin(t * star.speed + star.phase)
+            )
+        else:
+            twinkle = star.base
+        alpha = max(0.08, min(1.0, twinkle))
+        red = 0.92 - 0.18 * star.cool
+        green = 0.94 - 0.08 * star.cool
+        blue = 1.0
+        if alpha > 0.75 and star.radius >= 1.15:
+            cr.set_source_rgba(red, green, blue, alpha * 0.22)
+            cr.arc(star.x, star.y, star.radius * 2.4, 0, 2 * math.pi)
+            cr.fill()
+        cr.set_source_rgba(red, green, blue, alpha)
+        cr.arc(star.x, star.y, star.radius, 0, 2 * math.pi)
+        cr.fill()
+
+
+def _paint_matrix_background(
+    cr: cairo.Context,
+    width: float,
+    height: float,
+    theme: Theme | None,
+    glyphs: Sequence[_MatrixGlyph],
+    elapsed_ms: int,
+) -> None:
+    void = color_to_rgb(theme.colors.background) if theme is not None else (0.01, 0.03, 0.03)
+    glow = color_to_rgb(theme.colors.primary) if theme is not None else (0.25, 0.96, 0.42)
+    gradient = cairo.LinearGradient(0, 0, 0, height)
+    gradient.add_color_stop_rgba(0.0, *void, 1.0)
+    gradient.add_color_stop_rgba(1.0, 0.0, 0.05, 0.04, 1.0)
+    cr.set_source(gradient)
+    cr.rectangle(0, 0, width, height)
+    cr.fill()
+
+    t = elapsed_ms / 1000.0
+    cr.select_font_face("monospace", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+    for glyph in glyphs:
+        flicker = 0.2 + 0.8 * (0.5 + 0.5 * math.sin(t * glyph.speed + glyph.phase))
+        alpha = max(0.12, min(1.0, glyph.alpha * flicker))
+        cr.set_font_size(glyph.size)
+        cr.set_source_rgba(glow[0] * 0.55 + 0.45, glow[1], glow[2] * 0.7 + 0.3, alpha)
+        cr.move_to(glyph.x, glyph.y)
+        cr.show_text(glyph.char)
 
 
 def _space_palette(
@@ -321,3 +381,27 @@ def _generate_stars(width: int, height: int) -> tuple[_Star, ...]:
             )
         )
     return tuple(stars)
+
+
+def _generate_matrix(width: int, height: int) -> tuple[_MatrixGlyph, ...]:
+    rng = random.Random(0xC0D3E0 ^ (width * 65537) ^ (height * 131071))
+    chars = "01ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    columns = max(14, int(width / 18))
+    glyphs: list[_MatrixGlyph] = []
+    for column in range(columns):
+        x = 7.0 + column * rng.uniform(14.0, 18.0)
+        stack = rng.randint(12, max(16, int(height / 12)))
+        for row in range(stack):
+            y = float(row * rng.uniform(14.0, 18.0))
+            glyphs.append(
+                _MatrixGlyph(
+                    x=x,
+                    y=y,
+                    char=rng.choice(chars),
+                    size=rng.uniform(10.0, 15.0),
+                    alpha=rng.uniform(0.18, 0.9),
+                    speed=rng.uniform(0.8, 2.4),
+                    phase=rng.uniform(0.0, math.tau),
+                )
+            )
+    return tuple(glyphs)

@@ -22,6 +22,7 @@ error = "#FF6B8A"
 info = "#65B7FF"
 
 [effects]
+background = "space"
 blur = 8
 opacity = 0.94
 

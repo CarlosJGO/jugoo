@@ -52,6 +52,7 @@ class ThemeColors:
 class ThemeEffects:
     blur: int
     opacity: float
+    background: str = "space"
 
 
 @dataclass(frozen=True)
@@ -124,6 +125,12 @@ def load_theme(path: Path, *, key: str | None = None) -> Theme:
 
     blur = _integer(effects, "blur", minimum=0, maximum=64)
     opacity = _number(effects, "opacity", minimum=0.2, maximum=1.0)
+    background = effects.get("background", "space")
+    if not isinstance(background, str) or not background.strip():
+        raise ValueError("effects.background must be a non-empty string")
+    background_name = background.strip().lower()
+    if background_name not in {"space", "matrix"}:
+        raise ValueError("effects.background must be 'space' or 'matrix'")
     radius = _integer(shape, "radius", minimum=0, maximum=48)
     duration = _integer(animation, "duration", minimum=0, maximum=5000)
     enabled = animation.get("enabled")
@@ -138,7 +145,7 @@ def load_theme(path: Path, *, key: str | None = None) -> Theme:
         key=key or path.stem,
         name=name.strip(),
         colors=ThemeColors(**color_values),
-        effects=ThemeEffects(blur=blur, opacity=opacity),
+        effects=ThemeEffects(blur=blur, opacity=opacity, background=background_name),
         shape=ThemeShape(radius=radius),
         animation=ThemeAnimation(enabled=enabled, duration=duration),
     )

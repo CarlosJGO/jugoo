@@ -114,6 +114,8 @@ class SystemTrayService:
         self._unregister_signal_id: int = 0
         self._watcher_watch_id: int = 0
         self._retry_source_id: int = 0
+        self._refresh_source_id: int = 0
+        self._refresh_interval_ms = 1000
         self._closing = False
         self._started = False
         self._providing_watcher = False
@@ -154,12 +156,16 @@ class SystemTrayService:
             self._on_watcher_appeared,
             self._on_watcher_vanished,
         )
+        self._schedule_refresh_poll()
 
     def close(self) -> None:
         self._closing = True
         if self._retry_source_id:
             GLib.source_remove(self._retry_source_id)
             self._retry_source_id = 0
+        if self._refresh_source_id:
+            GLib.source_remove(self._refresh_source_id)
+            self._refresh_source_id = 0
         if self._watcher_watch_id:
             Gio.bus_unwatch_name(self._watcher_watch_id)
             self._watcher_watch_id = 0
@@ -426,6 +432,23 @@ class SystemTrayService:
     def _clear_items(self) -> None:
         for address in list(self._items):
             self._remove_item(address)
+
+    def _schedule_refresh_poll(self) -> None:
+        if self._refresh_source_id or self._closing:
+            return
+        self._refresh_source_id = GLib.timeout_add(
+            self._refresh_interval_ms,
+            self._refresh_all_items,
+        )
+
+    def _refresh_all_items(self) -> bool:
+        self._refresh_source_id = 0
+        if self._closing:
+            return False
+        for address in list(self._items):
+            self._refresh_item(address)
+        self._schedule_refresh_poll()
+        return False
 
     def _schedule_registration_retry(self) -> None:
         if self._retry_source_id or self._closing:
