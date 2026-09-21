@@ -15,6 +15,7 @@ gi.require_version("GtkLayerShell", "0.1")
 
 from gi.repository import Gdk, Gio, GLib, Gtk, GtkLayerShell
 
+from .actions import dispatch_action
 from .config import (
     ACTIVE_THEME,
     HYPRLAND_THEME_EXPORT_PATH,
@@ -39,10 +40,12 @@ from .servicios.portapapeles.servicio import ClipboardService
 from .servicios.audio.audio import AudioService
 from .servicios.audio.audio_visualizer import AudioVisualizerService
 from .servicios.escritorio.hyprland import HyprlandService
+from .servicios.escritorio.desktop_icons import DesktopIconsService
 from .servicios.multimedia.media import MediaService
 from .servicios.red.network import NetworkService
 from .servicios.notificaciones.notifications import NotificationService
 from .servicios.energia.power import PowerService
+from .servicios.energia.battery import BatteryService
 from .servicios.sistema.system import SystemStatsService
 from .servicios.bandeja.tray import SystemTrayService
 from .servicios.tareas.briefing import StartupTaskBriefing
@@ -54,6 +57,7 @@ from .settings.manager import SettingsManager
 from .widgets.barra.active_window import ActiveWindowWidget
 from .widgets.barra.clock import ClockWidget
 from .widgets.barra.ethernet import EthernetWidget
+from .widgets.barra.battery import BatteryWidget
 from .widgets.barra.keyboard_cat import KeyboardCatWidget
 from .widgets.barra.notifications import NotificationsWidget
 from .widgets.barra.pinned_apps import PinnedAppsWidget
@@ -63,6 +67,7 @@ from .widgets.barra.stats import StatsWidget
 from .widgets.barra.tasks import TasksWidget
 from .widgets.barra.tray import SystemTrayWidget
 from .widgets.barra.workspace import WorkspaceWidget
+from .widgets.escritorio.layer import DesktopIconsLayer
 from .ui.starfield import StarfieldBackground
 from .ui.theme import ThemeManager
 from .window_identity import APPLICATION_ID, TITLE_BAR, configure_toplevel, init_window_identity
@@ -106,10 +111,17 @@ class ShellApplication(Gtk.Window):
         )
         self.hyprland = HyprlandService(self.event_bus, PERSISTENT_WORKSPACES)
         self.applications = ApplicationsService(self.event_bus)
+        self.desktop_icons = DesktopIconsService(
+            self.event_bus,
+            launch_application=self.applications.launch,
+            dispatch_action=lambda name: dispatch_action(name, self),
+        )
+        self.settings_manager.set_desktop_icons_service(self.desktop_icons)
         self.clipboard_service = ClipboardService(self.event_bus)
         self.audio_service = AudioService(self.event_bus)
         self.system_stats = SystemStatsService()
         self.power_service = PowerService()
+        self.battery_service = BatteryService(self.event_bus)
         self.tray_service = SystemTrayService()
         self.notification_service = NotificationService(self.event_bus)
         self.tasks_service = TasksService(self.event_bus)
@@ -177,6 +189,7 @@ class ShellApplication(Gtk.Window):
         self.layout.left.add(self.keyboard_cat_widget)
 
         self.ethernet_widget = EthernetWidget(self.event_bus, self.network_service)
+        self.battery_widget = BatteryWidget(self.event_bus, self.battery_service)
         self.tray_widget = SystemTrayWidget(self.tray_service)
         self.layout.right.add(self.tray_widget)
         self.notifications_widget = NotificationsWidget(
@@ -186,6 +199,7 @@ class ShellApplication(Gtk.Window):
         )
         self.layout.right.add(self.notifications_widget)
         self.layout.right.add(self.ethernet_widget)
+        self.layout.right.add(self.battery_widget)
         self.stats_widget = StatsWidget(self.system_stats, self, self.event_bus)
         self.layout.right.add(self.stats_widget)
         self.tasks_widget = TasksWidget(self.event_bus, self.tasks_service, self)
@@ -260,11 +274,26 @@ class ShellApplication(Gtk.Window):
         # Load persisted overrides after live hooks exist so first apply is complete.
         self.settings_manager.start()
 
+        self.desktop_icons_layer = DesktopIconsLayer(
+            application,
+            self.event_bus,
+            self.desktop_icons,
+        )
+        self.settings_manager.set_desktop_icons_enabled_hook(
+            self.desktop_icons_layer.set_enabled
+        )
+        self.desktop_icons.start()
+        enabled = bool(self.settings_manager.get("escritorio.icons_enabled"))
+        self.desktop_icons_layer.set_enabled(enabled)
+        if enabled:
+            self.desktop_icons_layer.show_all()
+
         self.connect("destroy", self._on_destroy)
 
         self.applications.start()
         self.clipboard_service.start()
         self.hyprland.start()
+        self.battery_service.start()
         self.audio_service.start()
         self.volume_osd_controller.start()
         self.bar_retract_controller.start()
@@ -416,6 +445,7 @@ class ShellApplication(Gtk.Window):
         self.bar_retract_controller.close()
         self.audio_service.close()
         self.network_service.close()
+        self.battery_service.close()
         self.media_service.close()
         self.audio_visualizer.close()
         self.notification_service.close()
@@ -427,8 +457,12 @@ class ShellApplication(Gtk.Window):
         self.applications_controller.close_launcher()
         self.clipboard_service.close()
         self.applications.close()
+        self.desktop_icons.close()
+        if getattr(self, "desktop_icons_layer", None) is not None:
+            self.desktop_icons_layer.destroy()
         self.keyboard_activity.close()
         self.hyprland.close()
+
 
 
 class ShellGtkApplication(Gtk.Application):

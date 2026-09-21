@@ -98,6 +98,14 @@ class SettingsOverlay(Gtk.Window):
         ordered = (CategoryId.GENERAL,) + tuple(
             cat for cat in manager.categories_present() if cat is not CategoryId.GENERAL
         )
+        # Atajos is catalog-free (read-only registry page); always offer it.
+        if CategoryId.ATAJOS not in ordered:
+            insert_at = len(ordered)
+            for index, cat in enumerate(ordered):
+                if cat is CategoryId.AVANZADO:
+                    insert_at = index
+                    break
+            ordered = ordered[:insert_at] + (CategoryId.ATAJOS,) + ordered[insert_at:]
         for category in ordered:
             label, _subtitle = CATEGORY_META[category]
             button = Gtk.Button(label=label, relief=Gtk.ReliefStyle.NONE)
@@ -185,7 +193,11 @@ class SettingsOverlay(Gtk.Window):
     def _on_setting_changed(self, key: str, value: object) -> None:
         self._manager.set(key, value)
         # Rebuild night / layout pages so banners and previews stay honest.
-        if key.startswith("modo_noche.") or key.startswith("layout."):
+        if (
+            key.startswith("modo_noche.")
+            or key.startswith("layout.")
+            or key.startswith("escritorio.wallpaper")
+        ):
             self._show_category(self._active_category)
         elif key == "tema.active":
             # Theme CSS refresh is enough; keep page mounted.

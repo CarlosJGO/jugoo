@@ -1,0 +1,70 @@
+# Minimal Hyprland starter for Jugoo on Debian (beginner-friendly).
+# Super = Windows key.
+
+debug {
+    disable_logs = false
+}
+
+monitor=,preferred,auto,1
+
+exec-once = dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE
+exec-once = systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
+exec-once = jugoo
+exec-once = sleep 1 && xfce4-terminal
+
+general {
+    gaps_in = 4
+    gaps_out = 8
+    border_size = 2
+    col.active_border = rgba(7c8cffee)
+    col.inactive_border = rgba(2a3140aa)
+}
+
+decoration {
+    rounding = 12
+    blur {
+        enabled = true
+        size = 8
+        passes = 2
+    }
+}
+
+animations {
+    enabled = true
+}
+
+xwayland {
+    enabled = true
+}
+
+misc {
+    disable_hyprland_logo = true
+    force_default_wallpaper = 0
+}
+
+input {
+    kb_layout = latam,us
+    kb_options = grp:alt_shift_toggle
+    follow_mouse = 1
+}
+
+bind = SUPER, Return, exec, xfce4-terminal
+bind = SUPER, Space, exec, jugoo action launcher
+bind = SUPER, E, exec, thunar
+bind = SUPER, B, exec, firefox
+bind = SUPER, Q, killactive,
+bind = SUPER SHIFT, E, exit,
+
+bind = SUPER, 1, workspace, 1
+bind = SUPER, 2, workspace, 2
+bind = SUPER, 3, workspace, 3
+bind = SUPER, 4, workspace, 4
+bind = SUPER, 5, workspace, 5
+bind = SUPER SHIFT, 1, movetoworkspace, 1
+bind = SUPER SHIFT, 2, movetoworkspace, 2
+bind = SUPER SHIFT, 3, movetoworkspace, 3
+bind = SUPER SHIFT, 4, movetoworkspace, 4
+bind = SUPER SHIFT, 5, movetoworkspace, 5
+
+bindm = SUPER, mouse:272, movewindow
+bindm = SUPER, mouse:273, resizewindow

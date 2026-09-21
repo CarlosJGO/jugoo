@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from shell.settings.layout_model import DEFAULT_LAYOUT, parse_layout
-from shell.settings.schema import CategoryId, build_settings_catalog, settings_by_key
+from shell.settings.schema import CATEGORY_META, CategoryId, build_settings_catalog, settings_by_key
 from shell.settings.store import SettingsStore
 
 
@@ -42,7 +42,11 @@ class SettingsStoreTests(unittest.TestCase):
         keys = [item.key for item in catalog]
         self.assertEqual(len(keys), len(set(keys)))
         self.assertIn(CategoryId.MODO_NOCHE, {item.category for item in catalog})
+        self.assertIn(CategoryId.ATAJOS, CATEGORY_META)
+        self.assertEqual(CATEGORY_META[CategoryId.ATAJOS][0], "Atajos")
         self.assertIn("tema.active", settings_by_key())
+        self.assertIn("escritorio.wallpaper_path", settings_by_key())
+        self.assertIn("escritorio.wallpaper_fill", settings_by_key())
         self.assertIn("notificaciones.grouping_mode", settings_by_key())
         self.assertIn("notificaciones.grouping_exceptions", settings_by_key())
 

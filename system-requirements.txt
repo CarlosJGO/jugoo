@@ -19,5 +19,8 @@ sudo pacman -S hyprpolkitagent
 # Opcional: reproductor multimedia integrado
 # sudo pacman -S strawberry
 
+# Opcional: fondo de escritorio desde Configuraciones → Tema
+# sudo pacman -S swaybg
+
 # Opcional AUR: overview visual / Super+Tab
 # yay -S quickshell-overview-git

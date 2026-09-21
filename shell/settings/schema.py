@@ -32,6 +32,7 @@ class CategoryId(str, Enum):
     IA = "ia"
     MODO_NOCHE = "modo_noche"
     COMPORTAMIENTO = "comportamiento"
+    ATAJOS = "atajos"
     AVANZADO = "avanzado"
 
 
@@ -49,6 +50,7 @@ CATEGORY_META: dict[CategoryId, tuple[str, str]] = {
     CategoryId.IA: ("IA", "llama-cli y recordatorios inteligentes"),
     CategoryId.MODO_NOCHE: ("Modo noche", "Luz cálida de pantalla"),
     CategoryId.COMPORTAMIENTO: ("Comportamiento", "Timers y políticas generales"),
+    CategoryId.ATAJOS: ("Atajos", "Atajos de teclado activos (solo lectura)"),
     CategoryId.AVANZADO: ("Avanzado", "Rendimiento e integraciones"),
 }
 
@@ -106,6 +108,62 @@ def build_settings_catalog() -> tuple[SettingDef, ...]:
             choices=(),  # filled at runtime from ThemeManager
             tier="A",
             section="Catálogo",
+        ),
+        SettingDef(
+            key="escritorio.wallpaper_path",
+            category=CategoryId.TEMA,
+            label="Fondo de escritorio",
+            description=(
+                "Imagen JPG/PNG/WEBP. Jugoo guarda una copia y la aplica "
+                "con swaybg (o hyprpaper) al instante y al arrancar."
+            ),
+            value_type="path",
+            default="",
+            apply=APPLY_LIVE,
+            tier="A",
+            section="Escritorio",
+        ),
+        SettingDef(
+            key="escritorio.wallpaper_fill",
+            category=CategoryId.TEMA,
+            label="Escalado del fondo",
+            description="Recortar para llenar (crop), ajustar completo (fit) o estirar.",
+            value_type="choice",
+            default="crop",
+            choices=(
+                ("crop", "Recortar (crop)"),
+                ("fit", "Ajustar (fit)"),
+                ("stretch", "Estirar"),
+            ),
+            apply=APPLY_LIVE,
+            tier="A",
+            section="Escritorio",
+        ),
+        SettingDef(
+            key="escritorio.icons_enabled",
+            category=CategoryId.TEMA,
+            label="Mostrar iconos del escritorio",
+            description=(
+                "Capa independiente sobre el wallpaper. "
+                "Desactívala para ocultar los iconos sin borrar los accesos."
+            ),
+            value_type="bool",
+            default=shell_config.DESKTOP_ICONS_ENABLED,
+            config_attr="DESKTOP_ICONS_ENABLED",
+            apply=APPLY_LIVE,
+            tier="A",
+            section="Escritorio",
+        ),
+        SettingDef(
+            key="escritorio.icons_editor",
+            category=CategoryId.TEMA,
+            label="Accesos directos",
+            description="Crear o eliminar iconos del escritorio (no borra apps ni archivos).",
+            value_type="string",
+            default="",
+            apply=APPLY_LIVE,
+            tier="A",
+            section="Escritorio",
         ),
         # —— SDDM (greeter). Privileged apply is explicit via UI/CLI buttons. ——
         SettingDef(
@@ -311,6 +369,26 @@ def build_settings_catalog() -> tuple[SettingDef, ...]:
             unit="px",
         ),
         # —— Widgets ——
+        SettingDef(
+            key="widgets.battery_visibility",
+            category=CategoryId.WIDGETS,
+            label="Indicador de batería",
+            description=(
+                "Automático muestra el widget solo si hay batería "
+                "(portátil). En PC de escritorio permanece oculto."
+            ),
+            value_type="choice",
+            default=shell_config.BATTERY_VISIBILITY,
+            config_attr="BATTERY_VISIBILITY",
+            apply=APPLY_LIVE,
+            choices=(
+                ("auto", "Automático"),
+                ("always", "Siempre"),
+                ("never", "Nunca"),
+            ),
+            tier="A",
+            section="Batería",
+        ),
         SettingDef(
             key="widgets.clock_time_format",
             category=CategoryId.WIDGETS,
@@ -976,6 +1054,80 @@ def build_settings_catalog() -> tuple[SettingDef, ...]:
             step=0.1,
             tier="C",
             section="Audio",
+            unit="s",
+        ),
+        SettingDef(
+            key="aidyc.enabled",
+            category=CategoryId.AVANZADO,
+            label="Integración AIDYC",
+            description="Mostrar y gestionar tareas de AIDYC desde Jugoo.",
+            value_type="bool",
+            default=False,
+            apply=APPLY_RELOAD,
+            tier="B",
+            section="AIDYC",
+        ),
+        SettingDef(
+            key="aidyc.base_url",
+            category=CategoryId.AVANZADO,
+            label="AIDYC URL",
+            description="Base URL del servidor (ej. https://www.aidycsolutions.com).",
+            value_type="string",
+            default="",
+            apply=APPLY_RELOAD,
+            tier="B",
+            section="AIDYC",
+        ),
+        SettingDef(
+            key="aidyc.api_key",
+            category=CategoryId.AVANZADO,
+            label="AIDYC API Key",
+            description="Valor de JUGOO_API_KEY configurado en el servidor AIDYC.",
+            value_type="string",
+            default="",
+            apply=APPLY_RELOAD,
+            tier="B",
+            section="AIDYC",
+        ),
+        SettingDef(
+            key="aidyc.padre_db",
+            category=CategoryId.AVANZADO,
+            label="AIDYC Padre DB",
+            description="Negocio (padre_db) autorizado. Debe coincidir con JUGOO_PADRE_DB.",
+            value_type="string",
+            default="",
+            apply=APPLY_RELOAD,
+            tier="B",
+            section="AIDYC",
+        ),
+        SettingDef(
+            key="aidyc.timeout_sec",
+            category=CategoryId.AVANZADO,
+            label="Timeout AIDYC",
+            description="Segundos máximos por petición HTTP a AIDYC.",
+            value_type="float",
+            default=8.0,
+            apply=APPLY_RELOAD,
+            minimum=2.0,
+            maximum=60.0,
+            step=1.0,
+            tier="C",
+            section="AIDYC",
+            unit="s",
+        ),
+        SettingDef(
+            key="aidyc.poll_sec",
+            category=CategoryId.AVANZADO,
+            label="Poll AIDYC",
+            description="Intervalo de sincronización pull mientras el panel está abierto.",
+            value_type="int",
+            default=60,
+            apply=APPLY_RELOAD,
+            minimum=15,
+            maximum=600,
+            step=5,
+            tier="C",
+            section="AIDYC",
             unit="s",
         ),
     )

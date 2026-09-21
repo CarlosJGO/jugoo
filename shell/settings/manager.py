@@ -11,6 +11,7 @@ from .. import config as shell_config
 from ..eventbus import EventBus
 from .layout_model import default_layout_json
 from .night_mode import NightModeService, NightModeStatus
+from .wallpaper import WallpaperService, WallpaperStatus
 from .schema import (
     APPLY_LIVE,
     APPLY_RELOAD,
@@ -24,6 +25,7 @@ from .store import SettingsStore, default_settings_path
 
 SETTINGS_CHANGED = "settings_changed"
 NIGHT_MODE_CHANGED = "night_mode_changed"
+WALLPAPER_CHANGED = "wallpaper_changed"
 
 ApplyHook = Callable[["SettingsManager", SettingDef, Any], None]
 
@@ -76,7 +78,10 @@ class SettingsManager:
         self._hooks: dict[str, ApplyHook] = {}
         self._volume_osd_delay_setter: Callable[[int], None] | None = None
         self._workspace_hover_setter: Callable[[int], None] | None = None
+        self._desktop_icons = None
+        self._desktop_icons_enabled_setter: Callable[[bool], None] | None = None
         self._night = NightModeService(on_status=self._emit_night_status)
+        self._wallpaper = WallpaperService(on_status=self._emit_wallpaper_status)
         self._schedule_source_id = 0
         self._register_builtin_hooks()
 
@@ -87,6 +92,22 @@ class SettingsManager:
     @property
     def night_mode(self) -> NightModeService:
         return self._night
+
+    @property
+    def wallpaper(self) -> WallpaperService:
+        return self._wallpaper
+
+    @property
+    def desktop_icons(self):
+        return self._desktop_icons
+
+    def set_desktop_icons_service(self, service) -> None:
+        """Optional DesktopIconsService for the Settings editor (FASE D)."""
+        self._desktop_icons = service
+
+    def set_desktop_icons_enabled_hook(self, callback: Callable[[bool], None]) -> None:
+        self._desktop_icons_enabled_setter = callback
+        self._hooks["escritorio.icons_enabled"] = self._apply_desktop_icons_enabled
 
     @property
     def path(self) -> Path:
@@ -103,6 +124,7 @@ class SettingsManager:
             GLib.source_remove(self._schedule_source_id)
             self._schedule_source_id = 0
         self._night.close()
+        self._wallpaper.close()
 
     def catalog(self) -> tuple[SettingDef, ...]:
         return self._store.catalog
@@ -172,6 +194,8 @@ class SettingsManager:
         if key.startswith("modo_noche."):
             self._apply_night_mode()
             self._ensure_schedule_timer()
+        if key.startswith("escritorio.wallpaper"):
+            self._apply_wallpaper()
         return True
 
     def apply_mode_label(self, mode: str) -> str:
@@ -189,16 +213,20 @@ class SettingsManager:
         self._hooks["popups.volume_osd_hide_ms"] = self._apply_volume_osd
         self._hooks["comportamiento.workspace_hover_delay_ms"] = self._apply_workspace_hover
         self._hooks["widgets.workspace_accent_colors_json"] = self._apply_workspace_accents
+
     def _apply_all(self, *, initial: bool) -> None:
         for definition in self._store.catalog:
             value = self._store.get(definition.key)
             if definition.key.startswith("modo_noche."):
+                continue
+            if definition.key.startswith("escritorio.wallpaper"):
                 continue
             if initial and definition.apply != APPLY_LIVE and definition.key != "tema.active":
                 # Non-live knobs already patched into config for next consumers.
                 continue
             self._run_hook(definition, value)
         self._apply_night_mode()
+        self._apply_wallpaper()
 
     def _sync_all_config_attrs(self) -> None:
         for definition in self._store.catalog:
@@ -246,6 +274,12 @@ class SettingsManager:
         if self._workspace_hover_setter is not None:
             self._workspace_hover_setter(int(value))
 
+    def _apply_desktop_icons_enabled(
+        self, _manager: SettingsManager, _definition: SettingDef, value: Any
+    ) -> None:
+        if self._desktop_icons_enabled_setter is not None:
+            self._desktop_icons_enabled_setter(bool(value))
+
     def _apply_workspace_accents(
         self, _manager: SettingsManager, _definition: SettingDef, value: Any
     ) -> None:
@@ -264,8 +298,17 @@ class SettingsManager:
             end_hour=int(self._store.get("modo_noche.end_hour")),
         )
 
+    def _apply_wallpaper(self) -> WallpaperStatus:
+        return self._wallpaper.configure(
+            path=str(self._store.get("escritorio.wallpaper_path") or ""),
+            fill=str(self._store.get("escritorio.wallpaper_fill") or "crop"),
+        )
+
     def _emit_night_status(self, status: NightModeStatus) -> None:
         self._event_bus.emit(NIGHT_MODE_CHANGED, status)
+
+    def _emit_wallpaper_status(self, status: WallpaperStatus) -> None:
+        self._event_bus.emit(WALLPAPER_CHANGED, status)
 
     def _ensure_schedule_timer(self) -> None:
         auto = bool(self._store.get("modo_noche.auto_schedule")) and bool(

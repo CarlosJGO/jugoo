@@ -166,7 +166,10 @@ class SettingRow(Gtk.Box):
         parent = self.get_toplevel()
         window = parent if isinstance(parent, Gtk.Window) else None
         title = f"Seleccionar — {self._definition.label}"
-        if self._definition.key == "sddm.background_path":
+        if self._definition.key in {
+            "sddm.background_path",
+            "escritorio.wallpaper_path",
+        }:
             path = choose_image_path(window, title=title)
         else:
             path = choose_file_path(window, title=title)

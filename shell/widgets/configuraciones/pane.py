@@ -19,11 +19,24 @@ Destination = CategoryId | str
 
 
 def ordered_categories(manager: SettingsManager) -> tuple[CategoryId, ...]:
-    return (CategoryId.GENERAL,) + tuple(
+    """Nav order for the live Settings UI (launcher settings mode).
+
+    ``CategoryId.ATAJOS`` is catalog-free (no SettingDef) so it never appears in
+    ``categories_present()``; insert it once before Avanzado for the real menu.
+    """
+    ordered = (CategoryId.GENERAL,) + tuple(
         category
         for category in manager.categories_present()
         if category is not CategoryId.GENERAL
     )
+    if CategoryId.ATAJOS in ordered:
+        return ordered
+    insert_at = len(ordered)
+    for index, category in enumerate(ordered):
+        if category is CategoryId.AVANZADO:
+            insert_at = index
+            break
+    return ordered[:insert_at] + (CategoryId.ATAJOS,) + ordered[insert_at:]
 
 
 def build_settings_nav(
