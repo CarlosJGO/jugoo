@@ -1,0 +1,10 @@
+{
+  "values": {
+    "escritorio.wallpaper_path": "/home/angeljoc/.local/share/waybar-shell/wallpapers/current.jpg",
+    "general.avatar_path": "/home/angeljoc/Documentos/Proyectos_AidyC/jugoo/shell/assets/usuario.jpg",
+    "multimedia.visualizer_fps": 18,
+    "sddm.background_path": "/home/angeljoc/Imágenes/3395466.jpg",
+    "widgets.clock_date_format": "%A %d %B"
+  },
+  "version": 1
+}

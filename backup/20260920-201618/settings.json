@@ -1,0 +1,11 @@
+{
+  "values": {
+    "barra.active_window_width": 320,
+    "barra.top_margin": 2,
+    "escritorio.wallpaper_path": "/home/angeljoc/.local/share/waybar-shell/wallpapers/current.jpg",
+    "general.avatar_path": "/home/angeljoc/Documentos/Proyectos_AidyC/jugoo/shell/assets/usuario.jpg",
+    "multimedia.visualizer_fps": 18,
+    "sddm.background_path": "/home/angeljoc/Imágenes/3395466.jpg"
+  },
+  "version": 1
+}
