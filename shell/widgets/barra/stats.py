@@ -82,7 +82,6 @@ class MemoryPopup(Gtk.Window):
         register_shell_popup(self, shell_window)
         configure_toplevel(self, title=TITLE_MEMORY_POPUP)
         configure_passive_popup(self)
-        self.connect("focus-out-event", self._on_focus_out)
 
         self._rows: dict[str, Gtk.Label] = {}
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -142,10 +141,6 @@ class MemoryPopup(Gtk.Window):
     def close_popup(self) -> None:
         self._anchor = None
         hide_popup(self)
-
-    def _on_focus_out(self, _window: Gtk.Window, _event: object) -> bool:
-        self.close_popup()
-        return False
 
     def _position(self) -> bool:
         if self._anchor is not None:

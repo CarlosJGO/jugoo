@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest import mock
 
-from shell.config import POPUP_OUTSIDE_DISMISS_GRACE_MS, VOLUME_OSD_HIDE_DELAY_MS
+from shell.config import VOLUME_OSD_HIDE_DELAY_MS
 from shell.eventbus import EventBus
 from shell.models import AudioSnapshot, SystemVolumeState
 from shell.servicios.audio.audio import AudioService, build_system_volume_state, friendly_device_description
@@ -36,10 +36,6 @@ def _volume(*, percent: int = 72, muted: bool = False, description: str = "ALC89
         volume=percent / 100.0,
         is_muted=muted,
     )
-
-
-def test_popup_outside_dismiss_grace_remains_500() -> None:
-    assert POPUP_OUTSIDE_DISMISS_GRACE_MS == 500
 
 
 def test_volume_osd_hide_delay_is_1200() -> None:
@@ -210,7 +206,6 @@ def test_controller_does_not_show_on_baseline_start() -> None:
 
 
 if __name__ == "__main__":
-    test_popup_outside_dismiss_grace_remains_500()
     test_volume_osd_hide_delay_is_1200()
     test_friendly_device_description_skips_null()
     test_build_system_volume_state_from_default_sink()

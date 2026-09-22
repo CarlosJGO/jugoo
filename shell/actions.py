@@ -108,6 +108,11 @@ ACTIONS: tuple[ShellAction, ...] = (
         recommend_global_bind=False,
     ),
     ShellAction(
+        "dismiss-popups-outside",
+        "Close shell popups if the pointer is outside them (Hyprland mouse-release hook)",
+        recommend_global_bind=False,
+    ),
+    ShellAction(
         "reload-theme",
         "Reload active theme CSS",
         legacy_flags=("--reload-theme",),
@@ -278,6 +283,7 @@ def dispatch_action(
         "notifications": lambda: shell.toggle_notifications(),
         "session": lambda: shell.toggle_session(),
         "tasks": lambda: shell.open_tasks_panel(),
+        "dismiss-popups-outside": lambda: shell.dismiss_popups_outside(),
         "reload-theme": lambda: shell.reload_theme(),
         "sddm-apply": lambda: shell.apply_sddm_theme(),
         "sddm-restore": lambda: shell.restore_sddm_theme(),

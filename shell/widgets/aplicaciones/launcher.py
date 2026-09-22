@@ -102,6 +102,7 @@ class LauncherAppRow(Gtk.ListBoxRow):
 
         favorite_button = Gtk.Button()
         favorite_button.set_relief(Gtk.ReliefStyle.NONE)
+        favorite_button.set_can_focus(False)
         favorite_button.get_style_context().add_class("launcher-favorite-button")
         if favorite:
             favorite_button.get_style_context().add_class("favorited")
@@ -302,12 +303,17 @@ class AppLauncherWindow(PickerOverlay):
             self._rebuild_rows()
 
     def on_activate(self) -> None:
-        if self._mode == SEARCH_DESTINATION:
-            # If no row is selected, select the first one
-            if self._list.get_selected_row() is None and self._list.get_children():
-                first_row = self._list.get_children()[0]
-                self._list.select_row(first_row)
-            self._launch_selected()
+        if self._mode != SEARCH_DESTINATION:
+            return
+        if not self._rows:
+            return
+        index = self.session.selected_index
+        if index < 0 or index >= len(self._rows):
+            index = 0
+            self.session.select_index(0)
+        row = self._rows[index]
+        self._list.select_row(row)
+        self._open_application(row.application.id)
 
     def on_selection_moved(self) -> None:
         if self._mode != SEARCH_DESTINATION:
@@ -347,12 +353,20 @@ class AppLauncherWindow(PickerOverlay):
         if rows:
             self.set_empty_visible(False)
             self._list.show()
-            chosen = next((row for row in rows if row.application.id == selected_id), rows[0])
-            if keep_selection:
+            if keep_selection and selected_id is not None:
+                chosen = next(
+                    (row for row in rows if row.application.id == selected_id),
+                    rows[0],
+                )
                 self.session.select_index(rows.index(chosen))
             else:
-                chosen = rows[self.session.selected_index]
+                index = self.session.selected_index
+                if index < 0 or index >= len(rows):
+                    index = 0
+                    self.session.select_index(0)
+                chosen = rows[index]
             self._list.select_row(chosen)
+            GLib.idle_add(self._ensure_row_visible, chosen)
         else:
             self._list.hide()
             self.set_empty_visible(True)
@@ -465,12 +479,6 @@ class AppLauncherWindow(PickerOverlay):
     def _new_instance_application(self, app_id: str) -> None:
         self.close_launcher()
         self._on_new_instance(app_id)
-
-    def _launch_selected(self) -> None:
-        application = self._selected_application()
-        if application is None:
-            return
-        self._open_application(application.id)
 
     def _on_row_activated(self, _list: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
         if self._action_menu.get_visible():
@@ -611,5 +619,7 @@ class AppLauncherWindow(PickerOverlay):
     def _refresh_after_present(self) -> bool:
         self._snapshot = self._on_refresh()
         if self._mode == SEARCH_DESTINATION:
-            self._rebuild_rows(keep_selection=True)
+            # Fresh open: always land on the first result so Enter works immediately.
+            self._rebuild_rows(keep_selection=False)
+            self.focus_search()
         return False

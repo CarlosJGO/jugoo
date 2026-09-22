@@ -115,6 +115,7 @@ class NotificationsWidget(ShellModule):
         self._outside_click = PopupOutsideDismiss()
         self._group_window: Gtk.Window | None = None
         self._refresh_source_id = 0
+        self._preload_source_id = 0
         self._sound_path = assets_dir() / Path(NOTIFICATIONS_SOUND_PATH).name
 
         self._event_bus.subscribe(NOTIFICATIONS_CHANGED, self._on_notifications_changed)
@@ -128,6 +129,12 @@ class NotificationsWidget(ShellModule):
         self.connect("destroy", self._on_destroy)
         GLib.idle_add(self._sync_badge)
         GLib.idle_add(self._sync_fullscreen_from_hyprland)
+        # Build the Gtk window off the critical click path (first open otherwise stalls).
+        GLib.idle_add(self._warm_popup)
+
+    def _warm_popup(self) -> bool:
+        self._popup.get()
+        return False
 
     def _create_popup(self) -> NotificationPopup:
         return NotificationPopup(
@@ -153,6 +160,9 @@ class NotificationsWidget(ShellModule):
         if self._refresh_source_id:
             GLib.source_remove(self._refresh_source_id)
             self._refresh_source_id = 0
+        if self._preload_source_id:
+            GLib.source_remove(self._preload_source_id)
+            self._preload_source_id = 0
         self._event_bus.unsubscribe(NOTIFICATIONS_CHANGED, self._on_notifications_changed)
         self._event_bus.unsubscribe(NOTIFICATION_RECEIVED, self._on_notification_received)
         self._event_bus.unsubscribe(NOTIFICATIONS_PAUSED_CHANGED, self._on_paused_changed)
@@ -392,11 +402,24 @@ class NotificationsWidget(ShellModule):
         self,
         groups: list[list[NotificationSnapshot]],
     ) -> None:
-        """Warm block pages when the history panel opens / refreshes."""
+        """Warm block pages after the panel is already visible (never on the click path)."""
+        if self._preload_source_id:
+            GLib.source_remove(self._preload_source_id)
+            self._preload_source_id = 0
         if not groups:
             return
+        self._preload_source_id = GLib.idle_add(self._preload_group_pages_now, groups)
+
+    def _preload_group_pages_now(
+        self,
+        groups: list[list[NotificationSnapshot]],
+    ) -> bool:
+        self._preload_source_id = 0
+        if not self._popup.is_visible():
+            return False
         window, _created = self._ensure_group_window()
         window.preload_groups(groups)
+        return False
 
     def _open_group_window(
         self,

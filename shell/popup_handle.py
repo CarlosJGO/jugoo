@@ -11,19 +11,15 @@ gi.require_version("Gtk", "3.0")
 
 from gi.repository import Gdk, GLib, Gtk
 
-from . import config as shell_config
-from .models import ActiveWindow
-from .servicios.escritorio.hyprland import ACTIVE_WINDOW_CHANGED
 from .ui.theme import active_theme
 
 T = TypeVar("T", bound=Gtk.Window)
 
 _POPUP_FADE_TICK_MS = 16
 
-
-def _popup_dismiss_grace_ms() -> int:
-    return int(shell_config.POPUP_OUTSIDE_DISMISS_GRACE_MS)
-
+# Shell bar press probes registered while a popup is open.
+_SHELL_PROBES_ATTR = "_jugoo_popup_outside_probes"
+_event_handler_installed = False
 
 def _popup_fade_step() -> float:
     theme = active_theme()
@@ -255,19 +251,85 @@ def is_pointer_leaving_surface(event: object | None) -> bool:
     return True
 
 
+def _event_button_number(event) -> int:
+    try:
+        ok, button = event.get_button()
+        if ok and int(button) > 0:
+            return int(button)
+    except Exception:
+        pass
+    button_field = getattr(event, "button", None)
+    if isinstance(button_field, int):
+        return button_field
+    if button_field is not None:
+        try:
+            return int(button_field.button)
+        except Exception:
+            pass
+    return 0
+
+
+def _event_gdk_window(event) -> Gdk.Window | None:
+    try:
+        window = event.get_window()
+        if window is not None:
+            return window
+    except Exception:
+        pass
+    return getattr(event, "window", None)
+
+
+def _collect_active_probes() -> list[PopupOutsideDismiss]:
+    probes: list[PopupOutsideDismiss] = []
+    seen: set[int] = set()
+    for shell in list(Gtk.Window.list_toplevels()):
+        registered = getattr(shell, _SHELL_PROBES_ATTR, None) or ()
+        for probe in list(registered):
+            marker = id(probe)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            probes.append(probe)
+    return probes
+
+
+def _gdk_global_event_handler(event) -> None:
+    """See every GDK event for this process, then continue normal GTK dispatch.
+
+    Used so bar-button presses (which never bubble to ``Gtk.Window``) still
+    dismiss open popups — without eating the click.
+    """
+    try:
+        if event.type == Gdk.EventType.BUTTON_PRESS:
+            button = _event_button_number(event)
+            if button in (1, 3):
+                event_window = _event_gdk_window(event)
+                for probe in _collect_active_probes():
+                    probe.on_gdk_button_press(button, event_window)
+    except Exception:
+        pass
+    Gtk.main_do_event(event)
+
+
+def _ensure_global_event_handler() -> None:
+    global _event_handler_installed
+    if _event_handler_installed:
+        return
+    Gdk.event_handler_set(_gdk_global_event_handler)
+    _event_handler_installed = True
+
+
 class PopupOutsideDismiss:
-    """Hide popups when the pointer leaves, independent of keyboard focus.
+    """Hide popups on outside click without eating that click.
 
-    Pointer hover owns the dismiss timer:
+    Close triggers:
 
-    * ENTER popup/anchor → cancel any pending dismiss
-    * LEAVE popup/anchor → start ``POPUP_OUTSIDE_DISMISS_GRACE_MS``
-    * timer fires → close only if the pointer is still outside
+    * Button press on the shell bar outside the popup/anchor (global GDK handler)
+    * ``dismiss_open_popups_if_pointer_outside()`` — Hyprland mouse *press*
+      (non-consuming ``gapplication action``) after the click reaches its target
 
-    Focus and Hyprland active-window changes never cancel a running timer and
-    never replace one. They only start a timer if the pointer is already
-    outside and no timer is pending (missed leave-notify on Wayland).
-    Bar clicks outside the popup still close immediately.
+    Never closes on GTK ``focus-out``, Hyprland focus-follows-mouse, or pointer leave.
+    Notification toasts keep their own expire timers.
     """
 
     _INSTALL_GRACE_USEC = 200_000
@@ -278,21 +340,9 @@ class PopupOutsideDismiss:
         self._anchors: tuple[Gtk.Widget, ...] = ()
         self._on_dismiss: Callable[[], None] | None = None
         self._popup_title: str = ""
-        self._shell_press_id: int | None = None
-        self._focus_out_id: int | None = None
-        self._popup_enter_id: int | None = None
-        self._popup_leave_id: int | None = None
-        self._anchor_enter_ids: list[tuple[Gtk.Widget, int]] = []
-        self._anchor_leave_ids: list[tuple[Gtk.Widget, int]] = []
         self._install_grace_until: int = 0
-        self._deferred_dismiss_source_id: int = 0
         self._dismiss_generation: int = 0
-        self._event_bus = None
-        self._active_window_handler = None
         self._extra_windows: tuple[Gtk.Window, ...] = ()
-        self._extra_focus_out_ids: list[int] = []
-        self._extra_enter_ids: list[int] = []
-        self._extra_leave_ids: list[int] = []
         self._suspended = False
 
     def install(
@@ -304,151 +354,68 @@ class PopupOutsideDismiss:
         event_bus=None,
         extra_windows: tuple[Gtk.Window, ...] = (),
     ) -> None:
+        del event_bus  # Kept for call-site compatibility; focus/active-window unused.
         self.uninstall()
         self._dismiss_generation += 1
         self._popup = popup
         self._shell_window = shell_window
         self._anchors = anchor_widgets
         self._on_dismiss = on_dismiss
-        self._popup_title = popup.get_title() or ""
+        self._popup_title = (popup.get_title() or "").strip()
         self._install_grace_until = GLib.get_monotonic_time() + self._INSTALL_GRACE_USEC
-        self._event_bus = event_bus
         self._extra_windows = extra_windows
-        self._shell_press_id = shell_window.connect(
-            "button-press-event",
-            self._on_shell_button_press,
-        )
-        self._focus_out_id = popup.connect("focus-out-event", self._on_focus_out)
-        self._popup_enter_id = popup.connect("enter-notify-event", self._on_pointer_enter)
-        self._popup_leave_id = popup.connect("leave-notify-event", self._on_pointer_leave)
-        for anchor in anchor_widgets:
-            enter_id = anchor.connect("enter-notify-event", self._on_pointer_enter)
-            leave_id = anchor.connect("leave-notify-event", self._on_pointer_leave)
-            self._anchor_enter_ids.append((anchor, enter_id))
-            self._anchor_leave_ids.append((anchor, leave_id))
-        for extra in extra_windows:
-            focus_id = extra.connect("focus-out-event", self._on_focus_out)
-            self._extra_focus_out_ids.append(focus_id)
-            self._extra_enter_ids.append(
-                extra.connect("enter-notify-event", self._on_pointer_enter)
-            )
-            self._extra_leave_ids.append(
-                extra.connect("leave-notify-event", self._on_pointer_leave)
-            )
-        self._active_window_handler = None
-        if event_bus is not None:
-            self._active_window_handler = self._on_active_window_changed
-            event_bus.subscribe(ACTIVE_WINDOW_CHANGED, self._active_window_handler)
+        self._register_shell_probe(shell_window)
+        _ensure_global_event_handler()
 
     def uninstall(self) -> None:
-        self._cancel_deferred_dismiss()
         self._dismiss_generation += 1
-        if self._event_bus is not None and self._active_window_handler is not None:
-            self._event_bus.unsubscribe(
-                ACTIVE_WINDOW_CHANGED,
-                self._active_window_handler,
-            )
-        if self._shell_window is not None and self._shell_press_id is not None:
-            self._shell_window.disconnect(self._shell_press_id)
-        if self._popup is not None:
-            if self._focus_out_id is not None:
-                self._popup.disconnect(self._focus_out_id)
-            if self._popup_enter_id is not None:
-                self._popup.disconnect(self._popup_enter_id)
-            if self._popup_leave_id is not None:
-                self._popup.disconnect(self._popup_leave_id)
-        for anchor, handler_id in self._anchor_enter_ids:
-            anchor.disconnect(handler_id)
-        for anchor, handler_id in self._anchor_leave_ids:
-            anchor.disconnect(handler_id)
-        for extra, handler_id in zip(self._extra_windows, self._extra_focus_out_ids):
-            if extra and handler_id:
-                extra.disconnect(handler_id)
-        for extra, handler_id in zip(self._extra_windows, self._extra_enter_ids):
-            if extra and handler_id:
-                extra.disconnect(handler_id)
-        for extra, handler_id in zip(self._extra_windows, self._extra_leave_ids):
-            if extra and handler_id:
-                extra.disconnect(handler_id)
+        if self._shell_window is not None:
+            self._unregister_shell_probe(self._shell_window)
         self._popup = None
         self._shell_window = None
         self._anchors = ()
         self._on_dismiss = None
         self._popup_title = ""
-        self._shell_press_id = None
-        self._focus_out_id = None
-        self._popup_enter_id = None
-        self._popup_leave_id = None
-        self._anchor_enter_ids = []
-        self._anchor_leave_ids = []
         self._extra_windows = ()
-        self._extra_focus_out_ids = []
-        self._extra_enter_ids = []
-        self._extra_leave_ids = []
         self._install_grace_until = 0
-        self._event_bus = None
-        self._active_window_handler = None
         self._suspended = False
 
     def suspend(self) -> None:
         """Keep the popup open while a drag crosses its surface."""
         self._suspended = True
-        self._cancel_deferred_dismiss()
 
     def resume(self) -> None:
-        if not self._suspended:
-            return
         self._suspended = False
-        if self._popup is None:
-            return
-        if not self._pointer_over_popup_or_anchor():
-            self._schedule_deferred_dismiss(restart=True)
 
     def set_extra_windows(self, extra_windows: tuple[Gtk.Window, ...]) -> None:
-        previous_windows = self._extra_windows
-        previous_handlers = self._extra_focus_out_ids
-        previous_enter_handlers = self._extra_enter_ids
-        previous_leave_handlers = self._extra_leave_ids
-        for extra, handler_id in zip(previous_windows, previous_handlers):
-            if extra and handler_id:
-                extra.disconnect(handler_id)
-        for extra, handler_id in zip(previous_windows, previous_enter_handlers):
-            if extra and handler_id:
-                extra.disconnect(handler_id)
-        for extra, handler_id in zip(previous_windows, previous_leave_handlers):
-            if extra and handler_id:
-                extra.disconnect(handler_id)
         self._extra_windows = extra_windows
-        self._extra_focus_out_ids = []
-        self._extra_enter_ids = []
-        self._extra_leave_ids = []
-        for extra in extra_windows:
-            focus_id = extra.connect("focus-out-event", self._on_focus_out)
-            self._extra_focus_out_ids.append(focus_id)
-            self._extra_enter_ids.append(
-                extra.connect("enter-notify-event", self._on_pointer_enter)
-            )
-            self._extra_leave_ids.append(
-                extra.connect("leave-notify-event", self._on_pointer_leave)
-            )
 
-    def _cancel_deferred_dismiss(self) -> None:
-        if self._deferred_dismiss_source_id:
-            GLib.source_remove(self._deferred_dismiss_source_id)
-            self._deferred_dismiss_source_id = 0
+    def _register_shell_probe(self, shell_window: Gtk.Window) -> None:
+        probes = getattr(shell_window, _SHELL_PROBES_ATTR, None)
+        if probes is None:
+            probes = []
+            setattr(shell_window, _SHELL_PROBES_ATTR, probes)
+        if self not in probes:
+            probes.append(self)
 
-    def _schedule_deferred_dismiss(self, *, restart: bool = False) -> None:
-        if self._suspended:
+    def _unregister_shell_probe(self, shell_window: Gtk.Window) -> None:
+        probes = getattr(shell_window, _SHELL_PROBES_ATTR, None)
+        if not probes:
             return
-        if self._deferred_dismiss_source_id and not restart:
-            return
-        self._cancel_deferred_dismiss()
-        generation = self._dismiss_generation
-        self._deferred_dismiss_source_id = GLib.timeout_add(
-            _popup_dismiss_grace_ms(),
-            self._on_deferred_dismiss,
-            generation,
-        )
+        try:
+            probes.remove(self)
+        except ValueError:
+            pass
+
+    def _owned_gdk_windows(self) -> list[Gdk.Window]:
+        windows: list[Gdk.Window] = []
+        for candidate in (self._popup, *self._extra_windows):
+            if candidate is None or not candidate.get_visible():
+                continue
+            gdk_window = candidate.get_window()
+            if gdk_window is not None:
+                windows.append(gdk_window)
+        return windows
 
     def _pointer_over_popup_or_anchor(self) -> bool:
         popup = self._popup
@@ -462,79 +429,76 @@ class PopupOutsideDismiss:
                 return True
         return False
 
-    def _on_shell_button_press(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
-        if self._suspended:
+    def _press_on_owned_popup(self, event_window: Gdk.Window | None) -> bool:
+        if event_window is None:
             return False
-        if event.button not in (1, 3):
-            return False
-        popup = self._popup
-        if popup is None or not popup.get_visible():
-            return False
-        if pointer_inside_widget(popup):
-            return False
-        for extra in self._extra_windows:
-            if extra.get_visible() and pointer_inside_window(extra):
-                return False
-        for anchor in self._anchors:
-            if pointer_inside_widget(anchor):
-                return False
-        self._cancel_deferred_dismiss()
-        GLib.idle_add(self._dismiss)
-        return False
-
-    def _on_pointer_enter(self, _widget: Gtk.Widget, event: Gdk.EventCrossing | None) -> bool:
-        if _is_grab_crossing(event):
-            return False
-        self._cancel_deferred_dismiss()
-        return False
-
-    def _on_pointer_leave(self, _widget: Gtk.Widget, event: Gdk.EventCrossing | None) -> bool:
-        if not is_pointer_leaving_surface(event):
-            return False
-        if GLib.get_monotonic_time() < self._install_grace_until:
-            return False
-        if self._pointer_over_popup_or_anchor():
-            return False
-        self._schedule_deferred_dismiss(restart=False)
-        return False
-
-    def _on_focus_out(self, _widget: Gtk.Widget, _event: Gdk.EventFocus) -> bool:
-        if GLib.get_monotonic_time() < self._install_grace_until:
-            return False
-        if self._pointer_over_popup_or_anchor():
-            return False
-        self._schedule_deferred_dismiss(restart=False)
-        return False
-
-    def _any_window_has_focus(self) -> bool:
-        if self._popup is not None and self._popup.get_visible() and self._popup.has_focus():
-            return True
-        for extra in self._extra_windows:
-            if extra.get_visible() and extra.has_focus():
+        for owned in self._owned_gdk_windows():
+            if _gdk_window_is_within(event_window, owned):
                 return True
         return False
 
-    def _on_active_window_changed(self, active_window: ActiveWindow) -> None:
+    def _press_on_shell_bar(self, event_window: Gdk.Window | None) -> bool:
+        shell = self._shell_window
+        if shell is None or event_window is None:
+            return False
+        shell_gdk = shell.get_window()
+        if shell_gdk is None:
+            return False
+        return _gdk_window_is_within(event_window, shell_gdk)
+
+    def on_gdk_button_press(self, button: int, event_window: Gdk.Window | None) -> None:
+        """Bar press outside the popup → dismiss."""
+        if self._suspended:
+            return
         if GLib.get_monotonic_time() < self._install_grace_until:
             return
-        if self._any_window_has_focus():
+        if button not in (1, 3):
+            return
+        popup = self._popup
+        if popup is None or not popup.get_visible():
+            return
+        if self._press_on_owned_popup(event_window):
+            return
+        if not self._press_on_shell_bar(event_window):
+            return
+        for anchor in self._anchors:
+            if pointer_inside_widget(anchor):
+                return
+        self._dismiss()
+
+    def on_shell_bar_button_press(self, button: int) -> None:
+        """Direct bar-press notify (tests and callers without a Gdk event window)."""
+        if self._suspended:
+            return
+        if GLib.get_monotonic_time() < self._install_grace_until:
+            return
+        if button not in (1, 3):
+            return
+        popup = self._popup
+        if popup is None or not popup.get_visible():
+            return
+        if pointer_inside_widget(popup):
+            return
+        for extra in self._extra_windows:
+            if extra.get_visible() and pointer_inside_window(extra):
+                return
+        for anchor in self._anchors:
+            if pointer_inside_widget(anchor):
+                return
+        self._dismiss()
+
+    def dismiss_if_pointer_outside(self) -> None:
+        """Hyprland mouse-press hook: close only when the pointer is outside."""
+        if self._suspended:
+            return
+        if GLib.get_monotonic_time() < self._install_grace_until:
+            return
+        popup = self._popup
+        if popup is None or not popup.get_visible():
             return
         if self._pointer_over_popup_or_anchor():
             return
-        self._schedule_deferred_dismiss(restart=False)
-
-    def _on_deferred_dismiss(self, generation: int) -> bool:
-        if generation != self._dismiss_generation:
-            return False
-        self._deferred_dismiss_source_id = 0
-        self._dismiss_unless_pointer_inside()
-        return False
-
-    def _dismiss_unless_pointer_inside(self) -> bool:
-        if self._pointer_over_popup_or_anchor() or self._any_window_has_focus():
-            return False
         self._dismiss()
-        return False
 
     def _dismiss(self) -> bool:
         if self._suspended:
@@ -544,3 +508,16 @@ class PopupOutsideDismiss:
         if on_dismiss is not None:
             on_dismiss()
         return False
+
+
+def dismiss_open_popups_if_pointer_outside() -> None:
+    """Close every tracked shell popup whose pointer is not over it/its anchor.
+
+    Intended for Hyprland mouse-press binds (non-consuming): the click still
+    reaches its target while we hide dangling Jugoo popups immediately.
+    """
+    for probe in _collect_active_probes():
+        try:
+            probe.dismiss_if_pointer_outside()
+        except Exception:
+            continue

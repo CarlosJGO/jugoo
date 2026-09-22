@@ -326,6 +326,12 @@ class ShellApplication(Gtk.Window):
     def toggle_notifications(self) -> None:
         self.notifications_widget.toggle_popup()
 
+    def dismiss_popups_outside(self) -> None:
+        """Hyprland mouse-release hook: close popups if the pointer is outside."""
+        from .popup_handle import dismiss_open_popups_if_pointer_outside
+
+        dismiss_open_popups_if_pointer_outside()
+
     def toggle_session(self) -> None:
         self.power_widget.toggle_menu()
 

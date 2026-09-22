@@ -13,9 +13,13 @@ from gi.repository import GdkPixbuf, GLib
 from shell.servicios.bandeja.tray import (
     SystemTrayService,
     _argb32_to_rgba,
+    _human_label,
+    _looks_like_sni_address,
     _parse_service_address,
     _parse_sni_methods_from_introspection,
     _property_icon_pixbuf,
+    _resolve_named_icon,
+    _snapshot_from_proxy,
     normalize_sni_address,
 )
 
@@ -97,8 +101,92 @@ def test_tray_service_refreshes_on_property_changes() -> None:
     service = SystemTrayService()
     assert service._should_refresh_signal("NewIcon") is True
     assert service._should_refresh_signal("NewToolTip") is True
+    assert service._should_refresh_signal("NewTitle") is True
     assert service._should_refresh_signal("g-properties-changed") is True
     assert service._should_refresh_signal("SomeOtherSignal") is False
+
+
+def test_human_labels_hide_dbus_noise() -> None:
+    noise = "org.freedesktop.StatusNotifierItem-656934-1/StatusNotifierItem"
+    assert _looks_like_sni_address(noise) is True
+    assert _human_label(noise) == ""
+    assert _human_label("Unity Hub") == "Unity Hub"
+    assert _human_label(":1.42/StatusNotifierItem") == ""
+
+
+def test_snapshot_never_exposes_dbus_address_as_tooltip() -> None:
+    address = "org.freedesktop.StatusNotifierItem-1-1/StatusNotifierItem"
+    proxy = _FakeProxy({})
+    snapshot = _snapshot_from_proxy(
+        address,
+        "org.freedesktop.StatusNotifierItem-1-1",
+        "/StatusNotifierItem",
+        proxy,
+        frozenset(),
+        props={},
+    )
+    assert "StatusNotifierItem" not in snapshot.tooltip
+    assert snapshot.tooltip == ""
+
+
+def test_snapshot_uses_title_and_theme_icon(tmp_path) -> None:
+    icon_path = tmp_path / "unityhub.png"
+    # 1x1 ARGB PNG via GdkPixbuf save
+    pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, 1, 1)
+    pixbuf.fill(0xFF0000FF)
+    pixbuf.savev(str(icon_path), "png", [], [])
+
+    proxy = _FakeProxy({})
+    snapshot = _snapshot_from_proxy(
+        "org.freedesktop.StatusNotifierItem-9-1/StatusNotifierItem",
+        "org.freedesktop.StatusNotifierItem-9-1",
+        "/StatusNotifierItem",
+        proxy,
+        frozenset({"Activate"}),
+        props={
+            "Id": "unityhub",
+            "Title": "Unity Hub",
+            "IconName": "unityhub",
+            "IconThemePath": str(tmp_path),
+            "Status": "Active",
+        },
+    )
+    assert snapshot.tooltip == "Unity Hub"
+    assert snapshot.title == "Unity Hub"
+    assert snapshot.icon_pixbuf is not None
+    assert snapshot.icon_name is None  # pixbuf wins
+
+
+def test_snapshot_prefers_tooltip_over_chromium_id() -> None:
+    """Electron trays often leave Title empty and put the name only in ToolTip."""
+    proxy = _FakeProxy({})
+    snapshot = _snapshot_from_proxy(
+        "org.freedesktop.StatusNotifierItem-656934-1/StatusNotifierItem",
+        "org.freedesktop.StatusNotifierItem-656934-1",
+        "/StatusNotifierItem",
+        proxy,
+        frozenset({"Activate"}),
+        props={
+            "Id": "unityhub_status_icon_1",
+            "Title": "",
+            "ToolTip": ("", [], "Unity Hub", ""),
+            "Status": "Active",
+        },
+    )
+    assert snapshot.tooltip == "Unity Hub"
+    assert snapshot.title == "Unity Hub"
+    assert "StatusNotifierItem" not in snapshot.tooltip
+    assert "StatusNotifierItem" not in snapshot.title
+
+
+def test_resolve_named_icon_absolute_path(tmp_path) -> None:
+    icon_path = tmp_path / "app.png"
+    pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, 2, 2)
+    pixbuf.fill(0x00FF00FF)
+    pixbuf.savev(str(icon_path), "png", [], [])
+    loaded = _resolve_named_icon(str(icon_path), "")
+    assert loaded is not None
+    assert loaded.get_width() == 2
 
 
 if __name__ == "__main__":
@@ -108,4 +196,7 @@ if __name__ == "__main__":
     test_icon_pixbuf_from_argb()
     test_normalize_sni_address_accepts_bus_name_only()
     test_tray_service_starts_in_recovery_enabled_state()
+    test_tray_service_refreshes_on_property_changes()
+    test_human_labels_hide_dbus_noise()
+    test_snapshot_never_exposes_dbus_address_as_tooltip()
     print("tray safe tests OK")

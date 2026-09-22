@@ -13,7 +13,7 @@
 
 - `present_popup()` y `hide_popup()` para fades de opacidad.
 - `PopupHandle` para creación lazy.
-- `PopupOutsideDismiss` para cierre al salir, clicks en la barra y cambios de ventana activa.
+- `PopupOutsideDismiss` cierra con click en la barra o con `gapplication action com.jugoo.Shell dismiss-popups-outside` (Hyprland bind al *press*, non-consuming). No cierra por foco ni al sacar el puntero.
 - `pointer_inside_widget()` para comprobar la posición real del puntero.
 
 ## Puertas (pickers centrados)

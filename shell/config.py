@@ -49,9 +49,6 @@ BAR_RETRACT_ANIM_TICK_MS = 16
 # Screen-edge padding when clamping anchored popups.
 POPUP_EDGE_MARGIN = 8
 
-# Grace period before closing a popup after the pointer leaves it.
-POPUP_OUTSIDE_DISMISS_GRACE_MS = 500
-
 # Volume OSD auto-hide delay after the last default-sink volume/mute/output change.
 VOLUME_OSD_HIDE_DELAY_MS = 1200
 

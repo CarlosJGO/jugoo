@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import os
+from pathlib import Path
 import re
 from typing import Callable
 
@@ -20,6 +21,10 @@ WATCHER_BUS = "org.kde.StatusNotifierWatcher"
 WATCHER_PATH = "/StatusNotifierWatcher"
 WATCHER_IFACE = "org.kde.StatusNotifierWatcher"
 SNI_IFACE = "org.kde.StatusNotifierItem"
+_SNI_PROPERTY_IFACES = (
+    "org.kde.StatusNotifierItem",
+    "org.ayatana.StatusNotifierItem",
+)
 
 _WATCHER_XML = """
 <node>
@@ -532,12 +537,14 @@ class SystemTrayService:
             return False
 
         methods = _discover_sni_methods(self._bus, bus_name, object_path)
+        props = _fetch_sni_properties(self._bus, bus_name, object_path)
         snapshot = _snapshot_from_proxy(
             address,
             bus_name,
             object_path,
             proxy,
             methods,
+            props=props,
         )
         signal_id = proxy.connect("g-signal", self._on_item_proxy_signal, address)
         properties_signal_id = proxy.connect(
@@ -582,6 +589,9 @@ class SystemTrayService:
             name_vanished_id=name_vanished_id,
         )
         self._notify_listener()
+        # Electron / Unity Hub often publish IconName+IconThemePath a beat later.
+        GLib.timeout_add(200, self._refresh_item_once, address)
+        GLib.timeout_add(600, self._refresh_item_once, address)
         return False
 
     def _remove_item(self, address: str) -> bool:
@@ -617,14 +627,21 @@ class SystemTrayService:
         state = self._items.get(address)
         if state is None:
             return
+        props = _fetch_sni_properties(self._bus, state.bus_name, state.object_path)
         state.snapshot = _snapshot_from_proxy(
             state.address,
             state.bus_name,
             state.object_path,
             state.proxy,
             state.methods,
+            props=props,
         )
         self._notify_listener()
+
+    def _refresh_item_once(self, address: str) -> bool:
+        if address in self._items:
+            self._refresh_item(address)
+        return False
 
     @staticmethod
     def _should_refresh_signal(signal: str) -> bool:
@@ -632,6 +649,7 @@ class SystemTrayService:
             "NewIcon",
             "NewToolTip",
             "NewStatus",
+            "NewTitle",
             "NewAttentionIcon",
             "g-properties-changed",
         }
@@ -675,9 +693,13 @@ class SystemTrayService:
         if not names or set({
             "IconPixmap",
             "IconName",
+            "IconThemePath",
             "AttentionIconName",
+            "AttentionIconPixmap",
             "Status",
             "ToolTip",
+            "Title",
+            "Id",
             "Menu",
             "ItemIsMenu",
         }).intersection(names):
@@ -750,32 +772,43 @@ def _snapshot_from_proxy(
     object_path: str,
     proxy: Gio.DBusProxy,
     methods: frozenset[str],
+    *,
+    props: dict[str, object] | None = None,
 ) -> TrayItemSnapshot:
-    item_id = _property_string(proxy, "Id") or address
-    title = _property_string(proxy, "Title") or item_id
-    status = _property_string(proxy, "Status") or "Active"
-    icon_name = _property_string(proxy, "IconName")
-    attention_icon = _property_string(proxy, "AttentionIconName")
+    props = props or {}
+    item_id = _human_label(_props_string(props, proxy, "Id"))
+    title = _human_label(_props_string(props, proxy, "Title"))
+    status = _props_string(props, proxy, "Status") or "Active"
+    icon_name = _props_string(props, proxy, "IconName")
+    attention_icon = _props_string(props, proxy, "AttentionIconName")
+    theme_path = _props_string(props, proxy, "IconThemePath")
     if status == "NeedsAttention" and attention_icon:
         icon_name = attention_icon or icon_name
 
-    tooltip = _property_tooltip(proxy) or title
-    menu_path = _property_object_path(proxy, "Menu")
-    item_is_menu = _property_bool(proxy, "ItemIsMenu")
+    # Prefer ToolTip title over chromium-style Ids like "unityhub_status_icon_1".
+    tooltip = _props_tooltip(props, proxy)
+    if not title and tooltip:
+        title = tooltip.split("\n", 1)[0].strip()
+    title = title or item_id
+    tooltip = tooltip or title
+    menu_path = _props_object_path(props, proxy, "Menu")
+    item_is_menu = _props_bool(props, proxy, "ItemIsMenu")
 
-    pixbuf = _property_icon_pixbuf(proxy, "IconPixmap")
+    pixbuf = _props_icon_pixbuf(props, proxy, "IconPixmap")
     if pixbuf is None and status == "NeedsAttention":
-        pixbuf = _property_icon_pixbuf(proxy, "AttentionIconPixmap")
+        pixbuf = _props_icon_pixbuf(props, proxy, "AttentionIconPixmap")
+    if pixbuf is None and icon_name:
+        pixbuf = _resolve_named_icon(icon_name, theme_path)
 
     return TrayItemSnapshot(
         address=address,
         bus_name=bus_name,
         object_path=object_path,
-        item_id=item_id,
+        item_id=item_id or address,
         title=title,
         tooltip=tooltip,
         status=status,
-        icon_name=icon_name or None,
+        icon_name=(None if pixbuf is not None else (icon_name or None)),
         icon_pixbuf=pixbuf,
         menu_bus=bus_name if menu_path else None,
         menu_path=menu_path,
@@ -785,6 +818,38 @@ def _snapshot_from_proxy(
         supports_context_menu="ContextMenu" in methods,
         supports_scroll="Scroll" in methods,
     )
+
+
+def _fetch_sni_properties(
+    bus: Gio.DBusConnection | None,
+    bus_name: str,
+    object_path: str,
+) -> dict[str, object]:
+    """Pull properties via GetAll — proxy cache is often empty on first map."""
+    if bus is None or not bus_name or not object_path:
+        return {}
+    for iface in _SNI_PROPERTY_IFACES:
+        try:
+            result = bus.call_sync(
+                bus_name,
+                object_path,
+                "org.freedesktop.DBus.Properties",
+                "GetAll",
+                GLib.Variant("(s)", (iface,)),
+                GLib.VariantType("(a{sv})"),
+                Gio.DBusCallFlags.NONE,
+                2500,
+                None,
+            )
+        except GLib.Error:
+            continue
+        try:
+            payload = result.unpack()[0]
+        except (TypeError, ValueError, IndexError):
+            continue
+        if isinstance(payload, dict) and payload:
+            return {str(key): value for key, value in payload.items()}
+    return {}
 
 
 def _discover_sni_methods(
@@ -831,6 +896,203 @@ def _is_stale_dbus_error(error: GLib.Error) -> bool:
     return any(marker in message for marker in _STALE_DBUS_MARKERS)
 
 
+def _looks_like_sni_address(text: str) -> bool:
+    """True for D-Bus service/object noise that must never be shown as a label."""
+    value = str(text or "").strip()
+    if not value:
+        return True
+    if "StatusNotifierItem" in value or "StatusNotifierWatcher" in value:
+        return True
+    if value.startswith(":") and "/" in value:
+        return True
+    if re.match(r"^org\.(freedesktop|kde|ayatana)\.", value):
+        return True
+    return False
+
+
+def _human_label(text: str) -> str:
+    value = str(text or "").strip()
+    if _looks_like_sni_address(value):
+        return ""
+    return value
+
+
+def _props_raw(
+    props: dict[str, object],
+    proxy: Gio.DBusProxy,
+    name: str,
+) -> object | None:
+    if name in props:
+        return _coerce_prop_value(props[name])
+    value = proxy.get_cached_property(name)
+    if value is None:
+        return None
+    try:
+        return value.unpack()
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_prop_value(value: object) -> object:
+    if isinstance(value, GLib.Variant):
+        try:
+            return value.unpack()
+        except (TypeError, ValueError):
+            return value
+    return value
+
+
+def _props_string(props: dict[str, object], proxy: Gio.DBusProxy, name: str) -> str:
+    raw = _props_raw(props, proxy, name)
+    if raw is None:
+        return ""
+    return str(raw).strip()
+
+
+def _props_bool(props: dict[str, object], proxy: Gio.DBusProxy, name: str) -> bool:
+    raw = _props_raw(props, proxy, name)
+    return bool(raw)
+
+
+def _props_object_path(
+    props: dict[str, object],
+    proxy: Gio.DBusProxy,
+    name: str,
+) -> str | None:
+    raw = _props_raw(props, proxy, name)
+    if raw is None:
+        return None
+    path = str(raw).strip()
+    if not path or path == "/":
+        return None
+    return path
+
+
+def _props_tooltip(props: dict[str, object], proxy: Gio.DBusProxy) -> str:
+    raw = _props_raw(props, proxy, "ToolTip")
+    if raw is None:
+        return ""
+    if not isinstance(raw, tuple) or len(raw) < 4:
+        return ""
+    title = _human_label(str(raw[2] or ""))
+    subtitle = _human_label(str(raw[3] or ""))
+    if title and subtitle and subtitle != title:
+        return f"{title}\n{subtitle}"
+    return title or subtitle
+
+
+def _props_icon_pixbuf(
+    props: dict[str, object],
+    proxy: Gio.DBusProxy,
+    name: str,
+) -> GdkPixbuf.Pixbuf | None:
+    raw = _props_raw(props, proxy, name)
+    if raw is None:
+        # Fall back to cached Variant path used by older helpers/tests.
+        value = proxy.get_cached_property(name)
+        if value is None:
+            return None
+        try:
+            raw = value.unpack()
+        except (TypeError, ValueError):
+            return None
+    return _pixbuf_from_pixmap_entries(raw)
+
+
+def _pixbuf_from_pixmap_entries(pixmaps: object) -> GdkPixbuf.Pixbuf | None:
+    if not pixmaps:
+        return None
+
+    best: tuple[int, int, bytes] | None = None
+    best_score = -1
+    for entry in pixmaps:  # type: ignore[union-attr]
+        if not isinstance(entry, (list, tuple)) or len(entry) < 3:
+            continue
+        try:
+            width, height = int(entry[0]), int(entry[1])
+            data = bytes(entry[2])
+        except (TypeError, ValueError):
+            continue
+        if width <= 0 or height <= 0 or not data:
+            continue
+        score = min(width, height)
+        if score > best_score:
+            best_score = score
+            best = (width, height, data)
+
+    if best is None:
+        return None
+
+    width, height, data = best
+    expected = width * height * 4
+    if len(data) < expected:
+        return None
+    rgba = _argb32_to_rgba(data[:expected])
+    try:
+        return GdkPixbuf.Pixbuf.new_from_bytes(
+            GLib.Bytes.new(rgba),
+            GdkPixbuf.Colorspace.RGB,
+            True,
+            8,
+            width,
+            height,
+            width * 4,
+        )
+    except GLib.Error:
+        return None
+
+
+def _resolve_named_icon(icon_name: str, theme_path: str) -> GdkPixbuf.Pixbuf | None:
+    """Resolve IconName, including absolute paths and SNI IconThemePath (Electron)."""
+    name = str(icon_name or "").strip()
+    if not name:
+        return None
+    if name.startswith("file://"):
+        name = name[7:]
+    if name.startswith("/") or name.startswith("~"):
+        return _pixbuf_from_file(os.path.expanduser(name))
+    if theme_path:
+        loaded = _pixbuf_from_theme_path(theme_path, name)
+        if loaded is not None:
+            return loaded
+    return None
+
+
+def _pixbuf_from_file(path: str) -> GdkPixbuf.Pixbuf | None:
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        return GdkPixbuf.Pixbuf.new_from_file(path)
+    except GLib.Error:
+        return None
+
+
+def _pixbuf_from_theme_path(theme_path: str, icon_name: str) -> GdkPixbuf.Pixbuf | None:
+    root = Path(os.path.expanduser(theme_path))
+    if not root.is_dir():
+        return None
+    stem = icon_name
+    for ext in (".png", ".svg", ".xpm", ".jpg", ".jpeg"):
+        if icon_name.endswith(ext):
+            stem = icon_name[: -len(ext)]
+            break
+    candidates: list[Path] = [
+        root / icon_name,
+        root / f"{stem}.png",
+        root / f"{stem}.svg",
+        root / f"{stem}.xpm",
+    ]
+    for size in ("16x16", "22x22", "24x24", "32x32", "48x48", "64x64", "scalable"):
+        for kind in ("apps", "status", "panel", "devices"):
+            candidates.append(root / size / kind / f"{stem}.png")
+            candidates.append(root / size / kind / f"{stem}.svg")
+    for path in candidates:
+        pixbuf = _pixbuf_from_file(str(path))
+        if pixbuf is not None:
+            return pixbuf
+    return None
+
+
 def _property_string(proxy: Gio.DBusProxy, name: str) -> str:
     value = proxy.get_cached_property(name)
     if value is None:
@@ -863,8 +1125,8 @@ def _property_tooltip(proxy: Gio.DBusProxy) -> str:
     unpacked = value.unpack()
     if not isinstance(unpacked, tuple) or len(unpacked) < 4:
         return ""
-    title = str(unpacked[2] or "").strip()
-    subtitle = str(unpacked[3] or "").strip()
+    title = _human_label(str(unpacked[2] or ""))
+    subtitle = _human_label(str(unpacked[3] or ""))
     if title and subtitle and subtitle != title:
         return f"{title}\n{subtitle}"
     return title or subtitle
@@ -874,43 +1136,7 @@ def _property_icon_pixbuf(proxy: Gio.DBusProxy, name: str) -> GdkPixbuf.Pixbuf |
     value = proxy.get_cached_property(name)
     if value is None:
         return None
-    pixmaps = value.unpack()
-    if not pixmaps:
-        return None
-
-    best: tuple[int, int, bytes] | None = None
-    best_score = -1
-    for entry in pixmaps:
-        if not isinstance(entry, (list, tuple)) or len(entry) < 3:
-            continue
-        width, height, data = int(entry[0]), int(entry[1]), bytes(entry[2])
-        if width <= 0 or height <= 0 or not data:
-            continue
-        score = min(width, height)
-        if score > best_score:
-            best_score = score
-            best = (width, height, data)
-
-    if best is None:
-        return None
-
-    width, height, data = best
-    expected = width * height * 4
-    if len(data) < expected:
-        return None
-    rgba = _argb32_to_rgba(data[:expected])
-    try:
-        return GdkPixbuf.Pixbuf.new_from_bytes(
-            GLib.Bytes.new(rgba),
-            GdkPixbuf.Colorspace.RGB,
-            True,
-            8,
-            width,
-            height,
-            width * 4,
-        )
-    except GLib.Error:
-        return None
+    return _pixbuf_from_pixmap_entries(value.unpack())
 
 
 def _argb32_to_rgba(data: bytes) -> bytes:

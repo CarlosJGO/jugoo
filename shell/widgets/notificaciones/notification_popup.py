@@ -11,7 +11,7 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 gi.require_version("Pango", "1.0")
 
-from gi.repository import Gdk, Gtk, Pango
+from gi.repository import Gdk, GLib, Gtk, Pango
 
 from ...config import (
     NOTIFICATION_POPUP_ICON_SIZE,
@@ -36,13 +36,14 @@ from ...window_identity import (
     compute_popup_top_left,
     configure_interactive_popup,
     configure_toplevel,
-    position_popup_below_anchor,
     popup_window_size,
     register_shell_popup,
     schedule_popup_position,
     monitor_containing_point,
     anchor_button_geometry,
+    reposition_popup,
 )
+from ...popup_spawn import publish_popup_spawn
 from .notification_grouping import group_notification_snapshots
 
 _URGENCY_LABELS = {
@@ -366,8 +367,22 @@ class NotificationPopup(Gtk.Window):
         self._fixed_popup_top = None
         self._position = None
         self.refresh()
-        present_popup(self)
-        schedule_popup_position(self._position_after_show)
+        # Publish spawn coords before map so Hyprland places on first frame
+        # (avoids a storm of sync hyprctl moves on the click path).
+        top = publish_popup_spawn(
+            self,
+            anchor_button,
+            title=TITLE_NOTIFICATIONS,
+            offset=NOTIFICATION_POPUP_OFFSET,
+        )
+        if top is not None:
+            self._fixed_popup_top = top
+            present_popup(self)
+            # Spawn already placed the window; one idle pass is enough for size settle.
+            GLib.idle_add(self._position_after_show)
+        else:
+            present_popup(self)
+            schedule_popup_position(self._position_after_show)
 
     def close_popup(self) -> None:
         self._anchor_button = None
@@ -519,30 +534,26 @@ class NotificationPopup(Gtk.Window):
         self._blocked_apps_box.show_all()
 
     def _position_after_show(self) -> bool:
-        if self._anchor_button is not None:
-            geometry = anchor_button_geometry(self._anchor_button)
-            if geometry is not None:
-                width, height = popup_window_size(self)
-                monitor = monitor_containing_point(geometry.center_x, geometry.bottom)
-                position = compute_popup_top_left(
-                    button_center_x=geometry.center_x,
-                    button_bottom=geometry.bottom,
-                    popup_width=width,
-                    popup_height=height,
-                    offset=NOTIFICATION_POPUP_OFFSET,
-                    fixed_top=self._fixed_popup_top,
-                    monitor=monitor,
-                )
-                self._position = (position[0], position[1], width)
-            top = position_popup_below_anchor(
-                self,
-                self._anchor_button,
-                title=TITLE_NOTIFICATIONS,
-                offset=NOTIFICATION_POPUP_OFFSET,
-                fixed_top=self._fixed_popup_top,
-            )
-            if self._fixed_popup_top is None and top is not None:
-                self._fixed_popup_top = top
+        if self._anchor_button is None:
+            return False
+        geometry = anchor_button_geometry(self._anchor_button)
+        if geometry is None:
+            return False
+        width, height = popup_window_size(self)
+        monitor = monitor_containing_point(geometry.center_x, geometry.bottom)
+        left, top = compute_popup_top_left(
+            button_center_x=geometry.center_x,
+            button_bottom=geometry.bottom,
+            popup_width=width,
+            popup_height=height,
+            offset=NOTIFICATION_POPUP_OFFSET,
+            fixed_top=self._fixed_popup_top,
+            monitor=monitor,
+        )
+        self._position = (left, top, width)
+        reposition_popup(self, title=TITLE_NOTIFICATIONS, x=left, y=top)
+        if self._fixed_popup_top is None:
+            self._fixed_popup_top = top
         return False
 
 
