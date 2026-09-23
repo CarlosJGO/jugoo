@@ -259,7 +259,7 @@ class ClockCalendarPopup(Gtk.Window):
         bus = event_bus
         if bus is None and isinstance(parent, Gtk.Window):
             bus = resolve_event_bus(parent)
-        install_starfield(self, outer, bus, corner_radius=16.0)
+        install_starfield(self, outer, bus)
 
         self._calendar = TaskMonthGrid()
         self._calendar.connect_day_selected(self._on_day_selected)

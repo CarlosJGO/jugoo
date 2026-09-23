@@ -71,7 +71,6 @@ class WorkspacePanel(Gtk.Window):
             self,
             self._box,
             resolve_event_bus(shell_window),
-            corner_radius=16.0,
         )
 
     def open_for(

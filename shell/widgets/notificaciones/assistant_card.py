@@ -61,7 +61,7 @@ class AssistantCard(Gtk.EventBox):
         self._card.set_size_request(ASSISTANT_CARD_WIDTH, -1)
         self._card.get_style_context().add_class("assistant-card")
         self._card.get_style_context().add_class("assistant-card-content")
-        install_starfield(self, self._card, resolve_event_bus(self), corner_radius=18.0)
+        install_starfield(self, self._card, resolve_event_bus(self))
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         header.get_style_context().add_class("assistant-card-header")

@@ -94,7 +94,6 @@ class ControlCenterPopup(Gtk.Window):
             self,
             outer,
             resolve_event_bus(shell_window),
-            corner_radius=16.0,
         )
 
         header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)

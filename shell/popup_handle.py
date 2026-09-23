@@ -19,6 +19,8 @@ _POPUP_FADE_TICK_MS = 16
 
 # Shell bar press probes registered while a popup is open.
 _SHELL_PROBES_ATTR = "_jugoo_popup_outside_probes"
+# Popovers / helper surfaces that are not Gdk-children of the popup (Wayland).
+_OWNED_SURFACES_ATTR = "_jugoo_owned_surfaces"
 _event_handler_installed = False
 
 def _popup_fade_step() -> float:
@@ -57,19 +59,22 @@ def _fade_out_tick(window: Gtk.Window) -> bool:
     return True
 
 
-def present_popup(window: Gtk.Window) -> None:
+def present_popup(window: Gtk.Window, *, fade: bool = True) -> None:
     """Show a popup with a short opacity fade, without changing its position.
 
     Interactive popups may accept keyboard focus once on map. If the window is
     already visible, do not call ``present()`` again so refreshes do not steal
     Hyprland focus from the previously active application.
+
+    Pass ``fade=False`` when the caller will animate content in itself (e.g. the
+    notifications panel chrome should be visible immediately).
     """
     _cancel_popup_fade(window)
     if window.get_visible():
         window.set_opacity(1.0)
         return
     theme = active_theme()
-    if theme is not None and not theme.animation.enabled:
+    if (not fade) or (theme is not None and not theme.animation.enabled):
         window.set_opacity(1.0)
         window.show_all()
         window.present()
@@ -197,8 +202,125 @@ def pointer_inside_widget(widget: Gtk.Widget) -> bool:
     return _coords_in_widget_allocation(widget, x, y)
 
 
+def _gdk_effective_toplevel(window: Gdk.Window | None) -> Gdk.Window | None:
+    if window is None:
+        return None
+    current = window
+    while True:
+        parent = current.get_parent()
+        if parent is None:
+            return current
+        current = parent
+
+
+def _gdk_windows_related(left: Gdk.Window | None, right: Gdk.Window | None) -> bool:
+    if left is None or right is None:
+        return False
+    if left is right:
+        return True
+    if _gdk_window_is_within(left, right) or _gdk_window_is_within(right, left):
+        return True
+    return _gdk_effective_toplevel(left) is _gdk_effective_toplevel(right)
+
+
+def _pointer_over_surface(widget: Gtk.Widget) -> bool:
+    """Hit-test a Popover/popup surface, including Wayland subsurface siblings."""
+    if pointer_inside_widget(widget):
+        return True
+    if not widget.get_mapped() or not widget.get_visible():
+        return False
+    widget_window = widget.get_window()
+    if widget_window is None:
+        return False
+    display = widget.get_display()
+    seat = display.get_default_seat() if display is not None else None
+    pointer = seat.get_pointer() if seat is not None else None
+    if pointer is None:
+        return False
+    window_at = _pointer_window_at(pointer)
+    return _gdk_windows_related(window_at, widget_window)
+
+
 def pointer_inside_window(window: Gtk.Window) -> bool:
     return pointer_inside_widget(window)
+
+
+def _is_descendant_widget(widget: Gtk.Widget | None, ancestor: Gtk.Widget | None) -> bool:
+    if widget is None or ancestor is None:
+        return False
+    current: Gtk.Widget | None = widget
+    while current is not None:
+        if current is ancestor:
+            return True
+        current = current.get_parent()
+    return False
+
+
+def register_owned_surface(owner: Gtk.Widget, surface: Gtk.Widget) -> None:
+    """Track a Popover/menu surface so outside-dismiss treats it as part of ``owner``."""
+    toplevel = owner.get_toplevel()
+    if not isinstance(toplevel, Gtk.Window):
+        return
+    bag = getattr(toplevel, _OWNED_SURFACES_ATTR, None)
+    if bag is None:
+        bag = []
+        setattr(toplevel, _OWNED_SURFACES_ATTR, bag)
+    if surface not in bag:
+        bag.append(surface)
+
+
+def unregister_owned_surface(owner: Gtk.Widget, surface: Gtk.Widget) -> None:
+    toplevel = owner.get_toplevel()
+    if not isinstance(toplevel, Gtk.Window):
+        return
+    bag = getattr(toplevel, _OWNED_SURFACES_ATTR, None)
+    if not bag:
+        return
+    try:
+        bag.remove(surface)
+    except ValueError:
+        pass
+
+
+def _iter_owned_transient_windows(
+    owners: tuple[Gtk.Window, ...],
+) -> list[Gtk.Window]:
+    """ComboBox / menu popups are separate toplevels with transient-for set."""
+    found: list[Gtk.Window] = []
+    owner_set = {owner for owner in owners if owner is not None}
+    if not owner_set:
+        return found
+    for toplevel in Gtk.Window.list_toplevels():
+        if toplevel in owner_set or not toplevel.get_visible():
+            continue
+        try:
+            transient = toplevel.get_transient_for()
+        except Exception:
+            transient = None
+        if transient in owner_set:
+            found.append(toplevel)
+            continue
+        if isinstance(toplevel, Gtk.Menu):
+            attach = toplevel.get_attach_widget()
+            if attach is not None and any(
+                _is_descendant_widget(attach, owner) for owner in owner_set
+            ):
+                found.append(toplevel)
+    return found
+
+
+def _iter_registered_owned_surfaces(owners: tuple[Gtk.Window, ...]) -> list[Gtk.Widget]:
+    surfaces: list[Gtk.Widget] = []
+    for owner in owners:
+        if owner is None:
+            continue
+        for surface in list(getattr(owner, _OWNED_SURFACES_ATTR, None) or ()):
+            try:
+                if surface.get_mapped() and surface.get_visible():
+                    surfaces.append(surface)
+            except Exception:
+                continue
+    return surfaces
 
 
 class PopupHandle(Generic[T]):
@@ -407,25 +529,62 @@ class PopupOutsideDismiss:
         except ValueError:
             pass
 
+    def _owner_windows(self) -> tuple[Gtk.Window, ...]:
+        owners: list[Gtk.Window] = []
+        if self._popup is not None:
+            owners.append(self._popup)
+        owners.extend(self._extra_windows)
+        return tuple(owners)
+
     def _owned_gdk_windows(self) -> list[Gdk.Window]:
         windows: list[Gdk.Window] = []
-        for candidate in (self._popup, *self._extra_windows):
+        owners = self._owner_windows()
+        for candidate in (*owners, *_iter_owned_transient_windows(owners)):
             if candidate is None or not candidate.get_visible():
                 continue
             gdk_window = candidate.get_window()
             if gdk_window is not None:
                 windows.append(gdk_window)
+        for surface in _iter_registered_owned_surfaces(owners):
+            gdk_window = surface.get_window()
+            if gdk_window is not None:
+                windows.append(gdk_window)
         return windows
 
     def _pointer_over_popup_or_anchor(self) -> bool:
-        popup = self._popup
-        if popup is not None and pointer_inside_widget(popup):
-            return True
-        for extra in self._extra_windows:
-            if pointer_inside_window(extra):
+        owners = self._owner_windows()
+        for owner in owners:
+            if pointer_inside_widget(owner):
                 return True
+        for transient in _iter_owned_transient_windows(owners):
+            if _pointer_over_surface(transient):
+                return True
+        for surface in _iter_registered_owned_surfaces(owners):
+            if _pointer_over_surface(surface):
+                return True
+        grabbed = Gtk.grab_get_current()
+        if grabbed is not None and self._grab_belongs_to_popup(grabbed):
+            return True
         for anchor in self._anchors:
             if pointer_inside_widget(anchor):
+                return True
+        return False
+
+    def _grab_belongs_to_popup(self, grabbed: Gtk.Widget) -> bool:
+        owners = self._owner_windows()
+        if any(_is_descendant_widget(grabbed, owner) for owner in owners):
+            return True
+        if isinstance(grabbed, Gtk.Menu):
+            attach = grabbed.get_attach_widget()
+            if attach is not None and any(
+                _is_descendant_widget(attach, owner) for owner in owners
+            ):
+                return True
+        if isinstance(grabbed, Gtk.Popover):
+            relative = grabbed.get_relative_to()
+            if relative is not None and any(
+                _is_descendant_widget(relative, owner) for owner in owners
+            ):
                 return True
         return False
 
@@ -477,14 +636,8 @@ class PopupOutsideDismiss:
         popup = self._popup
         if popup is None or not popup.get_visible():
             return
-        if pointer_inside_widget(popup):
+        if self._pointer_over_popup_or_anchor():
             return
-        for extra in self._extra_windows:
-            if extra.get_visible() and pointer_inside_window(extra):
-                return
-        for anchor in self._anchors:
-            if pointer_inside_widget(anchor):
-                return
         self._dismiss()
 
     def dismiss_if_pointer_outside(self) -> None:

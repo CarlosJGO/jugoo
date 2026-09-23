@@ -13,6 +13,7 @@ from gi.repository import Gtk
 
 from ...models import TASK_REPEAT_DAILY, TASK_REPEAT_MONTHLY, TASK_REPEAT_NONE
 from ...settings.task_taxonomy import TaskCategory, TaskPriority
+from ...ui.date_entry import DateEntry
 
 _REPEAT_OPTIONS = (
     ("Una vez", TASK_REPEAT_NONE),
@@ -86,13 +87,11 @@ class TaskComposer(Gtk.Box):
         self._once_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         due_label = Gtk.Label(label="Vence", xalign=0)
         due_label.get_style_context().add_class("task-composer-label")
-        self._due_entry = Gtk.Entry()
-        self._due_entry.set_placeholder_text("AAAA-MM-DD")
-        self._due_entry.set_text(date.today().isoformat())
+        self._due_entry = DateEntry(initial=date.today())
         self._due_entry.set_width_chars(12)
         today_btn = Gtk.Button(label="Hoy", relief=Gtk.ReliefStyle.NONE)
         today_btn.get_style_context().add_class("task-composer-chip")
-        today_btn.connect("clicked", lambda _btn: self._due_entry.set_text(date.today().isoformat()))
+        today_btn.connect("clicked", lambda _btn: self._due_entry.set_date(date.today()))
         self._once_row.pack_start(due_label, False, False, 0)
         self._once_row.pack_start(self._due_entry, True, True, 0)
         self._once_row.pack_start(today_btn, False, False, 0)
@@ -168,7 +167,10 @@ class TaskComposer(Gtk.Box):
         self._notes.set_text(notes)
         self._repeat = repeat if repeat in self._repeat_buttons else TASK_REPEAT_NONE
         self._repeat_buttons[self._repeat].set_active(True)
-        self._due_entry.set_text(due_date or date.today().isoformat())
+        if due_date:
+            self._due_entry.set_text(due_date)
+        else:
+            self._due_entry.set_date(date.today())
         self._month_spin.set_value(month_day)
         self._set_combo_id(self._category_combo, category_id or _NONE_ID)
         self._set_combo_id(self._priority_combo, priority_id or _NONE_ID)
@@ -191,7 +193,7 @@ class TaskComposer(Gtk.Box):
         self._repeat = TASK_REPEAT_NONE
         none_button = self._repeat_buttons[TASK_REPEAT_NONE]
         none_button.set_active(True)
-        self._due_entry.set_text(date.today().isoformat())
+        self._due_entry.set_date(date.today())
         self._month_spin.set_value(date.today().day)
         self._set_combo_id(self._category_combo, _NONE_ID)
         self._set_combo_id(self._priority_combo, _NONE_ID)

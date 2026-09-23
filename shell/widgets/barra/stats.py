@@ -113,7 +113,6 @@ class MemoryPopup(Gtk.Window):
             self,
             content,
             resolve_event_bus(shell_window),
-            corner_radius=10.0,
         )
 
     def open_for(self, anchor: Gtk.Widget, stats: SystemStats) -> None:

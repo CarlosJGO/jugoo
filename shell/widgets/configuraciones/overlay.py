@@ -64,7 +64,6 @@ class SettingsOverlay(Gtk.Window):
             card,
             outer,
             resolve_event_bus(shell_window),
-            corner_radius=16.0,
         )
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)

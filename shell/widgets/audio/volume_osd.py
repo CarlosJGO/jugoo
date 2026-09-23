@@ -85,7 +85,6 @@ class VolumeOsd(Gtk.Window):
             outer,
             card,
             resolve_event_bus(shell_window),
-            corner_radius=16.0,
         )
 
         self._headline = Gtk.Label(xalign=0.5)

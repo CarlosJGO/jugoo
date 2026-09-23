@@ -18,7 +18,10 @@ from ...config import (
     NOTIFICATION_POPUP_LIST_SPACING,
     NOTIFICATION_POPUP_MAX_HEIGHT,
     NOTIFICATION_POPUP_OFFSET,
+    NOTIFICATION_POPUP_REVEAL_STAGGER_MS,
+    NOTIFICATION_POPUP_ROW_APPEAR_MS,
     NOTIFICATION_POPUP_ROW_BODY_LINES,
+    NOTIFICATION_POPUP_ROW_SLIDE_PX,
     NOTIFICATION_POPUP_WIDTH,
 )
 from ...models import NotificationSnapshot
@@ -31,6 +34,7 @@ from ...popup_handle import (
 from ...servicios.notificaciones.notifications import NotificationService
 from ...ui.disfraces import WindowRole, dress_window
 from ...ui.notification_icon import apply_notification_icon
+from ...ui.theme import active_theme
 from ...window_identity import (
     TITLE_NOTIFICATIONS,
     compute_popup_top_left,
@@ -51,6 +55,15 @@ _URGENCY_LABELS = {
     1: "Normal",
     2: "Urgente",
 }
+_ROW_APPEAR_TICK_MS = 16
+
+
+def _ease_in_out_cubic(t: float) -> float:
+    t = max(0.0, min(1.0, t))
+    if t < 0.5:
+        return 4.0 * t * t * t
+    u = -2.0 * t + 2.0
+    return 1.0 - (u * u * u) / 2.0
 
 
 class NotificationItemRow(Gtk.EventBox):
@@ -289,6 +302,9 @@ class NotificationPopup(Gtk.Window):
         self._anchor_button: Gtk.Widget | None = None
         self._fixed_popup_top: int | None = None
         self._position: tuple[int, int, int] | None = None
+        self._pending_groups: list[list[NotificationSnapshot]] = []
+        self._reveal_index = 0
+        self._reveal_source_id = 0
 
         self.set_name("shell-notifications")
         register_shell_popup(self, shell_window)
@@ -363,12 +379,13 @@ class NotificationPopup(Gtk.Window):
         self._empty_label.set_margin_bottom(12)
 
     def open_for(self, anchor_button: Gtk.Widget) -> None:
+        self._cancel_progressive_reveal()
         self._anchor_button = anchor_button
         self._fixed_popup_top = None
         self._position = None
-        self.refresh()
-        # Publish spawn coords before map so Hyprland places on first frame
-        # (avoids a storm of sync hyprctl moves on the click path).
+        # Chrome first (header + empty list) so the window is never blank/invisible
+        # while packages are materialised.
+        self._prepare_open_shell()
         top = publish_popup_spawn(
             self,
             anchor_button,
@@ -377,14 +394,15 @@ class NotificationPopup(Gtk.Window):
         )
         if top is not None:
             self._fixed_popup_top = top
-            present_popup(self)
-            # Spawn already placed the window; one idle pass is enough for size settle.
+            present_popup(self, fade=False)
             GLib.idle_add(self._position_after_show)
         else:
-            present_popup(self)
+            present_popup(self, fade=False)
             schedule_popup_position(self._position_after_show)
+        GLib.idle_add(self._start_progressive_reveal)
 
     def close_popup(self) -> None:
+        self._cancel_progressive_reveal()
         self._anchor_button = None
         self._fixed_popup_top = None
         hide_popup(self)
@@ -397,22 +415,16 @@ class NotificationPopup(Gtk.Window):
         return self._position
 
     def refresh(self) -> None:
+        """Rebuild the list synchronously (live updates while the panel is open)."""
+        self._cancel_progressive_reveal()
         self._sync_paused_ui()
         self._sync_muted_apps_ui()
         self._sync_blocked_apps_ui()
-        for child in self._list_box.get_children():
-            self._list_box.remove(child)
+        self._clear_list_children()
 
-        snapshots = tuple(
-            sorted(
-                self._service.history_snapshots,
-                key=lambda item: item.timestamp,
-                reverse=True,
-            )
-        )
+        snapshots = self._sorted_history()
         if not snapshots:
-            self._list_box.pack_start(self._empty_label, False, False, 0)
-            self._empty_label.show_all()
+            self._show_empty_state()
             if self._on_preload_group_pages is not None:
                 self._on_preload_group_pages([])
             self._scrolled.queue_resize()
@@ -421,25 +433,9 @@ class NotificationPopup(Gtk.Window):
             return
 
         self._empty_label.hide()
-
-        # Merge by grouping key across the full history (interleaved arrivals OK).
         groups = list(group_notification_snapshots(snapshots))
         for group in groups:
-            representative = group[0]
-            app_key = self._service.app_key_for(representative)
-            row = NotificationGroupRow(
-                group,
-                app_key=app_key,
-                app_sound_muted=self._service.is_app_sound_muted(app_key),
-                app_blocked=self._service.is_app_blocked(app_key),
-                on_mark_group_read=self._on_mark_group_read,
-                on_dismiss_group=self._on_dismiss_group,
-                on_invoke_action=self._on_invoke_action,
-                on_open_app=self._on_open_app,
-                on_toggle_app_sound_mute=self._on_toggle_app_sound_mute,
-                on_toggle_app_blocked=self._on_toggle_app_blocked,
-                on_open_group_window=self._on_open_group_window,
-            )
+            row = self._build_group_row(group)
             self._list_box.pack_start(row, False, False, 0)
 
         if self._on_preload_group_pages is not None:
@@ -450,6 +446,157 @@ class NotificationPopup(Gtk.Window):
         self._list_box.get_parent().queue_resize()
         if self.get_visible() and self._anchor_button is not None:
             schedule_popup_position(self._position_after_show)
+
+    def _prepare_open_shell(self) -> None:
+        self._sync_paused_ui()
+        self._sync_muted_apps_ui()
+        self._sync_blocked_apps_ui()
+        self._clear_list_children()
+        if not self._service.history_snapshots:
+            self._show_empty_state()
+        else:
+            self._empty_label.hide()
+
+    def _sorted_history(self) -> tuple[NotificationSnapshot, ...]:
+        return tuple(
+            sorted(
+                self._service.history_snapshots,
+                key=lambda item: item.timestamp,
+                reverse=True,
+            )
+        )
+
+    def _clear_list_children(self) -> None:
+        for child in list(self._list_box.get_children()):
+            self._list_box.remove(child)
+
+    def _show_empty_state(self) -> None:
+        if self._empty_label.get_parent() is None:
+            self._list_box.pack_start(self._empty_label, False, False, 0)
+        self._empty_label.show_all()
+
+    def _build_group_row(
+        self,
+        group: list[NotificationSnapshot],
+    ) -> NotificationGroupRow:
+        representative = group[0]
+        app_key = self._service.app_key_for(representative)
+        return NotificationGroupRow(
+            group,
+            app_key=app_key,
+            app_sound_muted=self._service.is_app_sound_muted(app_key),
+            app_blocked=self._service.is_app_blocked(app_key),
+            on_mark_group_read=self._on_mark_group_read,
+            on_dismiss_group=self._on_dismiss_group,
+            on_invoke_action=self._on_invoke_action,
+            on_open_app=self._on_open_app,
+            on_toggle_app_sound_mute=self._on_toggle_app_sound_mute,
+            on_toggle_app_blocked=self._on_toggle_app_blocked,
+            on_open_group_window=self._on_open_group_window,
+        )
+
+    def _cancel_progressive_reveal(self) -> None:
+        if self._reveal_source_id:
+            GLib.source_remove(self._reveal_source_id)
+            self._reveal_source_id = 0
+        self._pending_groups = []
+        self._reveal_index = 0
+
+    def _start_progressive_reveal(self) -> bool:
+        if self._anchor_button is None:
+            return False
+        snapshots = self._sorted_history()
+        if not snapshots:
+            self._show_empty_state()
+            if self._on_preload_group_pages is not None:
+                self._on_preload_group_pages([])
+            self._scrolled.queue_resize()
+            schedule_popup_position(self._position_after_show)
+            return False
+
+        if self._empty_label.get_parent() is not None:
+            self._list_box.remove(self._empty_label)
+        self._empty_label.hide()
+        self._pending_groups = list(group_notification_snapshots(snapshots))
+        self._reveal_index = 0
+        # First package immediately; remaining on a stagger so they stack in.
+        self._reveal_next_group()
+        if self._reveal_index < len(self._pending_groups):
+            self._reveal_source_id = GLib.timeout_add(
+                NOTIFICATION_POPUP_REVEAL_STAGGER_MS,
+                self._reveal_next_group,
+            )
+        return False
+
+    def _reveal_next_group(self) -> bool:
+        if self._anchor_button is None:
+            self._reveal_source_id = 0
+            return False
+        if self._reveal_index >= len(self._pending_groups):
+            self._reveal_source_id = 0
+            self._finish_progressive_reveal()
+            return False
+
+        group = self._pending_groups[self._reveal_index]
+        self._reveal_index += 1
+        row = self._build_group_row(group)
+        row.set_opacity(0.0)
+        row.set_margin_top(-NOTIFICATION_POPUP_ROW_SLIDE_PX)
+        self._list_box.pack_start(row, False, False, 0)
+        row.show_all()
+        self._animate_row_appear(row)
+
+        if self._reveal_index == 1 or self._reveal_index % 4 == 0:
+            schedule_popup_position(self._position_after_show)
+
+        if self._reveal_index >= len(self._pending_groups):
+            self._reveal_source_id = 0
+            self._finish_progressive_reveal()
+            return False
+        return True
+
+    def _finish_progressive_reveal(self) -> None:
+        groups = self._pending_groups
+        self._pending_groups = []
+        if self._on_preload_group_pages is not None:
+            self._on_preload_group_pages([group for group in groups if len(group) > 1])
+        self._scrolled.queue_resize()
+        parent = self._list_box.get_parent()
+        if parent is not None:
+            parent.queue_resize()
+        if self.get_visible() and self._anchor_button is not None:
+            schedule_popup_position(self._position_after_show)
+
+    def _animate_row_appear(self, row: Gtk.Widget) -> None:
+        theme = active_theme()
+        if theme is not None and not theme.animation.enabled:
+            row.set_opacity(1.0)
+            row.set_margin_top(0)
+            return
+
+        duration = NOTIFICATION_POPUP_ROW_APPEAR_MS
+        if theme is not None and theme.animation.duration > 0:
+            duration = min(duration, theme.animation.duration)
+        step = min(1.0, _ROW_APPEAR_TICK_MS / max(duration, 1))
+        setattr(row, "_appear_progress", 0.0)
+
+        def _tick() -> bool:
+            if self._anchor_button is None or not row.get_parent():
+                return False
+            progress = min(1.0, float(getattr(row, "_appear_progress", 0.0)) + step)
+            setattr(row, "_appear_progress", progress)
+            eased = _ease_in_out_cubic(progress)
+            row.set_opacity(eased)
+            row.set_margin_top(
+                int(round(-NOTIFICATION_POPUP_ROW_SLIDE_PX * (1.0 - eased)))
+            )
+            if progress >= 1.0:
+                row.set_opacity(1.0)
+                row.set_margin_top(0)
+                return False
+            return True
+
+        GLib.timeout_add(_ROW_APPEAR_TICK_MS, _tick)
 
     def _sync_paused_ui(self) -> None:
         paused = self._service.paused

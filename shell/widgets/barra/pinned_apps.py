@@ -191,7 +191,6 @@ class PinnedAppsOverflowPopup(Gtk.Window):
             self,
             self._content,
             resolve_event_bus(shell_window),
-            corner_radius=(0.0, 0.0, 14.0, 14.0),
         )
 
     def open_for(self, anchor: Gtk.Widget) -> None:

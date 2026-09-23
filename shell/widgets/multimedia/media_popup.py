@@ -82,7 +82,6 @@ class MediaPopup(Gtk.Window):
             self,
             outer,
             resolve_event_bus(shell_window),
-            corner_radius=16.0,
         )
 
         mode_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)

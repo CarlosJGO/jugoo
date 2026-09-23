@@ -112,7 +112,7 @@ def install_starfield(
     child: Gtk.Widget,
     event_bus: EventBus | None = None,
     *,
-    corner_radius: CornerRadii = 16.0,
+    corner_radius: CornerRadii = 0.0,
     draw_rim: bool = False,
     glass: bool = True,
 ) -> "StarfieldBackground":

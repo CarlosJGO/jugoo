@@ -25,11 +25,49 @@ SAMPLE_SINK = {
         "front-left": {"value_percent": "72%"},
         "front-right": {"value_percent": "72%"},
     },
+    "active_port": "analog-output-headphones",
+    "ports": [
+        {
+            "name": "analog-output-lineout",
+            "description": "(null)",
+            "type": "Line",
+        },
+        {
+            "name": "analog-output-headphones",
+            "description": "Auriculares",
+            "type": "Headphones",
+        },
+    ],
     "properties": {"node.nick": "ALC897 Analog"},
 }
 
+SAMPLE_SINK_SPEAKERS = {
+    **SAMPLE_SINK,
+    "active_port": "analog-output-lineout",
+}
 
-def _volume(*, percent: int = 72, muted: bool = False, description: str = "ALC897 Analog") -> SystemVolumeState:
+SAMPLE_HDMI_SINK = {
+    "index": 45,
+    "name": "alsa_output.pci-0000_12_00.1.hdmi-stereo",
+    "description": "(null)",
+    "mute": False,
+    "volume": {
+        "front-left": {"value_percent": "100%"},
+        "front-right": {"value_percent": "100%"},
+    },
+    "active_port": "hdmi-output-0",
+    "ports": [
+        {
+            "name": "hdmi-output-0",
+            "description": "HDMI / DisplayPort",
+            "type": "HDMI",
+        },
+    ],
+    "properties": {"node.nick": "LM24-B201S"},
+}
+
+
+def _volume(*, percent: int = 72, muted: bool = False, description: str = "Auriculares") -> SystemVolumeState:
     return SystemVolumeState(
         sink_name="alsa_output.pci-0000_30_00.6.analog-stereo",
         sink_description=description,
@@ -42,8 +80,10 @@ def test_volume_osd_hide_delay_is_1200() -> None:
     assert VOLUME_OSD_HIDE_DELAY_MS == 1200
 
 
-def test_friendly_device_description_skips_null() -> None:
-    assert friendly_device_description(SAMPLE_SINK) == "ALC897 Analog"
+def test_friendly_device_description_prefers_port_over_codec_nick() -> None:
+    assert friendly_device_description(SAMPLE_SINK) == "Auriculares"
+    assert friendly_device_description(SAMPLE_SINK_SPEAKERS) == "Parlantes"
+    assert friendly_device_description(SAMPLE_HDMI_SINK) == "LM24-B201S"
 
 
 def test_build_system_volume_state_from_default_sink() -> None:
@@ -54,7 +94,7 @@ def test_build_system_volume_state_from_default_sink() -> None:
     assert state is not None
     assert state.percent == 72
     assert state.is_muted is False
-    assert state.sink_description == "ALC897 Analog"
+    assert state.sink_description == "Auriculares"
 
 
 def test_volume_osd_headline_and_mute() -> None:
@@ -83,7 +123,7 @@ def test_audio_service_includes_system_volume_in_snapshot() -> None:
 
     assert service.snapshot.system_volume is not None
     assert service.snapshot.system_volume.percent == 72
-    assert service.snapshot.system_volume.sink_description == "ALC897 Analog"
+    assert service.snapshot.system_volume.sink_description == "Auriculares"
 
 
 def test_volume_osd_controller_updates_and_reuses_single_window() -> None:
@@ -207,7 +247,7 @@ def test_controller_does_not_show_on_baseline_start() -> None:
 
 if __name__ == "__main__":
     test_volume_osd_hide_delay_is_1200()
-    test_friendly_device_description_skips_null()
+    test_friendly_device_description_prefers_port_over_codec_nick()
     test_build_system_volume_state_from_default_sink()
     test_volume_osd_headline_and_mute()
     test_audio_service_includes_system_volume_in_snapshot()

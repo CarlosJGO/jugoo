@@ -57,7 +57,6 @@ class AiPromptOverlay(Gtk.Window):
             aligner,
             card,
             resolve_event_bus(shell_window),
-            corner_radius=14.0,
         )
 
         icon = Gtk.Image.new_from_icon_name("system-search-symbolic", Gtk.IconSize.MENU)

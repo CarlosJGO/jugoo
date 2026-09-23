@@ -500,7 +500,8 @@ window#shell-pinned-overflow {
 flowbox.pinned-apps-overflow-content {
     background-color: @shell_bar_bg;
     border: 1px solid @shell_bar_border;
-    border-radius: 0 0 14px 14px;
+    /* Square — Hyprland owns window rounding. */
+    border-radius: 0;
     padding: 6px 8px;
     box-shadow: 0 6px 16px @shell_shadow;
 }
@@ -534,7 +535,8 @@ scrolledwindow.picker-door-clip scrollbar {
 box.launcher-card {
     background-color: @shell_surface_bg_panel;
     border: 1px solid @shell_border_strong;
-    border-radius: 16px;
+    /* Square — Hyprland owns window rounding. */
+    border-radius: 0;
     padding: 12px;
     box-shadow: 0 12px 32px @shell_shadow;
 }
@@ -546,7 +548,7 @@ box.launcher-card.control-center-shell {
     background-image: none;
     background-color: alpha(@shell_surface_bg_elevated, 0.55);
     border: 1px solid @shell_border_strong;
-    border-radius: 16px;
+    border-radius: 0;
     padding: 0;
     box-shadow: 0 12px 32px @shell_shadow;
 }
@@ -931,7 +933,8 @@ box.workspace-popup-content,
 box.volume-osd-content {
     background-color: @shell_surface_bg_elevated;
     border: 1px solid @shell_border_medium;
-    border-radius: 16px;
+    /* Square — Hyprland owns window rounding. */
+    border-radius: 0;
     box-shadow: 0 6px 18px @shell_shadow;
 }
 
@@ -1325,7 +1328,8 @@ box.tasks-popup-content,
 box.clock-calendar-content {
     background-color: @shell_surface_bg_panel;
     border: 1px solid @shell_border_strong;
-    border-radius: 16px;
+    /* Square — Hyprland owns window rounding. */
+    border-radius: 0;
     box-shadow: 0 6px 18px @shell_shadow;
 }
 
@@ -1446,6 +1450,25 @@ label.task-composer-label {
     color: @shell_text_secondary;
     font-size: 11px;
     min-width: 72px;
+}
+
+box.date-entry {
+    background-color: transparent;
+}
+
+entry.date-entry-field {
+    min-height: 28px;
+}
+
+popover.date-entry-popover,
+window.date-entry-popover {
+    background-color: @shell_surface_bg_panel;
+    border: 1px solid @shell_border_strong;
+    padding: 6px;
+}
+
+calendar.date-entry-calendar {
+    background-color: transparent;
 }
 
 radiobutton.task-composer-repeat {
@@ -1700,7 +1723,8 @@ window#shell-memory-popup {
 box.memory-popup-content {
     background-color: @shell_surface_bg_elevated;
     border: 1px solid @shell_border_medium;
-    border-radius: 10px;
+    /* Square — Hyprland owns window rounding. */
+    border-radius: 0;
     padding: 10px 12px;
     min-width: 190px;
 }
@@ -2034,7 +2058,8 @@ box.notification-popup-content {
         to(alpha(@shell_special, 0.10))
     );
     border: 1px solid alpha(@shell_secondary, 0.34);
-    border-radius: 16px;
+    /* Square — Hyprland owns window rounding. */
+    border-radius: 0;
     box-shadow:
         inset 0 1px 0 @shell_glass_highlight,
         inset 1px 0 0 alpha(@shell_secondary, 0.14),
@@ -2296,7 +2321,8 @@ window#shell-notification-group-window {
 box.notification-group-window-content {
     background-color: @shell_surface_bg_panel;
     border: 1px solid @shell_border_strong;
-    border-radius: 14px;
+    /* Square — Hyprland owns window rounding. */
+    border-radius: 0;
     padding: 8px;
     box-shadow:
         inset 0 1px 0 @shell_glass_highlight,
@@ -2363,7 +2389,8 @@ box.notification-toast-container {
 box.notification-toast-content {
     background-color: @shell_surface_bg_panel;
     border: 1px solid @shell_border_strong;
-    border-radius: 14px;
+    /* Square — Hyprland owns window rounding. */
+    border-radius: 0;
     padding: 10px 14px;
     min-width: 400px;
     box-shadow:
@@ -2586,7 +2613,8 @@ box.assistant-card-layer {
 box.assistant-card-content {
     background-color: @shell_surface_bg_panel;
     border: 1px solid @shell_border_strong;
-    border-radius: 18px;
+    /* Square — Hyprland owns window rounding. */
+    border-radius: 0;
     padding: 16px 18px 14px 18px;
     min-width: 360px;
     box-shadow:

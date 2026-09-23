@@ -165,6 +165,37 @@ def test_suspend_blocks_shell_click_dismiss() -> None:
     assert dismiss._popup is not None
 
 
+def test_pointer_over_transient_combo_keeps_open() -> None:
+    """ComboBox menus are separate toplevels with transient-for the popup."""
+    closed, dismiss = _install_dismiss(PopupOutsideDismiss())
+    popup = dismiss._popup
+    assert popup is not None
+
+    fake_menu = mock.Mock()
+    fake_menu.get_visible.return_value = True
+    fake_menu.get_mapped.return_value = True
+    fake_menu.get_window.return_value = object()
+    fake_menu.get_transient_for.return_value = popup
+
+    with mock.patch(
+        "shell.popup_handle.pointer_inside_widget",
+        side_effect=lambda widget: widget is fake_menu,
+    ), mock.patch(
+        "shell.popup_handle._iter_owned_transient_windows",
+        return_value=[fake_menu],
+    ), mock.patch(
+        "shell.popup_handle._iter_registered_owned_surfaces",
+        return_value=[],
+    ), mock.patch(
+        "shell.popup_handle.Gtk.grab_get_current",
+        return_value=None,
+    ):
+        dismiss.dismiss_if_pointer_outside()
+
+    assert closed == []
+    assert dismiss._popup is not None
+
+
 if __name__ == "__main__":
     test_leave_does_not_close()
     test_shell_click_outside_closes()
@@ -173,4 +204,5 @@ if __name__ == "__main__":
     test_pointer_outside_hook_keeps_open_when_over_popup()
     test_focus_out_does_not_close()
     test_suspend_blocks_shell_click_dismiss()
+    test_pointer_over_transient_combo_keeps_open()
     print("popup outside dismiss tests OK")

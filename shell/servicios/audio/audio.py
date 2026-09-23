@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import threading
 import time
@@ -27,26 +28,119 @@ WINDOW_OPENED = "window_opened"
 WINDOW_CLOSED = "window_closed"
 _AUDIO_COMMAND_TIMEOUT_SEC = 2.0
 
+# Codec / chip nicks that do not identify the listening device for humans.
+_CODEC_LABEL = re.compile(
+    r"^(?:ALC|CMI|USB)\d+\b|^HD-Audio\b|\bALC\d+\s+(?:Analog|Digital)\b",
+    re.IGNORECASE,
+)
+
+_PORT_TYPE_LABELS = {
+    "headphones": "Auriculares",
+    "headset": "Auriculares",
+    "line": "Parlantes",
+    "speaker": "Parlantes",
+    "speakers": "Parlantes",
+    "hdmi": "HDMI",
+    "displayport": "DisplayPort",
+}
+
+
+def _clean_label(value: object) -> str:
+    text = str(value or "").strip()
+    if not text or text == "(null)":
+        return ""
+    return text
+
+
+def _is_codec_label(text: str) -> bool:
+    value = text.strip()
+    if not value:
+        return True
+    if _CODEC_LABEL.search(value):
+        return True
+    lowered = value.casefold()
+    return lowered in {"analog", "digital", "stereo", "estéreo analógico", "estereo analogico"}
+
+
+def _label_from_port_name(port_name: str) -> str:
+    name = port_name.casefold()
+    if "headphone" in name or "headset" in name:
+        return "Auriculares"
+    if "lineout" in name or "line-out" in name or "line_out" in name:
+        return "Parlantes"
+    if "speaker" in name:
+        return "Parlantes"
+    if "hdmi" in name:
+        return "HDMI"
+    if "displayport" in name or name.endswith("-dp") or ".dp-" in name:
+        return "DisplayPort"
+    return ""
+
+
+def _active_port_label(item: dict[str, Any]) -> str:
+    """Human label for the sink's active port (headphones vs speakers, etc.)."""
+    active = _clean_label(item.get("active_port"))
+    if not active:
+        return ""
+
+    ports = item.get("ports") or []
+    port: dict[str, Any] | None = None
+    if isinstance(ports, dict):
+        candidate = ports.get(active)
+        if isinstance(candidate, dict):
+            port = candidate
+    elif isinstance(ports, list):
+        for entry in ports:
+            if isinstance(entry, dict) and _clean_label(entry.get("name")) == active:
+                port = entry
+                break
+
+    if port is not None:
+        port_type = _clean_label(port.get("type"))
+        mapped = _PORT_TYPE_LABELS.get(port_type.casefold())
+        if mapped:
+            return mapped
+        description = _clean_label(port.get("description"))
+        if description and not _is_codec_label(description):
+            return description
+
+    return _label_from_port_name(active)
+
 
 def friendly_device_description(item: dict[str, Any], *, fallback: str = "") -> str:
-    """Pick a human-readable sink/source label from pactl JSON."""
+    """Pick a human-readable sink/source label from pactl JSON.
+
+    Prefer the active port (Auriculares / Parlantes) over codec nicks like
+    ``ALC897 Analog``, which do not tell the user where sound is coming from.
+    """
     props = item.get("properties", {}) or {}
+    port_label = _active_port_label(item)
+    nick = _clean_label(props.get("node.nick"))
+
+    if port_label in {"Auriculares", "Parlantes"}:
+        return port_label
+
+    if nick and not _is_codec_label(nick):
+        return nick
+
+    if port_label:
+        return port_label
+
     candidates = (
-        props.get("node.nick"),
+        props.get("device.product.name"),
+        props.get("device.description"),
         item.get("description"),
         props.get("node.description"),
-        props.get("device.description"),
         item.get("name"),
         fallback,
     )
     for value in candidates:
-        text = str(value or "").strip()
-        if text and text != "(null)":
-            # Prefer a slightly richer label when nick is bare chip name.
-            if value == props.get("node.nick"):
-                profile = str(props.get("device.profile.description") or "").strip()
-                if profile and profile != "(null)" and profile.casefold() not in text.casefold():
-                    return f"{text} {profile}"
+        text = _clean_label(value)
+        if text and not _is_codec_label(text):
+            return text
+    for value in candidates:
+        text = _clean_label(value)
+        if text:
             return text
     return fallback or "Salida de audio"
 

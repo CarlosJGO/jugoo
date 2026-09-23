@@ -97,7 +97,6 @@ class PickerOverlay(Gtk.Window):
             card,
             outer,
             resolve_event_bus(shell_window),
-            corner_radius=16.0,
         )
 
         self._search_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)

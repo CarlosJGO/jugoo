@@ -175,6 +175,10 @@ NOTIFICATION_POPUP_MAX_HEIGHT = 540
 NOTIFICATION_POPUP_ICON_SIZE = 20
 NOTIFICATION_POPUP_ROW_BODY_LINES = 4
 NOTIFICATION_POPUP_LIST_SPACING = 8
+# Progressive open: chrome first, then staggered package appear + stack.
+NOTIFICATION_POPUP_REVEAL_STAGGER_MS = 40
+NOTIFICATION_POPUP_ROW_APPEAR_MS = 180
+NOTIFICATION_POPUP_ROW_SLIDE_PX = 12
 
 # Stacked group window: whole-block page slide when changing parent.
 # Deliberately long so rapid parent changes feel like continuous navigation.

@@ -52,5 +52,4 @@ def dress_window(window: Gtk.Window, role: WindowRole, content: Gtk.Widget) -> N
         window,
         wrapped,
         resolve_event_bus(window),
-        corner_radius=16.0,
     )

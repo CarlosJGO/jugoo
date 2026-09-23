@@ -31,3 +31,12 @@ notifications.json
 # Personal profile photos (copied into shell/assets on pick)
 shell/assets/usuario.*
 shell/assets/pc.*
+
+# lIBRETO
+ARCHITECTURE.md
+DECISIONS.md
+DESIGN.md
+MEMORY.md
+PRD.md
+RULES.md
+TASKS.md

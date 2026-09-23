@@ -24,6 +24,7 @@ from ...settings.task_taxonomy import (
     priority_weight_map,
     sort_by_priority,
 )
+from ...ui.date_entry import DateEntry
 from ...ui.starfield import install_starfield, resolve_event_bus
 from ...window_identity import (
     TITLE_TASKS,
@@ -70,7 +71,6 @@ class TasksPopup(Gtk.Window):
             self,
             outer,
             resolve_event_bus(shell_window),
-            corner_radius=16.0,
         )
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -111,11 +111,10 @@ class TasksPopup(Gtk.Window):
 
         self._date_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self._date_bar.get_style_context().add_class("tasks-popup-date-bar")
-        self._date_entry = Gtk.Entry()
-        self._date_entry.set_placeholder_text("AAAA-MM-DD")
-        self._date_entry.set_text(self._browse_date.isoformat())
+        self._date_entry = DateEntry(initial=self._browse_date)
         self._date_entry.set_width_chars(12)
-        self._date_entry.connect("activate", self._on_date_apply)
+        self._date_entry.get_entry().connect("activate", self._on_date_apply)
+        self._date_entry.connect_changed(lambda _value: self._on_date_apply())
         today_btn = Gtk.Button(label="Hoy", relief=Gtk.ReliefStyle.NONE)
         today_btn.get_style_context().add_class("tasks-popup-date-chip")
         today_btn.connect("clicked", self._on_date_today)
@@ -330,16 +329,16 @@ class TasksPopup(Gtk.Window):
 
     def _on_date_today(self, *_args) -> None:
         self._browse_date = date.today()
-        self._date_entry.set_text(self._browse_date.isoformat())
+        self._date_entry.set_date(self._browse_date)
         self.refresh()
 
     def _on_date_apply(self, *_args) -> None:
-        parsed = parse_iso_date(self._date_entry.get_text().strip())
+        parsed = self._date_entry.get_date()
         if parsed is None:
-            self._date_entry.set_text(self._browse_date.isoformat())
+            self._date_entry.set_date(self._browse_date)
             return
         self._browse_date = parsed
-        self._date_entry.set_text(parsed.isoformat())
+        self._date_entry.set_date(parsed)
         self.refresh()
 
     def _on_toggle_composer(self, *_args) -> None:

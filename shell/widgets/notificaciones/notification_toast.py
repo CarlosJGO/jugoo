@@ -75,7 +75,6 @@ class NotificationToast(Gtk.EventBox):
             self,
             dress_content(WindowRole.NOTIFICATION_TOAST, self._card),
             resolve_event_bus(self),
-            corner_radius=14.0,
         )
         host.add_events(
             Gdk.EventMask.ENTER_NOTIFY_MASK

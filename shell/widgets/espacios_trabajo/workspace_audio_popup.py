@@ -73,7 +73,6 @@ class WorkspaceAudioPopup(Gtk.Window):
             self,
             self._container,
             resolve_event_bus(shell_window),
-            corner_radius=16.0,
         )
 
     def show_for(

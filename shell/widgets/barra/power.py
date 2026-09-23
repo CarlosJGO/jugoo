@@ -84,7 +84,6 @@ class PowerMenu(Gtk.Window):
             self,
             self._box,
             resolve_event_bus(shell_window),
-            corner_radius=16.0,
         )
 
         for action, label, icon_name, destructive in POWER_MENU_ENTRIES:
@@ -174,7 +173,6 @@ class PowerConfirmDialog(Gtk.Window):
             self,
             outer,
             resolve_event_bus(shell_window),
-            corner_radius=16.0,
         )
 
         self._message = Gtk.Label(xalign=0.5)
