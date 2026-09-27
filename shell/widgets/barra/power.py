@@ -1,4 +1,4 @@
-"""System power button, dropdown menu, and confirmation dialogs."""
+"""System power button, dropdown menu, and inline confirmations."""
 
 from __future__ import annotations
 
@@ -28,7 +28,6 @@ from ...popup_spawn import publish_popup_spawn
 from ...ui.starfield import install_starfield, resolve_event_bus
 from ...ui import ShellModule
 from ...window_identity import (
-    TITLE_POWER_CONFIRM,
     TITLE_POWER_MENU,
     configure_interactive_popup,
     configure_toplevel,
@@ -40,6 +39,7 @@ from ...window_identity import (
 MenuEntry = tuple[str, str, str, bool]
 
 ACTION_RELAUNCH_SHELL = "relaunch_shell"
+POWER_CONTROL_CENTER_REQUESTED = "power-control-center-requested"
 
 POWER_MENU_ENTRIES: tuple[MenuEntry, ...] = (
     (ACTION_LOCK, "Bloquear", "system-lock-screen-symbolic", False),
@@ -56,11 +56,11 @@ _CONFIRM_COPY = {
     ACTION_SHUTDOWN: ("¿Apagar el equipo?", "Apagar"),
 }
 
-POWER_CONTROL_CENTER_REQUESTED = "power_control_center_requested"
-
 
 class PowerMenu(Gtk.Window):
-    """Compact action list anchored below the power button."""
+    """Compact action list anchored below the power button with inline confirmations."""
+
+    _CONTENT_WIDTH = 270
 
     def __init__(
         self,
@@ -72,20 +72,28 @@ class PowerMenu(Gtk.Window):
         self._shell_window = shell_window
         self._on_action_selected = on_action_selected
         self._anchor_button: Gtk.Widget | None = None
+        self._needs_confirmation: dict[str, bool] = {}
 
         self.set_name("shell-power-menu")
         register_shell_popup(self, shell_window)
         configure_toplevel(self, title=TITLE_POWER_MENU)
         configure_interactive_popup(self)
+        self.set_resizable(False)
+        self.set_default_size(self._CONTENT_WIDTH, -1)
 
         self._box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self._box.set_size_request(self._CONTENT_WIDTH, -1)
         self._box.get_style_context().add_class("power-menu-content")
         install_starfield(
             self,
             self._box,
             resolve_event_bus(shell_window),
         )
+        self.add(self._box)
+        self._render_menu_entries()
 
+    def _render_menu_entries(self) -> None:
+        self._clear_content()
         for action, label, icon_name, destructive in POWER_MENU_ENTRIES:
             self._box.pack_start(
                 self._make_row(action, label, icon_name, destructive),
@@ -93,6 +101,42 @@ class PowerMenu(Gtk.Window):
                 False,
                 0,
             )
+        self._box.show_all()
+
+    def _clear_content(self) -> None:
+        for child in list(self._box.get_children()):
+            child.destroy()
+
+    def show_confirmation(self, action: str) -> None:
+        self._clear_content()
+        message, confirm_label = _CONFIRM_COPY[action]
+
+        label = Gtk.Label(label=message, xalign=0)
+        label.get_style_context().add_class("power-confirm-message")
+        self._box.pack_start(label, False, False, 10)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        actions.set_halign(Gtk.Align.END)
+
+        cancel_btn = Gtk.Button(label="Cancelar")
+        cancel_btn.get_style_context().add_class("power-confirm-cancel")
+        cancel_btn.connect("clicked", lambda *_args: self._on_action_selected("cancel"))
+        actions.pack_start(cancel_btn, False, False, 0)
+
+        confirm_btn = Gtk.Button(label=confirm_label)
+        confirm_btn.get_style_context().add_class("power-confirm-action")
+        confirm_btn.get_style_context().add_class(
+            "power-confirm-action-destructive" if action in (ACTION_LOGOUT, ACTION_REBOOT, ACTION_SHUTDOWN) else ""
+        )
+        confirm_btn.connect("clicked", lambda *_args: self._on_action_selected(action))
+        actions.pack_start(confirm_btn, False, False, 0)
+
+        self._box.pack_start(actions, False, False, 0)
+        self._box.show_all()
+        self.set_default_size(self._CONTENT_WIDTH, -1)
+
+    def set_default_action_state(self) -> None:
+        self._render_menu_entries()
 
     def open_for(self, anchor_button: Gtk.Widget) -> None:
         self._anchor_button = anchor_button
@@ -111,6 +155,12 @@ class PowerMenu(Gtk.Window):
 
     def pointer_is_inside(self) -> bool:
         return pointer_inside_widget(self)
+
+    def set_needs_confirmation(self, action: str, needs: bool) -> None:
+        self._needs_confirmation[action] = needs
+
+    def get_needs_confirmation(self, action: str) -> bool:
+        return self._needs_confirmation.get(action, False)
 
     def _make_row(
         self,
@@ -131,7 +181,10 @@ class PowerMenu(Gtk.Window):
         row.pack_start(icon, False, False, 0)
         row.pack_start(Gtk.Label(label=label, xalign=0), True, True, 0)
         button.add(row)
-        button.connect("clicked", lambda _btn, act=action: self._on_action_selected(act))
+        button.connect(
+            "clicked",
+            lambda _btn, act=action: self._on_action_selected(act),
+        )
         return button
 
     def _position_after_show(self) -> bool:
@@ -145,110 +198,8 @@ class PowerMenu(Gtk.Window):
         return False
 
 
-class PowerConfirmDialog(Gtk.Window):
-    """Small confirmation panel for destructive session actions."""
-
-    def __init__(
-        self,
-        shell_window: Gtk.Window,
-        on_confirmed: Callable[[], None],
-        on_cancelled: Callable[[], None],
-    ) -> None:
-        super().__init__(type=Gtk.WindowType.TOPLEVEL)
-
-        self._shell_window = shell_window
-        self._on_confirmed = on_confirmed
-        self._on_cancelled = on_cancelled
-        self._anchor_widget: Gtk.Widget | None = None
-        self._fixed_popup_top: int | None = None
-
-        self.set_name("shell-power-confirm")
-        register_shell_popup(self, shell_window)
-        configure_toplevel(self, title=TITLE_POWER_CONFIRM)
-        configure_interactive_popup(self)
-
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        outer.get_style_context().add_class("power-confirm-content")
-        install_starfield(
-            self,
-            outer,
-            resolve_event_bus(shell_window),
-        )
-
-        self._message = Gtk.Label(xalign=0.5)
-        self._message.get_style_context().add_class("power-confirm-message")
-        outer.pack_start(self._message, False, False, 0)
-
-        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        actions.set_halign(Gtk.Align.END)
-        outer.pack_start(actions, False, False, 0)
-
-        cancel = Gtk.Button(label="Cancelar")
-        cancel.get_style_context().add_class("power-confirm-cancel")
-        cancel.connect("clicked", self._handle_cancel)
-        actions.pack_start(cancel, False, False, 0)
-
-        self._confirm_button = Gtk.Button()
-        self._confirm_button.get_style_context().add_class("power-confirm-action")
-        self._confirm_button.connect("clicked", self._handle_confirm)
-        actions.pack_start(self._confirm_button, False, False, 0)
-
-    def open_for(
-        self,
-        anchor_widget: Gtk.Widget,
-        message: str,
-        confirm_label: str,
-        *,
-        destructive: bool,
-    ) -> None:
-        self._anchor_widget = anchor_widget
-        self._fixed_popup_top = None
-        self._message.set_text(message)
-        self._confirm_button.set_label(confirm_label)
-        style = self._confirm_button.get_style_context()
-        if destructive:
-            style.add_class("power-confirm-action-destructive")
-        else:
-            style.remove_class("power-confirm-action-destructive")
-        publish_popup_spawn(
-            self,
-            anchor_widget,
-            title=TITLE_POWER_CONFIRM,
-            offset=POWER_MENU_OFFSET,
-        )
-        present_popup(self)
-        schedule_popup_position(self._position_after_show)
-
-    def close_dialog(self) -> None:
-        self._anchor_widget = None
-        self._fixed_popup_top = None
-        hide_popup(self)
-
-    def pointer_is_inside(self) -> bool:
-        return pointer_inside_widget(self)
-
-    def _handle_cancel(self, *_args) -> None:
-        self._on_cancelled()
-
-    def _handle_confirm(self, *_args) -> None:
-        self._on_confirmed()
-
-    def _position_after_show(self) -> bool:
-        if self._anchor_widget is not None:
-            top = position_popup_below_anchor(
-                self,
-                self._anchor_widget,
-                title=TITLE_POWER_CONFIRM,
-                offset=POWER_MENU_OFFSET,
-                fixed_top=self._fixed_popup_top,
-            )
-            if self._fixed_popup_top is None and top is not None:
-                self._fixed_popup_top = top
-        return False
-
-
 class PowerWidget(ShellModule):
-    """Power button embedded in the main bar; menu and confirmations are separate windows."""
+    """Power button embedded in the main bar; confirmations are inline in the menu."""
 
     def __init__(
         self,
@@ -277,21 +228,12 @@ class PowerWidget(ShellModule):
         self.pack_start(self._button, False, False, 0)
 
         self._menu = PopupHandle(self._create_menu)
-        self._confirm = PopupHandle(self._create_confirm)
-        self._outside_click = PopupOutsideDismiss()
 
     def get_anchor_button(self) -> Gtk.Widget:
         return self._button
 
     def _create_menu(self) -> PowerMenu:
         return PowerMenu(self._shell_window, self._on_menu_action_selected)
-
-    def _create_confirm(self) -> PowerConfirmDialog:
-        return PowerConfirmDialog(
-            self._shell_window,
-            self._on_confirm_accepted,
-            self._on_confirm_cancelled,
-        )
 
     def _ensure_shell_press_handler(self) -> None:
         if self._shell_press_bound:
@@ -315,60 +257,46 @@ class PowerWidget(ShellModule):
         self._ensure_shell_press_handler()
         menu = self._menu.get()
         menu.open_for(self._button)
-        self._outside_click.install(
-            menu,
-            self._shell_window,
-            (self._button,),
-            self.close_menu,
-            self._shell_window.event_bus,
-        )
+        # Mark destructive actions as needing confirmation
+        for action, label, icon_name, destructive in POWER_MENU_ENTRIES:
+            if destructive:
+                menu.set_needs_confirmation(action, True)
+            else:
+                menu.set_needs_confirmation(action, False)
 
-    def toggle_menu(self) -> None:
-        """External/CLI entry: same behavior as left-clicking the power button."""
-        self._toggle_power_menu()
+    def get_needs_confirmation(self, action: str) -> bool:
+        menu = self._menu.maybe
+        if menu is None:
+            return False
+        return menu.get_needs_confirmation(action)
 
     def _on_menu_action_selected(self, action: str) -> None:
-        if action in _CONFIRM_COPY:
-            message, confirm_label = _CONFIRM_COPY[action]
-            self._pending_action = action
+        if action == "cancel":
             menu = self._menu.maybe
             if menu is not None:
-                menu.close_menu()
-            confirm = self._confirm.get()
-            confirm.open_for(
-                self._button,
-                message,
-                confirm_label,
-                destructive=True,
-            )
-            self._outside_click.install(
-                confirm,
-                self._shell_window,
-                (self._button,),
-                self._on_confirm_cancelled,
-                self._shell_window.event_bus,
-            )
+                menu.set_default_action_state()
             return
+        if self.get_needs_confirmation(action):
+            # Show inline confirmation by replacing menu content
+            self._show_inline_confirmation(action)
+        else:
+            self._execute_action(action)
+            self.close_menu()
 
+    def _show_inline_confirmation(self, action: str) -> None:
+        """Replace the menu content with inline confirmation buttons in the same popup."""
+        self._menu.get().show_confirmation(action)
+
+    def _on_inline_confirm(self, action: str) -> None:
+        """Handle inline confirmation button click."""
         self._execute_action(action)
         self.close_menu()
 
-    def _on_confirm_accepted(self) -> None:
-        action = self._pending_action
-        self._pending_action = None
-        confirm = self._confirm.maybe
-        if confirm is not None:
-            confirm.close_dialog()
-        if action is not None:
-            self._execute_action(action)
-        self.close_menu()
-
-    def _on_confirm_cancelled(self) -> None:
-        self._pending_action = None
-        confirm = self._confirm.maybe
-        if confirm is not None:
-            confirm.close_dialog()
-        self.close_menu()
+    def _on_inline_cancel(self, _action: str) -> None:
+        """Handle inline cancellation - just restore the normal menu items."""
+        menu = self._menu.maybe
+        if menu is not None:
+            menu.set_default_action_state()
 
     def _execute_action(self, action: str) -> None:
         if action == ACTION_RELAUNCH_SHELL:
@@ -409,26 +337,16 @@ class PowerWidget(ShellModule):
         return False
 
     def close_menu(self) -> None:
-        self._outside_click.uninstall()
         menu = self._menu.maybe
         if menu is not None:
             menu.close_menu()
-        confirm = self._confirm.maybe
-        if confirm is not None:
-            confirm.close_dialog()
         self._pending_action = None
 
     def _on_shell_button_press(self, _window: Gtk.Widget, event: Gdk.EventButton) -> bool:
         if event.button not in (1, 3):
             return False
 
-        confirm = self._confirm.maybe
-        if confirm is not None and confirm.get_visible():
-            if confirm.pointer_is_inside():
-                return False
-            self._on_confirm_cancelled()
-            return False
-
+        # Inline confirmation is handled within the menu itself, no separate window to check
         if not self._menu.is_visible():
             return False
 

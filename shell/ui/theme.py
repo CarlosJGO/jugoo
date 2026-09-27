@@ -88,6 +88,22 @@ def active_theme() -> Theme | None:
     return _active_theme
 
 
+def _with_user_animation_gate(theme: Theme) -> Theme:
+    """Honor SHELL_ANIMATIONS_ENABLED without rewriting theme.toml."""
+    from .. import config as shell_config
+
+    if shell_config.SHELL_ANIMATIONS_ENABLED or not theme.animation.enabled:
+        return theme
+    return Theme(
+        key=theme.key,
+        name=theme.name,
+        colors=theme.colors,
+        effects=theme.effects,
+        shape=theme.shape,
+        animation=ThemeAnimation(enabled=False, duration=theme.animation.duration),
+    )
+
+
 def color_to_rgb(color: str) -> tuple[float, float, float]:
     """Convert a validated #RRGGBB color to normalized Cairo channels."""
     red, green, blue = _rgb(color)
@@ -392,6 +408,7 @@ class ThemeManager:
             Gtk.StyleContext.remove_provider_for_screen(screen, previous_provider)
 
         global _active_theme
+        theme = _with_user_animation_gate(theme)
         self._theme = theme
         _active_theme = theme
         Gtk.StyleContext.reset_widgets(screen)
@@ -399,6 +416,10 @@ class ThemeManager:
         self._event_bus.emit(THEME_CHANGED, theme)
         print(f"Jugoo theme: applied {theme.name}")
         return True
+
+    def refresh_animation_gate(self) -> bool:
+        """Re-apply the active theme so SHELL_ANIMATIONS_ENABLED takes effect live."""
+        return self.reload_current()
 
     def _apply_gtk_font_name(self, family: str) -> None:
         """Sync Gtk.Settings so widgets without explicit CSS pick up the family."""

@@ -965,6 +965,43 @@ def send_pinned_to_overflow(
     return move_pinned_application(ordered, ident, at_index=visible_limit)
 
 
+def swap_pinned_applications(
+    pinned_ids: Sequence[str],
+    left_id: str,
+    right_id: str,
+) -> tuple[str, ...]:
+    """Exchange the slots of two pinned apps (bar ↔ extras included)."""
+    left = normalize_desktop_id(left_id)
+    right = normalize_desktop_id(right_id)
+    ordered = [normalize_desktop_id(item) for item in pinned_ids if normalize_desktop_id(item)]
+    if not left or not right or left == right:
+        return tuple(ordered)
+    if left not in ordered or right not in ordered:
+        return tuple(ordered)
+    left_index = ordered.index(left)
+    right_index = ordered.index(right)
+    ordered[left_index], ordered[right_index] = ordered[right_index], ordered[left_index]
+    return tuple(ordered)
+
+
+def promote_pinned_from_overflow(
+    pinned_ids: Sequence[str],
+    app_id: str,
+    visible_limit: int,
+) -> tuple[str, ...]:
+    """Bring an extras pin onto the dock by swapping with the last visible slot."""
+    ident = normalize_desktop_id(app_id)
+    ordered = tuple(normalize_desktop_id(item) for item in pinned_ids if normalize_desktop_id(item))
+    if not ident or ident not in ordered or visible_limit < 1:
+        return ordered
+    if len(ordered) <= visible_limit:
+        return ordered
+    index = ordered.index(ident)
+    if index < visible_limit:
+        return ordered
+    return swap_pinned_applications(ordered, ident, ordered[visible_limit - 1])
+
+
 def split_pinned_dock(
     pinned_ids: Sequence[str],
     visible_limit: int,

@@ -40,6 +40,7 @@ class SettingsManager:
         theme_choices: Callable[[], tuple[tuple[str, str], ...]] | None = None,
         font_setter: Callable[[str], bool] | None = None,
         font_choices: Callable[[], tuple[tuple[str, str], ...]] | None = None,
+        animation_refresh: Callable[[], bool] | None = None,
     ) -> None:
         catalog = build_settings_catalog()
         # Inject default layout JSON so the key is never empty in a fresh store.
@@ -73,6 +74,9 @@ class SettingsManager:
         self._theme_choices = theme_choices
         self._font_setter = font_setter
         self._font_choices = font_choices
+        self._animation_refresh = animation_refresh
+        self._visualizer_sync: Callable[[], None] | None = None
+        self._keyboard_cat_sync: Callable[[], None] | None = None
         self._hooks: dict[str, ApplyHook] = {}
         self._volume_osd_delay_setter: Callable[[int], None] | None = None
         self._workspace_hover_setter: Callable[[int], None] | None = None
@@ -146,6 +150,12 @@ class SettingsManager:
     def set_workspace_hover_hook(self, callback: Callable[[int], None]) -> None:
         self._workspace_hover_setter = callback
 
+    def set_visualizer_sync_hook(self, callback: Callable[[], None]) -> None:
+        self._visualizer_sync = callback
+
+    def set_keyboard_cat_sync_hook(self, callback: Callable[[], None]) -> None:
+        self._keyboard_cat_sync = callback
+
     def register_hook(self, key: str, hook: ApplyHook) -> None:
         self._hooks[key] = hook
 
@@ -186,9 +196,15 @@ class SettingsManager:
     def _register_builtin_hooks(self) -> None:
         self._hooks["tema.active"] = self._apply_theme
         self._hooks["apariencia.ui_font"] = self._apply_ui_font
+        self._hooks["apariencia.animations_enabled"] = self._apply_animations
+        self._hooks["apariencia.starfield_enabled"] = self._apply_starfield
         self._hooks["popups.volume_osd_hide_ms"] = self._apply_volume_osd
         self._hooks["comportamiento.workspace_hover_delay_ms"] = self._apply_workspace_hover
         self._hooks["widgets.workspace_accent_colors_json"] = self._apply_workspace_accents
+        self._hooks["barra.keyboard_cat_enabled"] = self._apply_keyboard_cat
+        self._hooks["multimedia.visualizer_enabled"] = self._apply_visualizer
+        self._hooks["ia.watcher_enabled"] = self._apply_task_watcher
+
     def _apply_all(self, *, initial: bool) -> None:
         for definition in self._store.catalog:
             value = self._store.get(definition.key)
@@ -254,6 +270,44 @@ class SettingsManager:
 
         set_current_accent_colors(str(value or ""))
         self._event_bus.emit(WORKSPACE_ACCENTS_CHANGED, None)
+
+    def _apply_animations(
+        self, _manager: SettingsManager, _definition: SettingDef, _value: Any
+    ) -> None:
+        if self._animation_refresh is not None:
+            self._animation_refresh()
+
+    def _apply_starfield(
+        self, _manager: SettingsManager, _definition: SettingDef, _value: Any
+    ) -> None:
+        # Starfield hosts read STARFIELD_ENABLED on draw/tick; force a redraw pass.
+        if self._animation_refresh is not None:
+            self._animation_refresh()
+
+    def _apply_keyboard_cat(
+        self, _manager: SettingsManager, _definition: SettingDef, _value: Any
+    ) -> None:
+        if self._keyboard_cat_sync is not None:
+            self._keyboard_cat_sync()
+
+    def _apply_visualizer(
+        self, _manager: SettingsManager, _definition: SettingDef, _value: Any
+    ) -> None:
+        if self._visualizer_sync is not None:
+            self._visualizer_sync()
+
+    def _apply_task_watcher(
+        self, _manager: SettingsManager, _definition: SettingDef, value: Any
+    ) -> None:
+        from ..servicios.tareas.vigilancia.sesion import (
+            ensure_task_watcher_service,
+            stop_task_watcher_service,
+        )
+
+        if bool(value):
+            ensure_task_watcher_service()
+        else:
+            stop_task_watcher_service()
 
     def _apply_night_mode(self) -> NightModeStatus:
         return self._night.configure(

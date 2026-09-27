@@ -17,7 +17,9 @@ from ...models import (
     new_instance_command,
     normalize_desktop_id,
     pin_application,
+    promote_pinned_from_overflow,
     send_pinned_to_overflow,
+    swap_pinned_applications,
     unpin_application,
 )
 from ...runtime_paths import pinned_apps_path
@@ -30,6 +32,8 @@ APP_NEW_INSTANCE_REQUESTED = "app_new_instance_requested"
 APP_PIN_TOGGLE_REQUESTED = "app_pin_toggle_requested"
 APP_PIN_REORDER_REQUESTED = "app_pin_reorder_requested"
 APP_PIN_SEND_TO_OVERFLOW_REQUESTED = "app_pin_send_to_overflow_requested"
+APP_PIN_PROMOTE_FROM_OVERFLOW_REQUESTED = "app_pin_promote_from_overflow_requested"
+APP_PIN_SWAP_REQUESTED = "app_pin_swap_requested"
 APP_FAVORITE_TOGGLE_REQUESTED = "app_favorite_toggle_requested"
 LAUNCHER_TOGGLE_REQUESTED = "launcher_toggle_requested"
 
@@ -59,6 +63,11 @@ class ApplicationsService:
         self._event_bus.subscribe(APP_PIN_TOGGLE_REQUESTED, self._on_pin_toggle)
         self._event_bus.subscribe(APP_PIN_REORDER_REQUESTED, self._on_pin_reorder)
         self._event_bus.subscribe(APP_PIN_SEND_TO_OVERFLOW_REQUESTED, self._on_send_to_overflow)
+        self._event_bus.subscribe(
+            APP_PIN_PROMOTE_FROM_OVERFLOW_REQUESTED,
+            self._on_promote_from_overflow,
+        )
+        self._event_bus.subscribe(APP_PIN_SWAP_REQUESTED, self._on_pin_swap)
         self._event_bus.subscribe(APP_FAVORITE_TOGGLE_REQUESTED, self._on_favorite_toggle)
         self._event_bus.subscribe(APP_NEW_INSTANCE_REQUESTED, self._on_new_instance)
 
@@ -77,6 +86,11 @@ class ApplicationsService:
         self._event_bus.unsubscribe(APP_PIN_TOGGLE_REQUESTED, self._on_pin_toggle)
         self._event_bus.unsubscribe(APP_PIN_REORDER_REQUESTED, self._on_pin_reorder)
         self._event_bus.unsubscribe(APP_PIN_SEND_TO_OVERFLOW_REQUESTED, self._on_send_to_overflow)
+        self._event_bus.unsubscribe(
+            APP_PIN_PROMOTE_FROM_OVERFLOW_REQUESTED,
+            self._on_promote_from_overflow,
+        )
+        self._event_bus.unsubscribe(APP_PIN_SWAP_REQUESTED, self._on_pin_swap)
         self._event_bus.unsubscribe(APP_FAVORITE_TOGGLE_REQUESTED, self._on_favorite_toggle)
         self._event_bus.unsubscribe(APP_NEW_INSTANCE_REQUESTED, self._on_new_instance)
 
@@ -117,6 +131,18 @@ class ApplicationsService:
         self._set_pinned(
             send_pinned_to_overflow(self.snapshot.pinned_ids, app_id, PINNED_APPS_VISIBLE_LIMIT)
         )
+
+    def promote_from_overflow(self, app_id: str) -> None:
+        self._set_pinned(
+            promote_pinned_from_overflow(
+                self.snapshot.pinned_ids,
+                app_id,
+                PINNED_APPS_VISIBLE_LIMIT,
+            )
+        )
+
+    def swap(self, left_id: str, right_id: str) -> None:
+        self._set_pinned(swap_pinned_applications(self.snapshot.pinned_ids, left_id, right_id))
 
     def favorite(self, app_id: str) -> None:
         self._set_favorites(pin_application(self.snapshot.favorite_ids, app_id))
@@ -173,6 +199,18 @@ class ApplicationsService:
     def _on_send_to_overflow(self, app_id: object) -> None:
         if isinstance(app_id, str):
             self.send_to_overflow(app_id)
+
+    def _on_promote_from_overflow(self, app_id: object) -> None:
+        if isinstance(app_id, str):
+            self.promote_from_overflow(app_id)
+
+    def _on_pin_swap(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        left_id = payload.get("left_id")
+        right_id = payload.get("right_id")
+        if isinstance(left_id, str) and isinstance(right_id, str) and left_id and right_id:
+            self.swap(left_id, right_id)
 
     def _on_favorite_toggle(self, app_id: object) -> None:
         if isinstance(app_id, str):

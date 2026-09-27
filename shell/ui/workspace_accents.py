@@ -222,7 +222,7 @@ def build_accent_css(colors: Mapping[str, str] | None = None) -> str:
 button.workspace-button.ws-accent-{safe} {{
     background-color: alpha({hex_color}, 0.14);
     border: 1px solid alpha({hex_color}, 0.42);
-    border-radius: 8px;
+    border-radius: 0;
 }}
 button.workspace-button.ws-accent-{safe}:hover {{
     background-color: alpha({hex_color}, 0.20);

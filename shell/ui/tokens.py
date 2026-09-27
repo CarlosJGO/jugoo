@@ -5,6 +5,9 @@ from __future__ import annotations
 # Inner spacing between elements inside a module container.
 SHELL_MODULE_INNER_SPACING = 6
 
+# Gap between sibling modules packed into one ShellModuleGroup capsule.
+SHELL_MODULE_GROUP_SPACING = 2
+
 # Spacing between stacked labels in compact vertical modules (e.g. clock).
 SHELL_MODULE_STACK_SPACING = 0
 

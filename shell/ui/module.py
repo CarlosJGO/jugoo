@@ -8,9 +8,10 @@ gi.require_version("Gtk", "3.0")
 
 from gi.repository import Gtk
 
-from .tokens import SHELL_MODULE_INNER_SPACING
+from .tokens import SHELL_MODULE_GROUP_SPACING, SHELL_MODULE_INNER_SPACING
 
 SHELL_MODULE_CLASS = "shell-module"
+SHELL_MODULE_GROUP_CLASS = "shell-module-group"
 
 
 class ShellModule(Gtk.Box):
@@ -31,3 +32,21 @@ class ShellModule(Gtk.Box):
         self.set_spacing(
             spacing if spacing is not None else SHELL_MODULE_INNER_SPACING
         )
+
+
+class ShellModuleGroup(ShellModule):
+    """One capsule that hosts several bar modules side by side."""
+
+    def __init__(
+        self,
+        group_class: str,
+        *modules: Gtk.Widget,
+        spacing: int | None = None,
+    ) -> None:
+        super().__init__(
+            group_class,
+            spacing=spacing if spacing is not None else SHELL_MODULE_GROUP_SPACING,
+        )
+        self.get_style_context().add_class(SHELL_MODULE_GROUP_CLASS)
+        for module in modules:
+            self.pack_start(module, False, False, 0)

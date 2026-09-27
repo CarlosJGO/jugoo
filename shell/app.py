@@ -49,7 +49,10 @@ from .servicios.bandeja.tray import SystemTrayService
 from .servicios.tareas.briefing import StartupTaskBriefing
 from .servicios.tareas.presencia import TaskWatcherBridge
 from .servicios.tareas.tasks import TasksService
-from .servicios.tareas.vigilancia.sesion import ensure_task_watcher_service
+from .servicios.tareas.vigilancia.sesion import (
+    ensure_task_watcher_service,
+    stop_task_watcher_service,
+)
 from .servicios.teclado.actividad import KeyboardActivityService
 from .settings.manager import SettingsManager
 from .widgets.barra.active_window import ActiveWindowWidget
@@ -65,6 +68,7 @@ from .widgets.barra.stats import StatsWidget
 from .widgets.barra.tasks import TasksWidget
 from .widgets.barra.tray import SystemTrayWidget
 from .widgets.barra.workspace import WorkspaceWidget
+from .ui import ShellModuleGroup
 from .ui.starfield import StarfieldBackground
 from .ui.theme import ThemeManager
 from .window_identity import APPLICATION_ID, TITLE_BAR, configure_toplevel, init_window_identity
@@ -105,6 +109,7 @@ class ShellApplication(Gtk.Window):
             theme_choices=self._theme_choices,
             font_setter=self.theme_manager.set_ui_font,
             font_choices=self._font_choices,
+            animation_refresh=self.theme_manager.refresh_animation_gate,
         )
         self.hyprland = HyprlandService(self.event_bus, PERSISTENT_WORKSPACES)
         self.applications = ApplicationsService(self.event_bus)
@@ -188,15 +193,23 @@ class ShellApplication(Gtk.Window):
             self.notification_service,
             self,
         )
-        self.layout.right.add(self.notifications_widget)
-        self.layout.right.add(self.ethernet_widget)
-        self.layout.right.add(self.bluetooth_widget)
+        self.status_cluster = ShellModuleGroup(
+            "status-cluster",
+            self.notifications_widget,
+            self.ethernet_widget,
+            self.bluetooth_widget,
+        )
+        self.layout.right.add(self.status_cluster)
         self.stats_widget = StatsWidget(self.system_stats, self, self.event_bus)
         self.layout.right.add(self.stats_widget)
         self.tasks_widget = TasksWidget(self.event_bus, self.tasks_service, self)
-        self.layout.right.add(self.tasks_widget)
         self.clock_widget = ClockWidget(self.event_bus, self.tasks_service)
-        self.layout.right.add(self.clock_widget)
+        self.datetime_cluster = ShellModuleGroup(
+            "datetime-cluster",
+            self.tasks_widget,
+            self.clock_widget,
+        )
+        self.layout.right.add(self.datetime_cluster)
         self.settings_widget = SettingsWidget(self.toggle_settings)
         self.layout.right.add(self.settings_widget)
         self.power_widget = PowerWidget(self.power_service, self, self.event_bus)
@@ -264,8 +277,11 @@ class ShellApplication(Gtk.Window):
         self.settings_manager.set_volume_osd_delay_hook(
             self.volume_osd_controller.set_hide_delay_ms
         )
+        self.settings_manager.set_visualizer_sync_hook(self._sync_audio_visualizer)
+        self.settings_manager.set_keyboard_cat_sync_hook(self._sync_keyboard_cat)
         # Load persisted overrides after live hooks exist so first apply is complete.
         self.settings_manager.start()
+        self._sync_keyboard_cat()
 
         self.connect("destroy", self._on_destroy)
 
@@ -278,11 +294,10 @@ class ShellApplication(Gtk.Window):
         self.network_service.start()
         self.bluetooth_service.start()
         self.media_service.start()
-        self.audio_visualizer.start()
+        self._sync_audio_visualizer()
         self.notification_service.start()
         self.tasks_service.start()
         self.task_watcher_bridge.start()
-        self.keyboard_activity.start()
         GLib.idle_add(self._ensure_task_watcher)
         GLib.timeout_add(700, self._startup_briefing.schedule)
         self.show_all()
@@ -424,8 +439,32 @@ class ShellApplication(Gtk.Window):
         return ui_font_choices()
 
     def _ensure_task_watcher(self) -> bool:
-        ensure_task_watcher_service()
+        from . import config as shell_config
+
+        if shell_config.TASK_WATCHER_ENABLED:
+            ensure_task_watcher_service()
+        else:
+            stop_task_watcher_service()
         return False
+
+    def _sync_audio_visualizer(self) -> None:
+        from . import config as shell_config
+
+        if shell_config.AUDIO_VISUALIZER_ENABLED:
+            self.audio_visualizer.start()
+        else:
+            self.audio_visualizer.stop_sampling()
+
+    def _sync_keyboard_cat(self) -> None:
+        from . import config as shell_config
+
+        enabled = bool(shell_config.KEYBOARD_CAT_ENABLED)
+        if enabled:
+            self.keyboard_cat_widget.show()
+            self.keyboard_activity.start()
+        else:
+            self.keyboard_cat_widget.hide()
+            self.keyboard_activity.close()
 
     def _configure_layer_shell(self) -> None:
         GtkLayerShell.init_for_window(self)

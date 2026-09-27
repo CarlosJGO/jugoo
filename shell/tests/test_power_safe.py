@@ -170,6 +170,27 @@ def verify_lock_spawn_uses_random_bg_wrapper() -> None:
     assert captured == [[wrapper]], captured
 
 
+def verify_power_menu_imports() -> None:
+    import shell.widgets.barra.power as power_widget
+
+    assert any(entry[0] == "suspend" for entry in power_widget.POWER_MENU_ENTRIES)
+    assert power_widget.ACTION_SUSPEND == "suspend"
+
+
+def verify_power_widget_reads_menu_confirmation_state() -> None:
+    import shell.widgets.barra.power as power_widget
+
+    class _Menu:
+        def get_needs_confirmation(self, action: str) -> bool:
+            return action == "logout"
+
+    widget = power_widget.PowerWidget.__new__(power_widget.PowerWidget)
+    widget._menu = type("Holder", (), {"maybe": _Menu()})()
+
+    assert widget.get_needs_confirmation("logout") is True
+    assert widget.get_needs_confirmation("lock") is False
+
+
 if __name__ == "__main__":
     verify_power_service_dry_run()
     verify_mock_executor()
@@ -180,4 +201,6 @@ if __name__ == "__main__":
     verify_logout_prefers_session_id({"XDG_SESSION_ID": "42"})
     verify_logout_prefers_session_id({"USER": "aidyc"})
     verify_logout_prefers_session_id(None)
+    verify_power_menu_imports()
+    verify_power_widget_reads_menu_confirmation_state()
     print("power verification OK (no destructive actions executed)")

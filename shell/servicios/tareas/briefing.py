@@ -707,8 +707,11 @@ class StartupTaskBriefing:
         self._generator.close()
 
     def _arm(self) -> bool:
+        self._config = WatcherConfig.from_shell()
         with self._lock:
-            if self._started:
+            if self._started or self._closed:
+                return False
+            if not self._config.briefing_enabled:
                 return False
             self._started = True
             return True

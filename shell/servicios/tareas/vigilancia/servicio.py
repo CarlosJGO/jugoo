@@ -33,6 +33,7 @@ from .ia import (
     LocalTextGenerator,
     attribute_messages_to_tasks,
     generate_reminder_text,
+    message_mentions_snapshot,
 )
 from .notificaciones import (
     ACTION_DONE,
@@ -253,7 +254,9 @@ class TaskWatcher:
             target = candidates.get(task_id)
             if target is None:
                 continue
-            message = attributed.get(task_id, cleaned[0] if task_id == snapshot.id else "")
+            message = attributed.get(task_id, "")
+            if message and not message_mentions_snapshot(message, target):
+                message = ""
             next_count = self._state.memory(task_id).reminder_count + 1
             wait = cooldown_seconds(next_count, self._config.reminder_cooldown_sec)
             self._state.mark_notified(

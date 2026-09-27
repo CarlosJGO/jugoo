@@ -15,6 +15,7 @@ gi.require_version("Gdk", "3.0")
 
 from gi.repository import GLib, Gtk
 
+from .. import config as shell_config
 from ..eventbus import EventBus
 from .theme import THEME_CHANGED, Theme, active_theme, color_to_rgb
 
@@ -179,6 +180,10 @@ class StarfieldBackground(Gtk.EventBox):
             self._event_bus.unsubscribe(THEME_CHANGED, self._on_theme_changed)
 
     def _register_animation(self) -> None:
+        if not shell_config.STARFIELD_ENABLED:
+            self._unregister_animation()
+            self.queue_draw()
+            return
         theme = active_theme()
         if theme is not None and not theme.animation.enabled:
             self._unregister_animation()
@@ -196,6 +201,9 @@ class StarfieldBackground(Gtk.EventBox):
         self._animation_registered = False
 
     def _on_animated_frame(self, time_ms: int) -> None:
+        if not shell_config.STARFIELD_ENABLED:
+            self.queue_draw()
+            return
         theme = active_theme()
         if theme is not None and not theme.animation.enabled:
             self.queue_draw()
@@ -213,6 +221,9 @@ class StarfieldBackground(Gtk.EventBox):
         self._ensure_tick()
 
     def _ensure_tick(self) -> None:
+        if not shell_config.STARFIELD_ENABLED:
+            self._unregister_animation()
+            return
         theme = active_theme()
         if theme is not None and not theme.animation.enabled:
             self._unregister_animation()
@@ -226,14 +237,17 @@ class StarfieldBackground(Gtk.EventBox):
             return False
 
         theme = active_theme()
-        background_name = _theme_background_name(theme)
         _path_rounded_rect(cr, 0.0, 0.0, width, height, self._corner_radii)
         cr.clip()
 
-        if background_name == "matrix":
-            _paint_matrix_background(cr, width, height, theme, self._matrix, self._elapsed_ms)
+        if not shell_config.STARFIELD_ENABLED:
+            _paint_flat_background(cr, width, height, theme)
         else:
-            _paint_space_background(cr, width, height, theme, self._stars, self._elapsed_ms)
+            background_name = _theme_background_name(theme)
+            if background_name == "matrix":
+                _paint_matrix_background(cr, width, height, theme, self._matrix, self._elapsed_ms)
+            else:
+                _paint_space_background(cr, width, height, theme, self._stars, self._elapsed_ms)
 
         if self._draw_rim:
             rim_r, rim_g, rim_b = _rim_rgb(theme)
@@ -298,6 +312,18 @@ def _theme_background_name(theme: Theme | None) -> str:
     if theme is None:
         return "space"
     return str(getattr(theme.effects, "background", "space")).lower()
+
+
+def _paint_flat_background(
+    cr: cairo.Context,
+    width: float,
+    height: float,
+    theme: Theme | None,
+) -> None:
+    void_rgb, _mist = _space_palette(theme)
+    cr.set_source_rgb(*void_rgb)
+    cr.rectangle(0, 0, width, height)
+    cr.fill()
 
 
 def _paint_space_background(

@@ -11,6 +11,7 @@ gi.require_version("Gdk", "3.0")
 
 from gi.repository import Gdk, GLib, Gtk
 
+from ... import config as shell_config
 from ...config import (
     PINNED_APP_ICON_SIZE,
     PINNED_APP_SPACING,
@@ -33,8 +34,10 @@ from ...popup_spawn import publish_popup_spawn
 from ...servicios.aplicaciones.applications import (
     APP_ACTIVATE_REQUESTED,
     APP_NEW_INSTANCE_REQUESTED,
+    APP_PIN_PROMOTE_FROM_OVERFLOW_REQUESTED,
     APP_PIN_REORDER_REQUESTED,
     APP_PIN_SEND_TO_OVERFLOW_REQUESTED,
+    APP_PIN_SWAP_REQUESTED,
     APP_PIN_TOGGLE_REQUESTED,
     APPLICATIONS_CHANGED,
 )
@@ -46,7 +49,11 @@ from ...servicios.escritorio.hyprland import (
 )
 from ...ui import ShellModule
 from ...ui.starfield import install_starfield, resolve_event_bus
-from ...widgets.aplicaciones.context_menu import popup_application_menu
+from ...widgets.aplicaciones.context_menu import (
+    AppTargetEntry,
+    MenuHeader,
+    popup_application_menu,
+)
 from ...window_identity import (
     TITLE_PINNED_OVERFLOW,
     configure_passive_popup,
@@ -95,17 +102,12 @@ class PinnedAppButton(Gtk.Button):
         application: DesktopApplication,
         *,
         on_activate: Callable[[str], None],
-        on_unpin: Callable[[str], None],
-        on_new_instance: Callable[[str], None],
-        on_send_to_extras: Callable[[str], None],
+        on_context_menu: Callable[[str, Gdk.EventButton], None],
         icon_size: int,
     ) -> None:
         super().__init__()
         self.application_id = application.id
-        self._on_unpin = on_unpin
-        self._on_new_instance = on_new_instance
-        self._on_send_to_extras = on_send_to_extras
-        self._can_send_to_extras = False
+        self._on_context_menu = on_context_menu
         self._icon_size = icon_size
         self.get_style_context().add_class("pinned-app-button")
         self.set_relief(Gtk.ReliefStyle.NONE)
@@ -143,26 +145,10 @@ class PinnedAppButton(Gtk.Button):
         else:
             context.remove_class("focused")
 
-    def set_can_send_to_extras(self, enabled: bool) -> None:
-        self._can_send_to_extras = enabled
-
     def _on_button_press(self, _button: Gtk.Widget, event: Gdk.EventButton) -> bool:
         if event.button != 3:
             return False
-        entries: list[tuple[str, Callable[[], None]] | None] = [
-            ("Nueva instancia", lambda: self._on_new_instance(self.application_id)),
-        ]
-        if self._can_send_to_extras:
-            entries.append(
-                ("Enviar a extras", lambda: self._on_send_to_extras(self.application_id)),
-            )
-        entries.extend(
-            (
-                None,
-                ("Desfijar", lambda: self._on_unpin(self.application_id)),
-            )
-        )
-        popup_application_menu(event, tuple(entries))
+        self._on_context_menu(self.application_id, event)
         return True
 
 
@@ -179,23 +165,42 @@ class PinnedAppsOverflowPopup(Gtk.Window):
         configure_toplevel(self, title=TITLE_PINNED_OVERFLOW)
         configure_passive_popup(self)
 
+        self._root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._root.get_style_context().add_class("pinned-apps-overflow-content")
+
+        self._title = Gtk.Label(label="Extras", xalign=0)
+        self._title.get_style_context().add_class("pinned-apps-overflow-title")
+        self._root.pack_start(self._title, False, False, 0)
+
+        self._scrolled = Gtk.ScrolledWindow()
+        self._scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._apply_max_height()
+        self._scrolled.set_propagate_natural_height(True)
+        self._scrolled.set_propagate_natural_width(True)
+        self._scrolled.get_style_context().add_class("pinned-apps-overflow-scroll")
+
         self._content = Gtk.FlowBox()
-        self._content.get_style_context().add_class("pinned-apps-overflow-content")
+        self._content.get_style_context().add_class("pinned-apps-overflow-grid")
         self._content.set_selection_mode(Gtk.SelectionMode.NONE)
         self._content.set_min_children_per_line(1)
         self._content.set_max_children_per_line(PINNED_APPS_VISIBLE_LIMIT)
         self._content.set_column_spacing(PINNED_APP_SPACING)
         self._content.set_row_spacing(PINNED_APP_SPACING)
         self._content.set_homogeneous(True)
+        self._scrolled.add(self._content)
+        # Natural height only — do not expand into empty vertical space.
+        self._root.pack_start(self._scrolled, False, False, 0)
+
         install_starfield(
             self,
-            self._content,
+            self._root,
             resolve_event_bus(shell_window),
         )
 
     def open_for(self, anchor: Gtk.Widget) -> None:
         self._anchor = anchor
         self._fixed_top = None
+        self._apply_max_height()
         publish_popup_spawn(
             self,
             anchor,
@@ -211,6 +216,7 @@ class PinnedAppsOverflowPopup(Gtk.Window):
         hide_popup(self)
 
     def host_buttons(self, buttons: tuple[Gtk.Widget, ...]) -> None:
+        self._apply_max_height()
         for child in list(self._content.get_children()):
             inner = child.get_child()
             if inner is not None:
@@ -223,6 +229,11 @@ class PinnedAppsOverflowPopup(Gtk.Window):
         self._content.show_all()
         if self.get_visible():
             schedule_popup_position(self._position_after_show)
+
+    def _apply_max_height(self) -> None:
+        height = max(48, int(shell_config.PINNED_OVERFLOW_MAX_HEIGHT))
+        self._scrolled.set_max_content_height(height)
+        self._scrolled.set_min_content_height(0)
 
     def _position_after_show(self) -> bool:
         if self._anchor is None:
@@ -347,7 +358,6 @@ class PinnedAppsWidget(ShellModule):
         else:
             self._close_overflow()
             self.hide()
-        self._sync_send_to_extras(visible_ids, has_overflow)
         self._sync_expand_button()
 
     def _fill_row(self, row: Gtk.Box, app_ids: tuple[str, ...]) -> None:
@@ -375,9 +385,7 @@ class PinnedAppsWidget(ShellModule):
             button = PinnedAppButton(
                 application,
                 on_activate=self._on_activate,
-                on_unpin=self._on_unpin,
-                on_new_instance=self._on_new_instance,
-                on_send_to_extras=self._on_send_to_extras,
+                on_context_menu=self._show_app_menu,
                 icon_size=self._icon_size(),
             )
             self._buttons[application.id] = button
@@ -403,19 +411,101 @@ class PinnedAppsWidget(ShellModule):
             return
         self._event_bus.emit(APP_ACTIVATE_REQUESTED, app_id)
 
+    def _show_app_menu(self, app_id: str, event: Gdk.EventButton) -> None:
+        visible_ids, overflow_ids, has_overflow = split_pinned_dock(
+            self._snapshot.pinned_ids,
+            PINNED_APPS_VISIBLE_LIMIT,
+        )
+        entries: list = [
+            ("Nueva instancia", lambda: self._on_new_instance(app_id)),
+        ]
+        if has_overflow and app_id in visible_ids:
+            entries.append(("Enviar a extras", lambda: self._on_send_to_extras(app_id)))
+        if app_id in overflow_ids:
+            entries.append(("Traer a la barra", lambda: self._on_promote_from_extras(app_id)))
+        entries.append(("Desfijar", lambda: self._on_unpin(app_id)))
+
+        others_bar = tuple(item for item in visible_ids if item != app_id)
+        others_extras = tuple(item for item in overflow_ids if item != app_id)
+        if others_bar or others_extras:
+            entries.append(None)
+            if others_bar:
+                entries.append(MenuHeader("Intercambiar por"))
+                for other_id in others_bar:
+                    other = self._application_for(other_id)
+                    entries.append(
+                        AppTargetEntry(
+                            name=other.name,
+                            icon=other.icon or FALLBACK_ICON,
+                            callback=self._make_swap_callback(app_id, other_id),
+                        )
+                    )
+            if others_extras:
+                entries.append(MenuHeader("Extras"))
+                for other_id in others_extras:
+                    other = self._application_for(other_id)
+                    entries.append(
+                        AppTargetEntry(
+                            name=other.name,
+                            icon=other.icon or FALLBACK_ICON,
+                            callback=self._make_swap_callback(app_id, other_id),
+                        )
+                    )
+
+        attach = self._buttons.get(app_id)
+        owner = self._overflow.maybe if self._overflow_open else None
+        if self._overflow_open:
+            self._outside_click.suspend()
+
+        def _resume_overflow_dismiss() -> None:
+            if self._overflow_open:
+                self._outside_click.resume()
+
+        popup_application_menu(
+            event,
+            tuple(entries),
+            attach_widget=attach,
+            owner_popup=owner,
+            on_deactivate=_resume_overflow_dismiss,
+        )
+
+    def _make_swap_callback(self, left_id: str, right_id: str) -> Callable[[], None]:
+        return lambda: self._on_swap(left_id, right_id)
+
     def _on_unpin(self, app_id: str) -> None:
+        GLib.idle_add(self._emit_unpin, app_id)
+
+    def _emit_unpin(self, app_id: str) -> bool:
         self._event_bus.emit(APP_PIN_TOGGLE_REQUESTED, app_id)
+        return False
 
     def _on_new_instance(self, app_id: str) -> None:
         self._event_bus.emit(APP_NEW_INSTANCE_REQUESTED, app_id)
 
     def _on_send_to_extras(self, app_id: str) -> None:
-        self._event_bus.emit(APP_PIN_SEND_TO_OVERFLOW_REQUESTED, app_id)
+        GLib.idle_add(self._emit_send_to_extras, app_id)
 
-    def _sync_send_to_extras(self, visible_ids: tuple[str, ...], has_overflow: bool) -> None:
-        visible = set(visible_ids)
-        for app_id, button in self._buttons.items():
-            button.set_can_send_to_extras(has_overflow and app_id in visible)
+    def _emit_send_to_extras(self, app_id: str) -> bool:
+        self._event_bus.emit(APP_PIN_SEND_TO_OVERFLOW_REQUESTED, app_id)
+        return False
+
+    def _on_promote_from_extras(self, app_id: str) -> None:
+        GLib.idle_add(self._emit_promote_from_extras, app_id)
+
+    def _emit_promote_from_extras(self, app_id: str) -> bool:
+        self._event_bus.emit(APP_PIN_PROMOTE_FROM_OVERFLOW_REQUESTED, app_id)
+        return False
+
+    def _on_swap(self, left_id: str, right_id: str) -> None:
+        # Defer so the menu can deactivate before buttons are reparented.
+        GLib.idle_add(self._emit_swap, left_id, right_id)
+
+    def _emit_swap(self, left_id: str, right_id: str) -> bool:
+        self._event_bus.emit(
+            APP_PIN_SWAP_REQUESTED,
+            {"left_id": left_id, "right_id": right_id},
+        )
+        return False
 
     def _on_toggle_expand(self, *_args) -> None:
         _, overflow_ids, has_overflow = split_pinned_dock(

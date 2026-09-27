@@ -87,6 +87,10 @@ class AudioVisualizerService:
             self._on_theme_changed(self._theme_manager.theme)
         self._sync_sampling(force=True)
 
+    def stop_sampling(self) -> None:
+        """Public stop for feature toggles (keeps subscriptions alive)."""
+        self._stop_sampling()
+
     def close(self) -> None:
         self._event_bus.unsubscribe(MEDIA_CHANGED, self._on_media_changed)
         self._event_bus.unsubscribe(AUDIO_CHANGED, self._on_audio_changed)
@@ -123,6 +127,12 @@ class AudioVisualizerService:
         _logger.debug("Visualizer monitor target -> %s", target)
 
     def _sync_sampling(self, *, force: bool) -> None:
+        from ... import config as shell_config
+
+        if not shell_config.AUDIO_VISUALIZER_ENABLED:
+            if self._sampler_enabled or force:
+                self._stop_sampling()
+            return
         should_sample = visualizer_should_sample(self._media_service.snapshot)
         with self._state_lock:
             if should_sample:

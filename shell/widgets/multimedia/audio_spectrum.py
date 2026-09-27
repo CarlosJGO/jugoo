@@ -24,37 +24,61 @@ def paint_spectrum(
     bars: tuple[float, ...],
     colors: tuple[tuple[float, float, float, float], ...],
     peaks: tuple[float, ...] = (),
+    gap: int | None = None,
+    min_bar_width: int | None = None,
+    min_bar_height: int | None = None,
+    peak_height: float | None = None,
+    fill_width: bool = False,
+    corner_radius: float | None = None,
 ) -> None:
     """Draw frequency-colored bars from the bottom of the allocation."""
     if width <= 0 or height <= 0 or not bars:
         return
 
     bar_count = len(bars)
-    gap = _BAR_GAP
-    bar_width = max(_MIN_BAR_WIDTH, (width - gap * (bar_count - 1)) // bar_count)
-    total = bar_width * bar_count + gap * (bar_count - 1)
-    x = max(0, (width - total) // 2)
-    radius = min(2.5, bar_width / 2.0)
+    gap = _BAR_GAP if gap is None else max(0, int(gap))
+    min_width = _MIN_BAR_WIDTH if min_bar_width is None else max(1, int(min_bar_width))
+    floor = 3 if min_bar_height is None else max(1, int(min_bar_height))
+    peak_px = _PEAK_HEIGHT if peak_height is None else max(1.0, float(peak_height))
+
+    if fill_width:
+        usable = max(bar_count, width - gap * (bar_count - 1))
+        base = max(1, usable // bar_count)
+        leftover = max(0, usable - base * bar_count)
+        widths = [base + (1 if index < leftover else 0) for index in range(bar_count)]
+        x = 0.0
+    else:
+        bar_width = max(min_width, (width - gap * (bar_count - 1)) // bar_count)
+        total = bar_width * bar_count + gap * (bar_count - 1)
+        x = float(max(0, (width - total) // 2))
+        widths = [bar_width] * bar_count
 
     for index, level in enumerate(bars):
+        bar_width = widths[index]
+        if corner_radius is None:
+            radius = min(2.5, bar_width / 2.0)
+        else:
+            radius = max(0.0, float(corner_radius))
         color = colors[index] if index < len(colors) else None
         if level > 0.001 and color is not None:
             # Slight vertical gradient: denser near the base.
-            bar_height = max(3, int(height * (0.08 + 0.92 * level)))
+            bar_height = max(floor, int(height * (0.08 + 0.92 * level)))
             y = height - bar_height
             red, green, blue, alpha = color
             # Soften mid-height so titles stay readable.
-            center_boost = 1.0 - 0.18 * math.sin(math.pi * ((x + bar_width * 0.5) / max(1, width)))
+            center_boost = 1.0 - 0.18 * math.sin(
+                math.pi * ((x + bar_width * 0.5) / max(1, width))
+            )
             cr.set_source_rgba(red, green, blue, alpha * center_boost)
             _rounded_rect(cr, x, y, bar_width, bar_height, radius)
             cr.fill()
 
         if color is not None and index < len(peaks) and peaks[index] > 0.04:
             peak_level = peaks[index]
-            peak_y = height - max(_PEAK_HEIGHT, height * (0.08 + 0.92 * peak_level))
+            peak_y = height - max(peak_px, height * (0.08 + 0.92 * peak_level))
             red, green, blue, alpha = color
             cr.set_source_rgba(red, green, blue, min(0.55, alpha + 0.18))
-            cr.rectangle(x, peak_y, bar_width, _PEAK_HEIGHT)
+            cr.rectangle(x, peak_y, bar_width, peak_px)
             cr.fill()
 
         x += bar_width + gap

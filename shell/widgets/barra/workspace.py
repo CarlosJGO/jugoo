@@ -20,9 +20,11 @@ from ...config import (
     WORKSPACE_VISIBLE_ICON_LIMIT,
     WORKSPACES_PER_BLOCK,
 )
+from ... import config as shell_config
 from ...eventbus import EventBus
 from ...models import (
     AudioSnapshot,
+    AudioVisualizerSnapshot,
     HyprlandSnapshot,
     Window,
     Workspace,
@@ -30,7 +32,9 @@ from ...models import (
     WorkspaceAudioState,
     compose_workspace_blocks,
 )
+from ...servicios.audio.audio_visualizer import AUDIO_VISUALIZER_CHANGED
 from ...ui.workspace_accents import accent_class_for_workspace
+from .workspace_mini_cava import WorkspaceMiniCava
 
 WORKSPACE_CHANGED = "workspace_changed"
 WORKSPACE_REQUESTED = "workspace_requested"
@@ -82,15 +86,20 @@ class WorkspaceButton(Gtk.Button):
         self._hover_surface.connect("enter-notify-event", self._on_pointer_enter)
         self._hover_surface.connect("leave-notify-event", self._on_pointer_leave)
         self._hover_surface.connect("button-press-event", self._on_hover_surface_press)
+        self._hover_surface.connect("draw", self._on_draw_cava)
+        self._hover_surface.connect("destroy", self._on_hover_destroy)
 
         self._content = Gtk.Stack()
         self._content.set_transition_type(Gtk.StackTransitionType.NONE)
         self._content.set_homogeneous(False)
+        self._content.set_halign(Gtk.Align.CENTER)
+        self._content.set_valign(Gtk.Align.CENTER)
         self._dot = self._make_dot()
         self._icons = Gtk.Box(spacing=APPLICATION_ICON_SPACING)
         self._icons.get_style_context().add_class("application-icons")
         self._content.add_named(self._dot, "dot")
         self._content.add_named(self._icons, "icons")
+        self._mini_cava = WorkspaceMiniCava(on_redraw=self._hover_surface.queue_draw)
         self._hover_surface.add(self._content)
         self.add(self._hover_surface)
         self._content.show_all()
@@ -117,6 +126,16 @@ class WorkspaceButton(Gtk.Button):
     def _on_pointer_leave(self, _widget: Gtk.Widget, _event: Gdk.EventCrossing) -> bool:
         self.emit("workspace-left", self.workspace_id)
         return False
+
+    def _on_draw_cava(self, widget: Gtk.Widget, cr) -> bool:
+        if not shell_config.WORKSPACE_MINI_CAVA_ENABLED:
+            return False
+        allocation = widget.get_allocation()
+        self._mini_cava.paint(cr, max(1, allocation.width), max(1, allocation.height))
+        return False
+
+    def _on_hover_destroy(self, *_args) -> None:
+        self._mini_cava.close()
 
     def update(self, workspace: Workspace) -> None:
         """Apply only the visual differences for this workspace."""
@@ -166,8 +185,9 @@ class WorkspaceButton(Gtk.Button):
             return
         context.add_class("ws-accent")
         context.add_class(accent_class)
+
     def update_audio_state(self, audio_state: WorkspaceAudioState | None) -> None:
-        """Apply CSS classes reflecting audio status of this workspace."""
+        """Drive the mini cava from this workspace's playback summary."""
         context = self.get_style_context()
         has_audio = bool(audio_state and audio_state.has_audio)
         is_playing = bool(audio_state and audio_state.is_playing)
@@ -177,16 +197,26 @@ class WorkspaceButton(Gtk.Button):
             context.add_class("audio-has-stream")
         else:
             context.remove_class("audio-has-stream")
-
         if is_playing:
             context.add_class("audio-playing")
         else:
             context.remove_class("audio-playing")
-
         if is_muted:
             context.add_class("audio-muted")
         else:
             context.remove_class("audio-muted")
+
+        self._mini_cava.set_audio_state(
+            has_audio=has_audio and shell_config.WORKSPACE_MINI_CAVA_ENABLED,
+            playing=is_playing and shell_config.WORKSPACE_MINI_CAVA_ENABLED,
+            muted=is_muted,
+        )
+
+    def set_live_cava_bars(self, bars: tuple[float, ...] | None) -> None:
+        if not shell_config.WORKSPACE_MINI_CAVA_ENABLED:
+            self._mini_cava.set_live_bars(None)
+            return
+        self._mini_cava.set_live_bars(bars)
 
     @property
     def workspace(self) -> Workspace | None:
@@ -277,6 +307,8 @@ class WorkspaceWidget(Gtk.Box):
         self.buttons: dict[int, WorkspaceButton] = {}
         self.block_widgets: dict[int, WorkspaceBlockWidget] = {}
         self._audio_snapshot: AudioSnapshot | None = None
+        self._visualizer_snapshot = AudioVisualizerSnapshot.hidden()
+        self._playing_workspace_ids: set[int] = set()
         self._all_workspaces: tuple[Workspace, ...] = ()
         self._current_workspaces: tuple[Workspace, ...] = ()
         self.block_order: tuple[int, ...] = ()
@@ -291,6 +323,7 @@ class WorkspaceWidget(Gtk.Box):
         self._event_bus.subscribe(WINDOW_OPENED, self._on_workspace_changed)
         self._event_bus.subscribe(WINDOW_CLOSED, self._on_workspace_changed)
         self._event_bus.subscribe(AUDIO_CHANGED, self._on_audio_changed)
+        self._event_bus.subscribe(AUDIO_VISUALIZER_CHANGED, self._on_visualizer_changed)
         self._event_bus.subscribe(WORKSPACE_ACCENTS_CHANGED, self._on_accents_changed)
         self.connect("destroy", self._on_destroy)
 
@@ -542,11 +575,33 @@ class WorkspaceWidget(Gtk.Box):
         self._audio_snapshot = snapshot
         GLib.idle_add(self._apply_audio_snapshot, snapshot)
 
+    def _on_visualizer_changed(self, snapshot: AudioVisualizerSnapshot) -> None:
+        if not isinstance(snapshot, AudioVisualizerSnapshot):
+            return
+        GLib.idle_add(self._store_visualizer_snapshot, snapshot)
+
+    def _store_visualizer_snapshot(self, snapshot: AudioVisualizerSnapshot) -> bool:
+        self._visualizer_snapshot = snapshot
+        self._push_live_cava()
+        return False
+
     def _apply_audio_snapshot(self, snapshot: AudioSnapshot) -> bool:
+        playing_ids: set[int] = set()
         for ws_id, button in self.buttons.items():
             audio_state = snapshot.get_workspace_audio(ws_id)
             button.update_audio_state(audio_state)
+            if audio_state.is_playing and not audio_state.has_muted:
+                playing_ids.add(ws_id)
+        self._playing_workspace_ids = playing_ids
+        self._push_live_cava()
         return False
+
+    def _push_live_cava(self) -> None:
+        live = None
+        if self._visualizer_snapshot.visible and self._visualizer_snapshot.bars:
+            live = self._visualizer_snapshot.bars
+        for ws_id, button in self.buttons.items():
+            button.set_live_cava_bars(live if ws_id in self._playing_workspace_ids else None)
 
     def _on_destroy(self, *_args) -> None:
         self._reset_workspace_drag()
@@ -554,4 +609,5 @@ class WorkspaceWidget(Gtk.Box):
         self._event_bus.unsubscribe(WINDOW_OPENED, self._on_workspace_changed)
         self._event_bus.unsubscribe(WINDOW_CLOSED, self._on_workspace_changed)
         self._event_bus.unsubscribe(AUDIO_CHANGED, self._on_audio_changed)
+        self._event_bus.unsubscribe(AUDIO_VISUALIZER_CHANGED, self._on_visualizer_changed)
         self._event_bus.unsubscribe(WORKSPACE_ACCENTS_CHANGED, self._on_accents_changed)

@@ -46,6 +46,14 @@ BAR_RETRACT_POLL_MS = 32
 BAR_RETRACT_GAP_PX = 4
 BAR_RETRACT_ANIM_TICK_MS = 16
 
+# Optional shell chrome (safe to disable; core bar still works).
+SHELL_ANIMATIONS_ENABLED = True
+STARFIELD_ENABLED = True
+DISINTEGRATE_CLOSE_ENABLED = True
+KEYBOARD_CAT_ENABLED = True
+WORKSPACE_MINI_CAVA_ENABLED = True
+AUDIO_VISUALIZER_ENABLED = True
+
 # Screen-edge padding when clamping anchored popups.
 POPUP_EDGE_MARGIN = 8
 
@@ -57,6 +65,8 @@ WORKSPACE_BUTTON_SPACING = 4
 APPLICATION_ICON_SPACING = 6
 APPLICATION_ICON_SIZE = 18
 FOCUSED_APPLICATION_ICON_SIZE = 21
+WORKSPACE_MINI_CAVA_BARS = 7
+WORKSPACE_MINI_CAVA_FPS = 18
 ACTIVE_WINDOW_ICON_SIZE = 24
 ACTIVE_WINDOW_CONTENT_SPACING = 8
 # How long the cava volume % stays “punched” after a change (gamefeel).
@@ -262,6 +272,10 @@ PINNED_APPS_VISIBLE_LIMIT = 9
 PINNED_APP_ICON_SIZE = 20
 PINNED_APP_SPACING = 2
 PINNED_OVERFLOW_OFFSET = 4
+# Cap overflow / dock-menu height so long pin lists scroll instead of growing forever.
+# Extras hugs content; this is only the scroll ceiling (~2–3 icon rows).
+PINNED_OVERFLOW_MAX_HEIGHT = 112
+PINNED_APP_MENU_MAX_HEIGHT = 340
 PINNED_APPS_PATH = "pinned-apps.json"
 
 # Application launcher overlay (Super+Space).

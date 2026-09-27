@@ -81,6 +81,15 @@ class ReminderState:
             self._items.pop(task_id, None)
             self._save()
 
+    def forget_except(self, keep_ids: set[str] | frozenset[str]) -> None:
+        """Drop memory for tasks that are no longer on the live board."""
+        stale = [task_id for task_id in self._items if task_id not in keep_ids]
+        if not stale:
+            return
+        for task_id in stale:
+            self._items.pop(task_id, None)
+        self._save()
+
     def _align_calendar_day(self, item: TaskReminderMemory, now: float | None = None) -> None:
         today = _today_key(now if now is not None else datetime.now().timestamp())
         if item.day and item.day != today:

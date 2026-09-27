@@ -80,37 +80,56 @@ def choose_reminder(
     now: datetime,
     config: WatcherConfig,
 ) -> ReminderDecision:
-    """Return at most one primary reminder plus up to 3 eligible candidates."""
+    """Return at most one primary reminder plus up to 3 eligible candidates.
+
+    Completed and past-due (overdue) tasks are never reminded: they are dropped
+    from reminder memory so the AI cannot keep echoing them via last_message.
+    """
     empty = ReminderDecision(False, "none", distracted_for_sec=activity.distracted_for_sec)
     if not config.enabled:
         return ReminderDecision(False, "disabled", distracted_for_sec=activity.distracted_for_sec)
 
-    ranked: list[tuple[int, int, float, TaskSnapshot]] = []
+    state.forget_except({snapshot.id for snapshot in snapshots})
+
+    ranked: list[tuple[int, float, TaskSnapshot]] = []
     skipped: list[ReminderDecision] = []
     for snapshot in snapshots:
         if snapshot.status == TASK_STATUS_COMPLETED:
             state.forget(snapshot.id)
             continue
-        if snapshot.status not in (TASK_STATUS_PENDING, TASK_STATUS_OVERDUE):
+        remaining = (due_datetime(snapshot) - now).total_seconds()
+        past_due = snapshot.status == TASK_STATUS_OVERDUE or remaining < 0
+        if past_due:
+            # Past the due date: stop nagging and clear mention memory.
+            state.forget(snapshot.id)
+            skipped.append(
+                ReminderDecision(
+                    False,
+                    "past_due",
+                    snapshot,
+                    (),
+                    remaining,
+                    activity.distracted_for_sec,
+                )
+            )
+            continue
+        if snapshot.status != TASK_STATUS_PENDING:
             continue
         decision = _evaluate_task(snapshot, state, activity, now=now, config=config)
         if not decision.should_notify or decision.snapshot is None:
             skipped.append(decision)
             continue
-        remaining = decision.seconds_until_due if decision.seconds_until_due is not None else 0.0
-        overdue_rank = 0 if snapshot.status == TASK_STATUS_OVERDUE or remaining < 0 else 1
+        due_remaining = decision.seconds_until_due if decision.seconds_until_due is not None else 0.0
         memory = state.memory(snapshot.id)
         mention_penalty = 1 if memory.times_mentioned_today >= HIGH_MENTION_THRESHOLD else 0
-        ranked.append((overdue_rank, mention_penalty, remaining, snapshot))
+        ranked.append((mention_penalty, due_remaining, snapshot))
 
     if not ranked:
         return skipped[0] if skipped else empty
-    ranked.sort(key=lambda item: (item[0], item[1], item[2], item[3].title.casefold()))
-    candidates = tuple(item[3] for item in ranked[:_MAX_CANDIDATES])
-    _, _, remaining, snapshot = ranked[0]
-    reason = "overdue" if remaining < 0 or snapshot.status == TASK_STATUS_OVERDUE else (
-        "urgent" if remaining <= config.urgent_window_sec else "distracted"
-    )
+    ranked.sort(key=lambda item: (item[0], item[1], item[2].title.casefold()))
+    candidates = tuple(item[2] for item in ranked[:_MAX_CANDIDATES])
+    _, remaining, snapshot = ranked[0]
+    reason = "urgent" if remaining <= config.urgent_window_sec else "distracted"
     return ReminderDecision(
         True,
         reason,
@@ -147,11 +166,12 @@ def _evaluate_task(
         if now_ts - memory.last_notified_at < wait:
             return ReminderDecision(False, "cooldown", snapshot, (), remaining, activity.distracted_for_sec)
 
-    overdue = snapshot.status == TASK_STATUS_OVERDUE or remaining < 0
+    if remaining < 0 or snapshot.status == TASK_STATUS_OVERDUE:
+        return ReminderDecision(False, "past_due", snapshot, (), remaining, activity.distracted_for_sec)
     urgent = 0 <= remaining <= config.urgent_window_sec
     relevant_soon = 0 <= remaining <= config.future_horizon_sec
-    if overdue or urgent or (distracted_long_enough and relevant_soon):
-        reason = "overdue" if overdue else ("urgent" if urgent else "distracted")
+    if urgent or (distracted_long_enough and relevant_soon):
+        reason = "urgent" if urgent else "distracted"
         return ReminderDecision(True, reason, snapshot, (), remaining, activity.distracted_for_sec)
     if remaining > config.future_horizon_sec:
         return ReminderDecision(False, "future", snapshot, (), remaining, activity.distracted_for_sec)

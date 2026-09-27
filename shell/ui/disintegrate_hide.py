@@ -233,6 +233,10 @@ def disintegrate_hide(window: Gtk.Window) -> bool:
     """
     if not _eligible(window) or not window.get_visible():
         return False
+    from .. import config as shell_config
+
+    if not shell_config.DISINTEGRATE_CLOSE_ENABLED:
+        return False
     if not _DISINTEGRATE_SCRIPT.is_file():
         return False
 

@@ -114,6 +114,10 @@ def _now() -> datetime:
     return datetime(2026, 9, 5, 21, 30, 0)
 
 
+def _urgent_now() -> datetime:
+    return datetime(2026, 9, 5, 22, 30, 0)
+
+
 def _activity(*, distracted: bool = False, seconds: float = 0.0) -> ActivitySnapshot:
     return ActivitySnapshot(
         distracted=distracted,
@@ -167,12 +171,15 @@ class FakeGenerator:
         self.closed = True
 
 
-def test_overdue_task_is_eligible() -> None:
+def test_overdue_task_is_not_reminded() -> None:
     now = _now()
     snapshot = _snapshot(status="overdue", due_date="2026-09-01", period_key="2026-09-01")
-    decision = choose_reminder((snapshot,), ReminderState(), _activity(), now=now, config=_config())
-    assert decision.should_notify
-    assert decision.reason == "overdue"
+    state = ReminderState()
+    state.mark_notified(snapshot.id, snapshot.period_key, now.timestamp(), message="viejo")
+    decision = choose_reminder((snapshot,), state, _activity(), now=now, config=_config())
+    assert not decision.should_notify
+    assert decision.reason == "past_due"
+    assert snapshot.id not in state._items
 
 
 def test_task_due_within_urgent_window() -> None:
@@ -209,9 +216,9 @@ def test_distraction_raises_relevance_inside_horizon() -> None:
 
 
 def test_cooldown_blocks_repeat_spam() -> None:
-    snapshot = _snapshot(status="overdue", due_date="2026-09-01", period_key="2026-09-01")
+    snapshot = _snapshot(status="pending", due_date="2026-09-05", period_key="2026-09-05")
     state = ReminderState()
-    now = _now()
+    now = datetime(2026, 9, 5, 22, 30, 0)
     first = choose_reminder((snapshot,), state, _activity(), now=now, config=_config())
     assert first.should_notify
     state.mark_notified(snapshot.id, snapshot.period_key, now.timestamp())
@@ -221,9 +228,9 @@ def test_cooldown_blocks_repeat_spam() -> None:
 
 
 def test_snooze_is_respected() -> None:
-    snapshot = _snapshot(status="overdue", due_date="2026-09-01", period_key="2026-09-01")
+    snapshot = _snapshot(status="pending", due_date="2026-09-05", period_key="2026-09-05")
     state = ReminderState()
-    now = _now()
+    now = datetime(2026, 9, 5, 22, 30, 0)
     state.snooze(snapshot.id, now.timestamp() + 15 * 60)
     decision = choose_reminder((snapshot,), state, _activity(), now=now, config=_config())
     assert not decision.should_notify
@@ -518,9 +525,9 @@ def test_watcher_uses_fallback_when_ai_is_not_viable(tmp_path: Path) -> None:
             TaskRecord(
                 id="bill",
                 title="Pagar luz",
-                due_date="2026-09-01",
+                due_date="2026-09-05",
                 created_at="2026-08-20T10:00:00",
-                period_cursor="2026-09-01",
+                period_cursor="2026-09-05",
             ),
         ),
     )
@@ -534,7 +541,7 @@ def test_watcher_uses_fallback_when_ai_is_not_viable(tmp_path: Path) -> None:
         ),
         notifier=notifier,
         generator=generator,
-        clock=_now,
+        clock=_urgent_now,
         state=ReminderState(),
     )
     watcher._context.observe(None)
@@ -554,9 +561,9 @@ def test_watcher_uses_ai_when_resources_allow(tmp_path: Path) -> None:
             TaskRecord(
                 id="bill",
                 title="Pagar luz",
-                due_date="2026-09-01",
+                due_date="2026-09-05",
                 created_at="2026-08-20T10:00:00",
-                period_cursor="2026-09-01",
+                period_cursor="2026-09-05",
             ),
         ),
     )
@@ -576,7 +583,7 @@ def test_watcher_uses_ai_when_resources_allow(tmp_path: Path) -> None:
         ),
         notifier=notifier,
         generator=generator,
-        clock=_now,
+        clock=_urgent_now,
         state=ReminderState(),
     )
     watcher._tick()
@@ -589,26 +596,29 @@ def test_watcher_uses_ai_when_resources_allow(tmp_path: Path) -> None:
 def test_watcher_done_and_snooze_actions(tmp_path: Path) -> None:
     path = tmp_path / "tasks.json"
     today = datetime.now().date()
-    due = today - timedelta(days=2)
     save_tasks(
         path,
         (
             TaskRecord(
                 id="bill",
                 title="Pagar luz",
-                due_date=due.isoformat(),
-                created_at=due.isoformat() + "T08:00:00",
-                period_cursor=due.isoformat(),
+                due_date=today.isoformat(),
+                created_at=today.isoformat() + "T08:00:00",
+                period_cursor=today.isoformat(),
             ),
         ),
     )
     notifier = RecordingNotifier()
+
+    def clock() -> datetime:
+        return datetime.combine(today, datetime.min.time().replace(hour=22, minute=30))
+
     watcher = TaskWatcher(
         config=_config(ai_enabled=False),
         provider=LocalTaskProvider(path),
         notifier=notifier,
         generator=FakeGenerator(),
-        clock=datetime.now,
+        clock=clock,
         state=ReminderState(),
     )
     watcher._tick()
@@ -619,7 +629,7 @@ def test_watcher_done_and_snooze_actions(tmp_path: Path) -> None:
     assert not decision.should_notify
     watcher._on_notification_action(notification_id, ACTION_DONE)
     records = watcher._provider.records()
-    assert due.isoformat() in records[0].completed_periods
+    assert today.isoformat() in records[0].completed_periods
 
 
 def test_fallback_phrases_vary() -> None:
@@ -664,9 +674,9 @@ def test_watcher_emits_reminder_instead_of_heartbeat(tmp_path: Path) -> None:
             TaskRecord(
                 id="bill",
                 title="Pagar luz",
-                due_date="2026-09-01",
+                due_date="2026-09-05",
                 created_at="2026-08-20T10:00:00",
-                period_cursor="2026-09-01",
+                period_cursor="2026-09-05",
             ),
         ),
     )
@@ -678,7 +688,7 @@ def test_watcher_emits_reminder_instead_of_heartbeat(tmp_path: Path) -> None:
         provider=LocalTaskProvider(path),
         notifier=notifier,
         generator=FakeGenerator(),
-        clock=_now,
+        clock=_urgent_now,
         state=ReminderState(),
     )
     watcher._event_bus.subscribe(TASK_WATCHER_HEARTBEAT, heartbeats.append)
@@ -699,9 +709,9 @@ def test_watcher_emits_ai_reminder_kind(tmp_path: Path) -> None:
             TaskRecord(
                 id="bill",
                 title="Pagar luz",
-                due_date="2026-09-01",
+                due_date="2026-09-05",
                 created_at="2026-08-20T10:00:00",
-                period_cursor="2026-09-01",
+                period_cursor="2026-09-05",
             ),
         ),
     )
@@ -721,7 +731,7 @@ def test_watcher_emits_ai_reminder_kind(tmp_path: Path) -> None:
         ),
         notifier=notifier,
         generator=FakeGenerator("Ey, acuérdate de pagar la luz 👀"),
-        clock=_now,
+        clock=_urgent_now,
         state=ReminderState(),
     )
     watcher._event_bus.subscribe(TASK_WATCHER_AI_REMINDER, kinds.append)
@@ -919,16 +929,16 @@ def test_watcher_emits_multiple_ai_messages(tmp_path: Path) -> None:
             TaskRecord(
                 id="bill",
                 title="Pagar luz",
-                due_date="2026-09-01",
+                due_date="2026-09-05",
                 created_at="2026-08-20T10:00:00",
-                period_cursor="2026-09-01",
+                period_cursor="2026-09-05",
             ),
             TaskRecord(
                 id="report",
                 title="Terminar informe",
-                due_date="2026-09-01",
+                due_date="2026-09-05",
                 created_at="2026-08-20T10:00:00",
-                period_cursor="2026-09-01",
+                period_cursor="2026-09-05",
             ),
         ),
     )
@@ -951,7 +961,7 @@ def test_watcher_emits_multiple_ai_messages(tmp_path: Path) -> None:
         ),
         notifier=notifier,
         generator=generator,
-        clock=_now,
+        clock=_urgent_now,
         state=state,
     )
     watcher._on_tick()
@@ -963,20 +973,20 @@ def test_watcher_emits_multiple_ai_messages(tmp_path: Path) -> None:
 
 
 def test_choose_reminder_returns_multiple_candidates() -> None:
-    now = _now()
+    now = _urgent_now()
     first = _snapshot(
         ident="a",
-        title="Vencida A",
-        status="overdue",
-        due_date="2026-09-01",
-        period_key="2026-09-01",
+        title="Pendiente A",
+        status="pending",
+        due_date="2026-09-05",
+        period_key="2026-09-05",
     )
     second = _snapshot(
         ident="b",
-        title="Vencida B",
-        status="overdue",
-        due_date="2026-09-02",
-        period_key="2026-09-02",
+        title="Pendiente B",
+        status="pending",
+        due_date="2026-09-05",
+        period_key="2026-09-05",
     )
     decision = choose_reminder(
         (first, second),
@@ -987,6 +997,58 @@ def test_choose_reminder_returns_multiple_candidates() -> None:
     )
     assert decision.should_notify
     assert len(decision.candidates) == 2
+
+
+def test_ai_messages_about_foreign_tasks_are_dropped() -> None:
+    from shell.servicios.tareas.vigilancia.ia import (
+        attribute_messages_to_tasks,
+        filter_reminder_messages_to_candidates,
+    )
+    from shell.servicios.tareas.vigilancia.politica import ReminderDecision
+
+    live = _snapshot(
+        ident="daily",
+        title="Dejar de proyectarse",
+        status="pending",
+        due_date=None,
+        period_key="2026-09-05",
+        repeat=TASK_REPEAT_DAILY,
+    )
+    messages = [
+        "No menciono más Dejar de proyectarse por hoy.",
+        "Parece que no has avanzado en el proyecto 1.",
+        "Ajusta tu horario: el parcial móvil no se estudia la noche anterior.",
+    ]
+    kept = filter_reminder_messages_to_candidates(messages, (live,))
+    assert kept == [messages[0]]
+    decision = ReminderDecision(True, "urgent", live, (live,), 100.0, 0.0)
+    attributed = attribute_messages_to_tasks(messages, decision)
+    assert attributed == {"daily": messages[0]}
+
+
+def test_polluted_last_message_is_omitted_from_prompt() -> None:
+    from shell.servicios.tareas.vigilancia.ia import build_reminder_prompt
+    from shell.servicios.tareas.vigilancia.politica import ReminderDecision
+
+    snapshot = _snapshot(
+        ident="daily",
+        title="Dejar de proyectarse",
+        status="pending",
+        due_date=None,
+        period_key="2026-09-05",
+        repeat=TASK_REPEAT_DAILY,
+    )
+    state = ReminderState()
+    state.mark_notified(
+        snapshot.id,
+        snapshot.period_key,
+        datetime.now().timestamp(),
+        message="Ajusta tu horario si es posible, el parcial móvil no se estudia la noche anterior.",
+    )
+    decision = ReminderDecision(True, "urgent", snapshot, (snapshot,), 100.0, 0.0)
+    prompt = build_reminder_prompt(decision, _activity(), now=_urgent_now(), state=state)
+    assert "parcial" not in prompt.casefold()
+    assert "último_mensaje:" not in prompt
 
 
 if __name__ == "__main__":

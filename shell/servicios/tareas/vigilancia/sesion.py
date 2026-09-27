@@ -77,6 +77,35 @@ def ensure_task_watcher_service(
     return "started"
 
 
+def stop_task_watcher_service(
+    *,
+    runner: CommandRunner | None = None,
+    unit_path: Path | None = None,
+) -> str:
+    """Disable and stop the watcher unit. Safe if the unit is already inactive."""
+    path = unit_path if unit_path is not None else task_watcher_service_path()
+    if not path.is_file():
+        return "missing"
+    command = ["systemctl", "--user", "disable", "--now", TASK_WATCHER_UNIT]
+    run = runner or subprocess.run
+    try:
+        result = run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        print(f"Task watcher: systemd stop failed: {error}")
+        return "failed"
+    if getattr(result, "returncode", 1) != 0:
+        stderr = getattr(result, "stderr", "") or ""
+        print(f"Task watcher: systemd stop failed: {stderr.strip() or 'nonzero exit'}")
+        return "failed"
+    return "stopped"
+
+
 def enable_task_watcher_service(*, runner: CommandRunner | None = None) -> None:
     run = runner or subprocess.run
     try:

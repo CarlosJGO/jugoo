@@ -39,31 +39,36 @@ _REMINDER_SYSTEM_PROMPT = (
     "DATOS QUE RECIBES:\n"
     "- Fecha y hora actual.\n"
     "- Lista de tareas relevantes ahora (título, notas, vencimiento, prioridad, "
-    "categoría).\n"
+    "categoría). Solo esas existen para este turno.\n"
     "- Para cada tarea: cuántas veces ya la mencionaste hoy y cuál fue tu "
     "último mensaje sobre ella (si aplica).\n"
     "- Ventana(s) activa(s) del usuario, si están disponibles.\n"
     "\n"
     "REGLAS DE CONTENIDO (no negociables):\n"
-    "1. Habla solo de datos presentes en el contexto. Nunca inventes cómo fue "
-    "el día del usuario, su ánimo, o acciones que no están en los datos.\n"
-    "2. Nunca digas que una tarea se empezó, terminó o se ignoró sin evidencia "
+    "1. Habla SOLO de tareas listadas en \"Tareas relevantes\". Prohibido "
+    "mencionar, inventar o reutilizar temas de tareas hechas, vencidas o "
+    "ausentes de esa lista.\n"
+    "2. Nunca inventes cómo fue el día del usuario, su ánimo, o acciones que "
+    "no están en los datos.\n"
+    "3. Nunca digas que una tarea se empezó, terminó o se ignoró sin evidencia "
     "explícita en los datos.\n"
-    "3. No conviertas tareas recurrentes en órdenes nuevas.\n"
-    "4. Nunca digas que eres una IA.\n"
+    "4. No conviertas tareas recurrentes en órdenes nuevas.\n"
+    "5. Nunca digas que eres una IA.\n"
+    "6. Los ejemplos de tono son FICTICIOS: no copies sus temas ni frases si "
+    "esas tareas no aparecen en \"Tareas relevantes\".\n"
     "\n"
     "REGLAS DE ENFOQUE:\n"
-    "5. No enumeres todas las tareas pendientes cada vez. Elige la(s) más "
-    "relevante(s) ahora mismo (vencida > por vencer pronto > alta prioridad "
-    "> lleva tiempo sin tocarse). Solo lista todas si es explícitamente el "
-    "resumen del día.\n"
-    "6. Si una tarea tiene \"último_mensaje\" registrado, NO repitas la misma "
+    "7. No enumeres todas las tareas pendientes cada vez. Elige la(s) más "
+    "relevante(s) ahora mismo (por vencer pronto > alta prioridad > lleva "
+    "tiempo sin tocarse). Solo lista todas si es explícitamente el resumen "
+    "del día.\n"
+    "8. Si una tarea tiene \"último_mensaje\" registrado, NO repitas la misma "
     "estructura ni las mismas palabras. Cambia de ángulo: opina sobre el "
     "contenido, haz una pregunta retórica, comenta sobre las notas, o si de "
     "plano no hay nada nuevo que aportar, omite esa tarea.\n"
-    f"7. Si una tarea lleva {HIGH_MENTION_THRESHOLD} o más menciones hoy, cambia de "
+    f"9. Si una tarea lleva {HIGH_MENTION_THRESHOLD} o más menciones hoy, cambia de "
     "táctica obligatoriamente o no la menciones en este turno.\n"
-    "8. Puedes opinar con criterio sobre una tarea (si suena difícil, urgente, "
+    "10. Puedes opinar con criterio sobre una tarea (si suena difícil, urgente, "
     "rara, tediosa, mal planeada) usando su título y notas — no te limites "
     "a repetirla tal cual.\n"
     "\n"
@@ -74,16 +79,14 @@ _REMINDER_SYSTEM_PROMPT = (
     "- Separa cada mensaje con una línea que contenga únicamente: ---\n"
     "- Cada mensaje: 1 frase, máximo ~20 palabras. Nada de listas ni viñetas "
     "dentro de un mensaje.\n"
+    "- Cada mensaje debe mencionar claramente al menos una tarea de la lista "
+    "(por título o una palabra clave inequívoca del título).\n"
     "- No agregues comillas, explicaciones, ni texto fuera de los mensajes.\n"
     "\n"
-    "EJEMPLOS DE TONO (ajusta vocabulario, no estructura):\n"
-    "- \"Ojo, lo del CRUD para el parcial móvil no se estudia la noche "
-    "anterior — ya deberías ir armando el esqueleto.\"\n"
-    "- \"Sigue pendiente deshacerte del cadáver. Espero que sepas lo que "
-    "haces con eso.\"\n"
-    "- \"El proyecto 1 vence el 17 y las notas siguen diciendo 'hay que "
-    "hacerlo' — o sea, cero avance todavía.\"\n"
-    "- \"Aja, limpiar la PC con pistola y cepillo sigue ahí. Cuando sea.\""
+    "EJEMPLOS DE TONO (ficticios; solo el estilo):\n"
+    "- \"Ojo, sacar la basura no se hace solo — ya huele raro en la cocina.\"\n"
+    "- \"Aja, llamar al dentista sigue en pausa. Un correo y listo.\"\n"
+    "- \"Renovar el pasaporte vence pronto y las notas dicen 'sacar citas'.\""
 )
 _BRIEFING_SYSTEM_PROMPT = (
     "Eres el asistente de escritorio de Jugoo.\n"
@@ -211,7 +214,7 @@ def build_reminder_prompt(
 ) -> str:
     when = now if hasattr(now, "strftime") else None
     stamp = when.strftime("%Y-%m-%d %H:%M") if when is not None else str(now)
-    candidates = decision.candidates or ((decision.snapshot,) if decision.snapshot else ())
+    candidates = decision.candidates or ((decision.snapshot,) if decision.snapshot is not None else ())
     lines = [
         f"Ahora: {stamp}",
         f"Ventana activa: {activity.label or 'desktop'}",
@@ -228,7 +231,13 @@ def build_reminder_prompt(
         priority = snapshot.priority_id or "sin prioridad"
         category = snapshot.category_id or "sin categoría"
         mentioned = memory.times_mentioned_today if memory is not None else 0
-        last_message = memory.last_message if memory is not None else ""
+        last_message = ""
+        if memory is not None and memory.last_message:
+            # Drop polluted memory (e.g. hallucinated old tasks attributed here).
+            if message_mentions_snapshot(memory.last_message, snapshot):
+                last_message = memory.last_message
+            else:
+                memory.last_message = ""
         lines.append(f"{index}. id={snapshot.id}")
         lines.append(f"   título: {snapshot.title}")
         if notes:
@@ -242,9 +251,94 @@ def build_reminder_prompt(
         elif mentioned >= HIGH_MENTION_THRESHOLD:
             lines.append("   último_mensaje: (sin texto guardado)")
     lines.append(
-        "Escribe 1 a 3 mensajes cortos en español según las reglas del sistema."
+        "Escribe 1 a 3 mensajes cortos en español según las reglas del sistema. "
+        "Solo sobre las tareas de arriba."
     )
     return "\n".join(lines)
+
+
+_STOPWORDS = frozenset(
+    {
+        "para",
+        "por",
+        "con",
+        "sin",
+        "del",
+        "las",
+        "los",
+        "una",
+        "uno",
+        "unos",
+        "unas",
+        "que",
+        "de",
+        "el",
+        "la",
+        "en",
+        "al",
+        "lo",
+        "se",
+        "su",
+        "sus",
+        "mi",
+        "mis",
+        "tu",
+        "tus",
+        "y",
+        "o",
+        "a",
+        "the",
+        "and",
+        "of",
+        "to",
+        "hacer",
+        "dejar",
+        "tarea",
+        "tareas",
+    }
+)
+
+
+def _title_tokens(title: str) -> list[str]:
+    tokens = [
+        token
+        for token in re.split(r"\W+", (title or "").casefold())
+        if len(token) >= 4 and token not in _STOPWORDS
+    ]
+    return tokens
+
+
+def message_mentions_snapshot(message: str, snapshot) -> bool:
+    """True if ``message`` clearly refers to this task's title."""
+    lowered = (message or "").casefold()
+    title = (getattr(snapshot, "title", None) or "").casefold().strip()
+    if not lowered or not title:
+        return False
+    if title in lowered:
+        return True
+    tokens = _title_tokens(title)
+    if not tokens:
+        # Short titles: require the whole title as a word-ish substring.
+        return title in lowered
+    return any(token in lowered for token in tokens)
+
+
+def message_mentions_any_candidate(message: str, candidates) -> bool:
+    return any(message_mentions_snapshot(message, snapshot) for snapshot in candidates)
+
+
+def filter_reminder_messages_to_candidates(
+    messages: list[str],
+    candidates,
+) -> list[str]:
+    """Keep only AI phrases that clearly refer to a live candidate task."""
+    if not candidates:
+        return []
+    return [
+        message
+        for message in messages
+        if message_mentions_any_candidate(message, candidates)
+    ]
 
 
 def _usable_output_lines(raw: str) -> list[str]:
@@ -317,7 +411,12 @@ def attribute_messages_to_tasks(
     messages: list[str],
     decision: ReminderDecision,
 ) -> dict[str, str]:
-    """Map each task id to the last message that appears to mention it."""
+    """Map each task id to the last message that appears to mention it.
+
+    Messages that do not match any candidate title are ignored — never force
+    attribution onto the primary pick (that polluted último_mensaje with
+    hallucinated old tasks).
+    """
     candidates = list(decision.candidates) if decision.candidates else []
     if decision.snapshot is not None and all(item.id != decision.snapshot.id for item in candidates):
         candidates.insert(0, decision.snapshot)
@@ -325,20 +424,13 @@ def attribute_messages_to_tasks(
         return {}
     attributed: dict[str, str] = {}
     for message in messages:
-        lowered = message.casefold()
         matches = [
             snapshot
             for snapshot in candidates
-            if snapshot.title and snapshot.title.casefold() in lowered
+            if message_mentions_snapshot(message, snapshot)
         ]
-        if not matches and decision.snapshot is not None:
-            matches = [decision.snapshot]
-        elif not matches:
-            matches = [candidates[0]]
         for snapshot in matches:
             attributed[snapshot.id] = message
-    if decision.snapshot is not None and decision.snapshot.id not in attributed and messages:
-        attributed[decision.snapshot.id] = messages[0]
     return attributed
 
 
@@ -738,11 +830,14 @@ def generate_reminder_text(
     )
     if generated:
         messages = parse_reminder_messages(generated)
-        if messages:
-            return messages, "ai"
-        # join_lines path may have flattened delimiters; try the raw stdout.
-        raw = getattr(generator, "last_stdout", None) or generated
-        messages = parse_reminder_messages(raw)
+        if not messages:
+            # join_lines path may have flattened delimiters; try the raw stdout.
+            raw = getattr(generator, "last_stdout", None) or generated
+            messages = parse_reminder_messages(raw)
+        candidates = decision.candidates or (
+            (decision.snapshot,) if decision.snapshot is not None else ()
+        )
+        messages = filter_reminder_messages_to_candidates(messages, candidates)
         if messages:
             return messages, "ai"
     return fallback, "fallback"

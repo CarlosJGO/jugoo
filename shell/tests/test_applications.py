@@ -12,15 +12,19 @@ from shell.models import (
     next_window_to_focus,
     normalize_desktop_id,
     pin_application,
+    promote_pinned_from_overflow,
     send_pinned_to_overflow,
     split_pinned_dock,
+    swap_pinned_applications,
     unpin_application,
     window_matches_application,
     windows_for_application,
 )
 from shell.eventbus import EventBus
 from shell.servicios.aplicaciones.applications import (
+    APP_PIN_PROMOTE_FROM_OVERFLOW_REQUESTED,
     APP_PIN_REORDER_REQUESTED,
+    APP_PIN_SWAP_REQUESTED,
     APPLICATIONS_CHANGED,
     ApplicationsService,
 )
@@ -145,6 +149,26 @@ def test_send_pinned_to_overflow_swaps_first_extra_into_the_bar() -> None:
     assert has_expand is True
     assert send_pinned_to_overflow(ids, "app-11", 9) == ids
     assert send_pinned_to_overflow(ids[:9], "app-3", 9) == ids[:9]
+
+
+def test_swap_pinned_applications_exchanges_bar_and_extras() -> None:
+    ids = ("steam", "discord", "code", "kate", "minecraft")
+    swapped = swap_pinned_applications(ids, "steam", "kate")
+    assert swapped == ("kate", "discord", "code", "steam", "minecraft")
+    assert swap_pinned_applications(ids, "steam", "steam") == ids
+    assert swap_pinned_applications(ids, "missing", "kate") == ids
+
+
+def test_promote_pinned_from_overflow_swaps_last_visible() -> None:
+    ids = tuple(f"app-{index}" for index in range(1, 12))
+    promoted = promote_pinned_from_overflow(ids, "app-11", 9)
+    visible, overflow, has_expand = split_pinned_dock(promoted, 9)
+    assert "app-11" in visible
+    assert visible[-1] == "app-11"
+    assert "app-9" in overflow
+    assert has_expand is True
+    assert promote_pinned_from_overflow(ids, "app-3", 9) == ids
+    assert promote_pinned_from_overflow(ids[:9], "app-3", 9) == ids[:9]
 
 
 def test_window_matching_uses_id_and_wm_class() -> None:
@@ -397,6 +421,59 @@ def test_applications_service_pins_emits_and_launches(tmp_path: Path) -> None:
     assert launched
     assert any("--new-window" in part for part in launched[0])
 
+    service.close()
+
+
+def test_applications_service_swap_and_promote_events(tmp_path: Path) -> None:
+    desktop_dir = tmp_path / "applications"
+    desktop_dir.mkdir()
+    for app_id in ("steam", "discord", "code", "kate", "minecraft"):
+        (desktop_dir / f"{app_id}.desktop").write_text(
+            f"[Desktop Entry]\nType=Application\nName={app_id.title()}\nExec=true\nIcon={app_id}\n",
+            encoding="utf-8",
+        )
+    bus = EventBus()
+    service = ApplicationsService(
+        bus,
+        path=tmp_path / "pinned-apps.json",
+        directories=(desktop_dir,),
+        executor=lambda _command: None,
+    )
+    service.start()
+    for app_id in ("steam", "discord", "code", "kate", "minecraft"):
+        service.pin(app_id)
+    # Force kate/minecraft into extras with a tiny visible limit via direct model ops.
+    from shell.config import PINNED_APPS_VISIBLE_LIMIT
+
+    assert PINNED_APPS_VISIBLE_LIMIT >= 1
+    # With 5 pins and limit 9 they are all visible; swap still exchanges slots.
+    bus.emit(APP_PIN_SWAP_REQUESTED, {"left_id": "steam", "right_id": "kate"})
+    assert service.snapshot.pinned_ids[0] == "kate"
+    assert service.snapshot.pinned_ids[3] == "steam"
+
+    # Promote is a no-op when everything already fits on the bar.
+    before = service.snapshot.pinned_ids
+    bus.emit(APP_PIN_PROMOTE_FROM_OVERFLOW_REQUESTED, "minecraft")
+    assert service.snapshot.pinned_ids == before
+
+    # Pad past the visible limit, then promote the last extra into the last bar slot.
+    padding = []
+    for index in range(PINNED_APPS_VISIBLE_LIMIT):
+        app_id = f"pad-{index}"
+        padding.append(app_id)
+        (desktop_dir / f"{app_id}.desktop").write_text(
+            f"[Desktop Entry]\nType=Application\nName={app_id}\nExec=true\nIcon={app_id}\n",
+            encoding="utf-8",
+        )
+    service.refresh_catalog(force=True)
+    for app_id in padding:
+        service.pin(app_id)
+    assert len(service.snapshot.pinned_ids) > PINNED_APPS_VISIBLE_LIMIT
+    extra = service.snapshot.pinned_ids[-1]
+    last_visible = service.snapshot.pinned_ids[PINNED_APPS_VISIBLE_LIMIT - 1]
+    bus.emit(APP_PIN_PROMOTE_FROM_OVERFLOW_REQUESTED, extra)
+    assert service.snapshot.pinned_ids[PINNED_APPS_VISIBLE_LIMIT - 1] == extra
+    assert last_visible in service.snapshot.pinned_ids[PINNED_APPS_VISIBLE_LIMIT:]
     service.close()
 
 

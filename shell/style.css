@@ -73,6 +73,26 @@ box.shell-module {
     margin: 0 3px;
 }
 
+/* Nested modules inside a group share one capsule — flatten their own surface. */
+box.shell-module-group > box.shell-module {
+    background-color: transparent;
+    border-radius: 0;
+    padding: 0;
+    margin: 0;
+}
+
+box.shell-module-group > box.notifications-widget,
+box.shell-module-group > box.ethernet-widget,
+box.shell-module-group > box.bluetooth-widget,
+box.shell-module-group > box.tasks-widget {
+    padding: 0;
+}
+
+box.shell-module-group > box.clock-widget {
+    padding: 0 2px 0 4px;
+    min-width: 0;
+}
+
 /* Free-floating cat: no capsule, sits on the bar floor next to pinned apps. */
 window#shell box#shell-left > box.keyboard-cat-widget,
 box.keyboard-cat-widget {
@@ -147,7 +167,7 @@ label.shell-text-muted {
 }
 
 eventbox.workspace-block {
-    border-radius: 10px;
+    border-radius: 0;
     padding: 1px;
 }
 
@@ -167,11 +187,12 @@ eventbox.workspace-block.drop-target {
 button.workspace-button {
     background: transparent;
     border: 0;
-    border-radius: 10px;
+    border-radius: 0;
     box-shadow: none;
     min-width: 24px;
     min-height: 24px;
-    padding: 2px 5px;
+    /* No side padding so the mini cava can run edge-to-edge. */
+    padding: 2px 0;
 }
 
 button.workspace-button:hover {
@@ -209,7 +230,7 @@ button.workspace-button.active {
 }
 
 box.application-icons {
-    padding: 0 2px;
+    padding: 0 4px;
 }
 
 box.application-icons image {
@@ -221,7 +242,7 @@ button.workspace-button.special,
 button.workspace-button.ws-accent {
     /* Per-workspace colors come from workspace_accents CSS provider.
        Keep a soft fallback only when no accent class resolved yet. */
-    border-radius: 8px;
+    border-radius: 0;
 }
 
 button.workspace-button.special:not(.ws-accent) {
@@ -247,7 +268,7 @@ label.workspace-overflow {
 
 eventbox.workspace-application-icon.focused {
     background-color: @shell_hover_bg;
-    border-radius: 8px;
+    border-radius: 0;
     padding: 1px;
 }
 
@@ -256,34 +277,7 @@ eventbox.workspace-application-icon.focused image {
     min-height: 21px;
 }
 
-/* Audio status indicators on workspace buttons */
-button.workspace-button.audio-has-stream {
-    background-image: linear-gradient(
-        to top,
-        alpha(@shell_accent, 0.55) 0,
-        alpha(@shell_accent, 0.55) 3px,
-        transparent 3px
-    );
-}
-
-button.workspace-button.audio-playing {
-    background-image: linear-gradient(
-        to top,
-        @shell_accent 0,
-        @shell_accent 3px,
-        transparent 3px
-    );
-}
-
-button.workspace-button.audio-muted {
-    background-image: linear-gradient(
-        to top,
-        @shell_danger 0,
-        @shell_danger 3px,
-        transparent 3px
-    );
-}
-
+/* Audio status: mini cava lives in the widget; keep soft active tint only. */
 button.workspace-button.active.audio-has-stream,
 button.workspace-button.active.audio-playing {
     background-color: @shell_accent_soft;
@@ -497,13 +491,33 @@ window#shell-pinned-overflow {
     background-color: transparent;
 }
 
-flowbox.pinned-apps-overflow-content {
+box.pinned-apps-overflow-content {
     background-color: @shell_bar_bg;
     border: 1px solid @shell_bar_border;
-    /* Square — Hyprland owns window rounding. */
     border-radius: 0;
-    padding: 6px 8px;
+    padding: 6px 8px 4px;
     box-shadow: 0 6px 16px @shell_shadow;
+}
+
+label.pinned-apps-overflow-title {
+    color: @shell_text_muted;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    padding: 0 2px 0;
+}
+
+scrolledwindow.pinned-apps-overflow-scroll {
+    background: transparent;
+    border: none;
+    min-height: 0;
+}
+
+flowbox.pinned-apps-overflow-grid {
+    background: transparent;
+    border: none;
+    padding: 0;
+    min-height: 0;
 }
 
 /* ==========================================================================
@@ -861,11 +875,60 @@ button.launcher-favorite-button.favorited {
 }
 
 menu.shell-app-menu,
-popover.shell-app-menu {
+popover.shell-app-menu,
+box.shell-app-menu {
+    background-color: transparent;
+    border: 0;
+    padding: 4px;
+}
+
+window#shell-app-menu-window {
+    background-color: transparent;
+}
+
+box.shell-app-menu-panel {
     background-color: @shell_surface_bg_panel;
     border: 1px solid @shell_border_strong;
     border-radius: 10px;
     padding: 6px;
+    min-width: 200px;
+    box-shadow: 0 8px 20px @shell_shadow;
+}
+
+scrolledwindow.shell-app-menu-scroll {
+    background: transparent;
+    border: none;
+}
+
+label.shell-app-menu-header {
+    opacity: 0.7;
+    padding: 6px 10px 2px;
+    color: @shell_text_muted;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+menuitem.shell-app-menu-header {
+    opacity: 0.7;
+    padding: 4px 10px 2px;
+}
+
+menuitem.shell-app-menu-header label {
+    color: @shell_text_muted;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+menuitem.shell-app-menu-target,
+button.shell-app-menu-target {
+    border-radius: 8px;
+    padding: 4px 8px;
+}
+
+menuitem.shell-app-menu-target:hover {
+    background-color: @shell_hover_bg_soft;
 }
 
 eventbox.launcher-menu-catcher {
