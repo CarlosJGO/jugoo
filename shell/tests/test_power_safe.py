@@ -191,6 +191,21 @@ def verify_power_widget_reads_menu_confirmation_state() -> None:
     assert widget.get_needs_confirmation("lock") is False
 
 
+def verify_power_confirmation_executes_action_once() -> None:
+    import shell.widgets.barra.power as power_widget
+
+    widget = power_widget.PowerWidget.__new__(power_widget.PowerWidget)
+    executed: list[str] = []
+    closed: list[bool] = []
+    widget._execute_action = executed.append
+    widget.close_menu = lambda: closed.append(True)
+
+    widget._on_menu_action_selected("confirm:reboot")
+
+    assert executed == ["reboot"]
+    assert closed == [True]
+
+
 if __name__ == "__main__":
     verify_power_service_dry_run()
     verify_mock_executor()
@@ -203,4 +218,5 @@ if __name__ == "__main__":
     verify_logout_prefers_session_id(None)
     verify_power_menu_imports()
     verify_power_widget_reads_menu_confirmation_state()
+    verify_power_confirmation_executes_action_once()
     print("power verification OK (no destructive actions executed)")

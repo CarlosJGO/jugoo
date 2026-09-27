@@ -23,7 +23,13 @@ from ...servicios.energia.power import (
     ACTION_SUSPEND,
     PowerService,
 )
-from ...popup_handle import PopupHandle, PopupOutsideDismiss, pointer_inside_widget, present_popup, hide_popup
+from ...popup_handle import (
+    PopupHandle,
+    PopupOutsideDismiss,
+    pointer_inside_widget,
+    present_popup,
+    hide_popup,
+)
 from ...popup_spawn import publish_popup_spawn
 from ...ui.starfield import install_starfield, resolve_event_bus
 from ...ui import ShellModule
@@ -89,7 +95,6 @@ class PowerMenu(Gtk.Window):
             self._box,
             resolve_event_bus(shell_window),
         )
-        self.add(self._box)
         self._render_menu_entries()
 
     def _render_menu_entries(self) -> None:
@@ -128,7 +133,7 @@ class PowerMenu(Gtk.Window):
         confirm_btn.get_style_context().add_class(
             "power-confirm-action-destructive" if action in (ACTION_LOGOUT, ACTION_REBOOT, ACTION_SHUTDOWN) else ""
         )
-        confirm_btn.connect("clicked", lambda *_args: self._on_action_selected(action))
+        confirm_btn.connect("clicked", lambda *_args: self._on_action_selected(f"confirm:{action}"))
         actions.pack_start(confirm_btn, False, False, 0)
 
         self._box.pack_start(actions, False, False, 0)
@@ -212,7 +217,6 @@ class PowerWidget(ShellModule):
         self._power_service = power_service
         self._shell_window = shell_window
         self._event_bus = event_bus
-        self._shell_press_bound = False
         self._pending_action: str | None = None
 
         self._button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
@@ -225,9 +229,11 @@ class PowerWidget(ShellModule):
         icon.set_pixel_size(POWER_ICON_SIZE)
         self._button.add(icon)
         self._button.connect("button-press-event", self._on_button_press)
+        self._button.connect("clicked", self._on_button_clicked)
         self.pack_start(self._button, False, False, 0)
 
         self._menu = PopupHandle(self._create_menu)
+        self._outside_click = PopupOutsideDismiss()
 
     def get_anchor_button(self) -> Gtk.Widget:
         return self._button
@@ -235,28 +241,28 @@ class PowerWidget(ShellModule):
     def _create_menu(self) -> PowerMenu:
         return PowerMenu(self._shell_window, self._on_menu_action_selected)
 
-    def _ensure_shell_press_handler(self) -> None:
-        if self._shell_press_bound:
-            return
-        self._shell_window.connect("button-press-event", self._on_shell_button_press)
-        self._shell_press_bound = True
-
     def _on_button_press(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
         if event.button == 3:
             self._event_bus.emit(POWER_CONTROL_CENTER_REQUESTED, self._button)
             return True
-        if event.button == 1:
-            self._toggle_power_menu()
-            return True
         return False
+
+    def _on_button_clicked(self, *_args) -> None:
+        self._toggle_power_menu()
 
     def _toggle_power_menu(self) -> None:
         if self._menu.is_visible():
             self.close_menu()
             return
-        self._ensure_shell_press_handler()
         menu = self._menu.get()
         menu.open_for(self._button)
+        self._outside_click.install(
+            menu,
+            self._shell_window,
+            (self._button,),
+            self.close_menu,
+            self._event_bus,
+        )
         # Mark destructive actions as needing confirmation
         for action, label, icon_name, destructive in POWER_MENU_ENTRIES:
             if destructive:
@@ -275,6 +281,10 @@ class PowerWidget(ShellModule):
             menu = self._menu.maybe
             if menu is not None:
                 menu.set_default_action_state()
+            return
+        if action.startswith("confirm:"):
+            self._execute_action(action.removeprefix("confirm:"))
+            self.close_menu()
             return
         if self.get_needs_confirmation(action):
             # Show inline confirmation by replacing menu content
@@ -337,28 +347,11 @@ class PowerWidget(ShellModule):
         return False
 
     def close_menu(self) -> None:
+        self._outside_click.uninstall()
         menu = self._menu.maybe
         if menu is not None:
             menu.close_menu()
         self._pending_action = None
-
-    def _on_shell_button_press(self, _window: Gtk.Widget, event: Gdk.EventButton) -> bool:
-        if event.button not in (1, 3):
-            return False
-
-        # Inline confirmation is handled within the menu itself, no separate window to check
-        if not self._menu.is_visible():
-            return False
-
-        menu = self._menu.maybe
-        if menu is None:
-            return False
-
-        if pointer_inside_widget(self._button) or menu.pointer_is_inside():
-            return False
-
-        self.close_menu()
-        return False
 
 
 def _pointer_inside_widget(widget: Gtk.Widget) -> bool:
