@@ -45,6 +45,10 @@ class PickerOverlay(Gtk.Window):
         self._closing = False
         self._opening = False
         self._present_generation = 0
+        # Gtk.Widget.hide() on the toplevel preserves child visibility.  After
+        # the initial map, recursing through the complete result tree with
+        # show_all() again is needless work on every picker opening.
+        self._contents_shown = False
         self._layout = layout
         self._focus_search_on_open = True
         self._card_height_request = card_height
@@ -460,11 +464,15 @@ class PickerOverlay(Gtk.Window):
         # Stay opaque: opacity 0→1 on a fullscreen layer was the black flash.
         self.set_opacity(1.0)
         self._door.apply(0.0)
-        self.show_all()
+        initial_show = not self._contents_shown
+        if not initial_show:
+            self.show()
+        else:
+            self.show_all()
+            self._contents_shown = True
         self.present()
-        # GTK3 show_all() unhides every Stack child and widgets previously hide()'d
-        # without set_no_show_all — subclasses must reassert mode chrome.
-        self.on_after_show_all()
+        if initial_show:
+            self.on_after_show_all()
 
         if reversing:
             self._door.capture_full_size()
@@ -475,26 +483,12 @@ class PickerOverlay(Gtk.Window):
             self._door.open(from_progress=start, on_complete=self._on_door_open_complete)
             return
 
-        # Wait for allocate/realize before measuring — first map used to get 1×1.
-        GLib.idle_add(self._begin_door_open, generation)
-
-    def _begin_door_open(self, generation: int) -> bool:
-        if generation != self._present_generation or self._closing:
-            return False
-        self._door.capture_full_size()
-        if not self._door.size_ready():
-            # Content not laid out yet; try once more on the next idle.
-            GLib.idle_add(self._begin_door_open_retry, generation)
-            return False
-        self._start_measured_open(generation)
-        return False
-
-    def _begin_door_open_retry(self, generation: int) -> bool:
-        if generation != self._present_generation or self._closing:
-            return False
+        # The visible tree now contains the final results, so refresh its
+        # natural card size before the first frame. This is essential for the
+        # horizontal Emoji door, whose width can exceed its initial seed. Keep
+        # the measurement synchronous to avoid an idle delay before animation.
         self._door.capture_full_size()
         self._start_measured_open(generation)
-        return False
 
     def _start_measured_open(self, generation: int) -> None:
         if generation != self._present_generation or self._closing:

@@ -175,6 +175,8 @@ class ClipboardPickerWindow(PickerOverlay):
         self._detail_entry_id: str | None = None
         self._detail_query: str = ""
         self._hit_tag: Gtk.TextTag | None = None
+        self._rows_need_rebuild = True
+        self._rendered_query: str | None = None
 
         body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         body.get_style_context().add_class("clipboard-split")
@@ -281,16 +283,22 @@ class ClipboardPickerWindow(PickerOverlay):
         self._show_detail(None)
 
     def set_entries(self, entries: tuple[ClipboardEntry, ...]) -> None:
+        self._rows_need_rebuild = self._rows_need_rebuild or entries != self._entries
         self._entries = entries
         if self.get_visible():
             self._rebuild_rows(keep_selection=True)
 
     def on_prepare_open(self) -> None:
-        self._entries = self._on_refresh()
+        entries = self._on_refresh()
+        self._rows_need_rebuild = self._rows_need_rebuild or entries != self._entries
+        self._entries = entries
         self._detail_entry_id = None
         self._detail_query = ""
 
     def on_query_changed(self, query: str) -> None:
+        if not self._rows_need_rebuild and query == self._rendered_query:
+            self._restore_rows()
+            return
         self._rebuild_rows()
 
     def on_activate(self) -> None:
@@ -325,6 +333,8 @@ class ClipboardPickerWindow(PickerOverlay):
             self._list.add(row)
             rows.append(row)
         self._rows = tuple(rows)
+        self._rendered_query = query
+        self._rows_need_rebuild = False
         self._list.show_all()
         self.session.set_items(len(rows), reset_selection=not keep_selection)
 
@@ -342,6 +352,21 @@ class ClipboardPickerWindow(PickerOverlay):
             self._list.hide()
             self.set_empty_visible(True)
             self._show_detail(None)
+
+    def _restore_rows(self) -> None:
+        """Reuse unchanged GTK rows when reopening the same history query."""
+        rows = self._rows
+        self.session.set_items(len(rows), reset_selection=True)
+        if not rows:
+            self._list.hide()
+            self.set_empty_visible(True)
+            self._show_detail(None)
+            return
+        self.set_empty_visible(False)
+        self._list.show()
+        chosen = rows[self.session.selected_index]
+        self._list.select_row(chosen)
+        self._show_detail(chosen.entry)
 
     def _show_detail(self, entry: ClipboardEntry | None) -> None:
         query = self._search.get_text()
