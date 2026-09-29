@@ -24,6 +24,7 @@ from ...config import (
 from ...eventbus import EventBus
 from ...identity import TITLE_APP_LAUNCHER
 from ...models import ApplicationsSnapshot, DesktopApplication, filter_applications
+from ...servicios.aplicaciones.inspection import inspect_application
 from ...servicios.sistema.system import SystemStatsService
 from ...settings.manager import SettingsManager
 from ...settings.schema import CategoryId
@@ -31,7 +32,11 @@ from ..configuraciones.pane import SEARCH_DESTINATION, Destination, build_settin
 from ..pickers.overlay import PickerOverlay
 from ..pickers.session import PickerSession
 from .user_pane import UserPane
-from .context_menu import fill_application_menu
+from .launcher_context_menu import (
+    LauncherContextPopover,
+    PopoverPageEntry,
+    build_application_info,
+)
 
 
 class LauncherAppRow(Gtk.ListBoxRow):
@@ -47,6 +52,7 @@ class LauncherAppRow(Gtk.ListBoxRow):
         on_new_instance: Callable[[str], None],
         on_favorite_toggle: Callable[[str], None],
         on_pin_toggle: Callable[[str], None],
+        on_show_information: Callable[[DesktopApplication], Gtk.Widget],
         on_context_menu: Callable[["LauncherAppRow"], None],
     ) -> None:
         super().__init__()
@@ -57,6 +63,7 @@ class LauncherAppRow(Gtk.ListBoxRow):
         self._on_new_instance = on_new_instance
         self._on_favorite_toggle = on_favorite_toggle
         self._on_pin_toggle = on_pin_toggle
+        self._on_show_information = on_show_information
         self._on_context_menu = on_context_menu
         self.get_style_context().add_class("launcher-row")
         if favorite:
@@ -137,6 +144,11 @@ class LauncherAppRow(Gtk.ListBoxRow):
             None,
             (favorite_label, lambda: self._on_favorite_toggle(self.application.id)),
             (pin_label, lambda: self._on_pin_toggle(self.application.id)),
+            None,
+            PopoverPageEntry(
+                "Información de la aplicación",
+                lambda: self._on_show_information(self.application),
+            ),
         )
 
 
@@ -226,26 +238,10 @@ class AppLauncherWindow(PickerOverlay):
         self._center_stack.set_transition_duration(100)
         self._center_stack.add_named(self._list_overlay, "launcher")
         self._center_stack.add_named(self._settings_scroll, "settings")
+
         self.content_box.pack_start(self._center_stack, True, True, 0)
 
-        self._menu_catcher = Gtk.EventBox()
-        self._menu_catcher.get_style_context().add_class("launcher-menu-catcher")
-        self._menu_catcher.set_halign(Gtk.Align.FILL)
-        self._menu_catcher.set_valign(Gtk.Align.FILL)
-        self._menu_catcher.set_hexpand(True)
-        self._menu_catcher.set_vexpand(True)
-        self._menu_catcher.set_no_show_all(True)
-        self._menu_catcher.connect("button-press-event", self._on_menu_catcher_press)
-        self._list_overlay.add_overlay(self._menu_catcher)
-        self._menu_catcher.hide()
-
-        self._action_menu = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        self._action_menu.get_style_context().add_class("launcher-action-menu")
-        self._action_menu.set_halign(Gtk.Align.END)
-        self._action_menu.set_valign(Gtk.Align.START)
-        self._action_menu.set_no_show_all(True)
-        self._list_overlay.add_overlay(self._action_menu)
-        self._action_menu.hide()
+        self._context_popup: LauncherContextPopover | None = None
 
         self._search.connect("focus-in-event", self._on_search_focus)
 
@@ -391,55 +387,25 @@ class AppLauncherWindow(PickerOverlay):
         return False
 
     def _dismiss_action_menu(self) -> None:
-        self._menu_catcher.hide()
-        self._menu_catcher.set_no_show_all(True)
-        self._action_menu.hide()
-        self._action_menu.set_no_show_all(True)
-        for child in list(self._action_menu.get_children()):
-            self._action_menu.remove(child)
+        popup = self._context_popup
+        self._context_popup = None
+        if popup is not None:
+            popup.popdown()
 
     def _show_row_menu(self, row: LauncherAppRow) -> None:
         self._list.select_row(row)
-        self._menu_catcher.set_no_show_all(False)
-        self._menu_catcher.show()
-        self._action_menu.set_no_show_all(False)
-        fill_application_menu(self._action_menu, row.menu_entries(), self._on_action_picked)
-        translated = row.translate_coordinates(self._list_overlay, 0, 0)
-        y = 0
-        if translated:
-            if len(translated) == 3:
-                _ok, _x, y = translated
-            else:
-                _x, y = translated
-        _min_h, menu_h = self._action_menu.get_preferred_height()
-        overlay_h = self._list_overlay.get_allocated_height()
-        if overlay_h > 0 and menu_h > 0:
-            y = max(0, min(int(y), overlay_h - menu_h))
-        else:
-            y = max(0, int(y))
-        self._action_menu.set_margin_top(y)
-        self._action_menu.set_margin_end(8)
-        self._action_menu.show_all()
-
-    def _on_action_picked(self, callback: Callable[[], None]) -> None:
         self._dismiss_action_menu()
-        callback()
+        popup = LauncherContextPopover(
+            row,
+            row.menu_entries(),
+            self._on_context_popover_closed,
+        )
+        self._context_popup = popup
+        popup.popup()
 
-    def _on_menu_catcher_press(self, widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
-        if event.button == 3:
-            y = int(event.y)
-            translated = widget.translate_coordinates(self._list, int(event.x), int(event.y))
-            if translated:
-                if len(translated) == 3:
-                    _ok, _x, y = translated
-                else:
-                    _x, y = translated
-            row = self._list.get_row_at_y(int(y))
-            if isinstance(row, LauncherAppRow):
-                self._show_row_menu(row)
-                return True
-        self._dismiss_action_menu()
-        return True
+    def _on_context_popover_closed(self, popup: LauncherContextPopover) -> None:
+        if self._context_popup is popup:
+            self._context_popup = None
 
     def _on_search_focus(self, *_args) -> bool:
         self._dismiss_action_menu()
@@ -447,7 +413,7 @@ class AppLauncherWindow(PickerOverlay):
 
     def _on_list_button_press(self, widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
         if event.button != 3:
-            if self._action_menu.get_visible():
+            if self._context_popup is not None:
                 self._dismiss_action_menu()
             return False
         y = int(event.y)
@@ -467,10 +433,17 @@ class AppLauncherWindow(PickerOverlay):
         return True
 
     def _on_card_press(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
-        if event.button == 1 and self._action_menu.get_visible():
+        if self._context_popup is not None:
+            self._dismiss_action_menu()
+            if event.button == 1:
+                return True
+        return event.button == 1
+
+    def _on_backdrop_press(self, widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
+        if self._context_popup is not None:
             self._dismiss_action_menu()
             return True
-        return event.button == 1
+        return super()._on_backdrop_press(widget, event)
 
     def _open_application(self, app_id: str) -> None:
         self.close_launcher()
@@ -480,8 +453,17 @@ class AppLauncherWindow(PickerOverlay):
         self.close_launcher()
         self._on_new_instance(app_id)
 
+    def _show_application_information(self, application: DesktopApplication) -> Gtk.Widget:
+        """Build the selected application's details for the context popover."""
+        details = inspect_application(application)
+        return build_application_info(details, self._show_action_menu_page)
+
+    def _show_action_menu_page(self) -> None:
+        if self._context_popup is not None:
+            self._context_popup.show_actions()
+
     def _on_row_activated(self, _list: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
-        if self._action_menu.get_visible():
+        if self._context_popup is not None:
             self._dismiss_action_menu()
             return
         if isinstance(row, LauncherAppRow):
@@ -494,7 +476,10 @@ class AppLauncherWindow(PickerOverlay):
             key in (Gdk.KEY_space, Gdk.KEY_KP_Space)
             and state & Gdk.ModifierType.SUPER_MASK
         )
-        if key == Gdk.KEY_Escape and self._action_menu.get_visible():
+        if key == Gdk.KEY_Escape and self._context_popup is not None:
+            if self._context_popup.showing_information:
+                self._context_popup.show_actions()
+                return True
             self._dismiss_action_menu()
             return True
         if key == Gdk.KEY_Escape and self._mode != SEARCH_DESTINATION:
@@ -530,6 +515,7 @@ class AppLauncherWindow(PickerOverlay):
             on_new_instance=self._new_instance_application,
             on_favorite_toggle=self._on_favorite_toggle,
             on_pin_toggle=self._on_pin_toggle,
+            on_show_information=self._show_application_information,
             on_context_menu=self._show_row_menu,
         )
         self._rows_by_id[application.id] = row

@@ -81,6 +81,7 @@ def read_desktop_application(path: Path) -> DesktopApplication | None:
         generic_name=entry.get("GenericName", "").strip(),
         terminal=_is_true(entry.get("Terminal", "")),
         desktop_path=str(path),
+        desktop_exec=entry.get("Exec", "").strip(),
         new_instance_exec=_new_instance_exec(parser, entry),
     )
 

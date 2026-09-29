@@ -33,6 +33,7 @@ from shell.servicios.aplicaciones.desktop import (
     scan_desktop_applications,
     strip_exec_field_codes,
 )
+from shell.servicios.aplicaciones.inspection import inspect_application
 from shell.icons import application_directories
 from shell.servicios.aplicaciones.store import (
     load_application_prefs,
@@ -249,6 +250,83 @@ def test_scan_reads_flatpak_desktop_entry(tmp_path: Path) -> None:
     assert apps[0].exec_cmd == (
         "/usr/bin/flatpak run --command=zapzap --file-forwarding com.rtosta.zapzap"
     )
+    assert apps[0].desktop_exec.endswith("@@u %u @@")
+
+
+def test_application_inspection_uses_flatpak_desktop_evidence(tmp_path: Path) -> None:
+    desktop = tmp_path / "com.rtosta.zapzap.desktop"
+    app = DesktopApplication(
+        id="com.rtosta.zapzap",
+        name="ZapZap",
+        icon="zapzap",
+        exec_cmd="flatpak run com.rtosta.zapzap",
+        desktop_exec="flatpak run com.rtosta.zapzap @@u %u @@",
+        desktop_path=str(desktop),
+    )
+
+    def runner(command: tuple[str, ...] | list[str]) -> str | None:
+        if tuple(command) == ("flatpak", "info", "--show-location", "com.rtosta.zapzap"):
+            return "/var/lib/flatpak/app/com.rtosta.zapzap/current/active/files\n"
+        return None
+
+    details = inspect_application(app, runner=runner)
+
+    assert details.origin == "Flatpak"
+    assert details.package == "com.rtosta.zapzap"
+    assert ("Desktop Entry", str(desktop)) in details.locations
+    assert ("Instalación Flatpak", "/var/lib/flatpak/app/com.rtosta.zapzap/current/active/files") in details.locations
+    assert details.desktop_exec.endswith("%u @@")
+    assert details.launch_command == "flatpak run com.rtosta.zapzap"
+
+
+def test_application_inspection_uses_pacman_ownership_not_app_name(tmp_path: Path) -> None:
+    executable = tmp_path / "my-browser"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    desktop = tmp_path / "browser.desktop"
+    app = DesktopApplication(
+        id="browser",
+        name="A name that is not a package name",
+        icon="browser",
+        exec_cmd=str(executable),
+        desktop_path=str(desktop),
+    )
+
+    def runner(command: tuple[str, ...] | list[str]) -> str | None:
+        if tuple(command) == ("pacman", "-Qo", str(executable)):
+            return f"{executable} is owned by real-package 1.2-1\n"
+        if tuple(command) == ("pacman", "-Qm", "real-package"):
+            return None
+        return None
+
+    details = inspect_application(app, runner=runner)
+
+    assert details.origin == "Pacman"
+    assert details.package == "real-package"
+    assert ("Ejecutable", str(executable)) in details.locations
+
+
+def test_application_inspection_distinguishes_appimage_and_desktop_only(tmp_path: Path) -> None:
+    appimage = tmp_path / "Example.AppImage"
+    appimage.write_text("binary", encoding="utf-8")
+    app = DesktopApplication(
+        id="example",
+        name="Example",
+        icon="example",
+        exec_cmd=str(appimage),
+        desktop_path=str(tmp_path / "example.desktop"),
+    )
+    details = inspect_application(app, runner=lambda _command: None)
+    assert details.origin == "AppImage"
+    assert ("AppImage", str(appimage.resolve())) in details.locations
+
+    desktop_only = DesktopApplication(
+        id="only-entry",
+        name="Only entry",
+        icon="app",
+        desktop_path=str(tmp_path / "only-entry.desktop"),
+    )
+    assert inspect_application(desktop_only, runner=lambda _command: None).origin == "Archivo .desktop"
 
 
 def test_read_desktop_application_skips_hidden(tmp_path: Path) -> None:
@@ -494,4 +572,3 @@ def _run() -> None:
 
 if __name__ == "__main__":
     _run()
-

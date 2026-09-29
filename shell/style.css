@@ -874,6 +874,70 @@ button.launcher-favorite-button.favorited {
     color: @shell_accent;
 }
 
+box.application-info-popup,
+scrolledwindow.application-info-scroll,
+scrolledwindow.application-info-scroll > viewport {
+    background-color: transparent;
+    border: none;
+}
+
+box.application-info-field {
+    background-color: @shell_hover_bg_faint;
+    border: 1px solid @shell_border_subtle;
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+
+label.application-info-title {
+    color: @shell_text_primary;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+button.application-info-back {
+    background-color: @shell_hover_bg_faint;
+    border: 1px solid @shell_border_subtle;
+    border-radius: 8px;
+    color: @shell_text_primary;
+    padding: 4px 8px;
+}
+
+button.application-info-back:hover {
+    background-color: @shell_hover_bg_soft;
+}
+
+label.application-info-label {
+    color: @shell_text_secondary;
+    font-size: 10.5px;
+    font-weight: 600;
+}
+
+label.application-info-value {
+    color: @shell_text_primary;
+    font-size: 12px;
+}
+
+label.application-info-command {
+    color: @shell_text_primary;
+    font-family: monospace;
+    font-size: 11.5px;
+}
+
+popover.launcher-context-popover {
+    background-color: transparent;
+    border: none;
+    padding: 0;
+}
+
+box.launcher-action-menu {
+    background-color: @shell_surface_bg_panel;
+    border: 1px solid @shell_border_strong;
+    border-radius: 10px;
+    padding: 6px;
+    min-width: 196px;
+    box-shadow: 0 8px 20px @shell_shadow;
+}
+
 menu.shell-app-menu,
 popover.shell-app-menu,
 box.shell-app-menu {
@@ -933,15 +997,6 @@ menuitem.shell-app-menu-target:hover {
 
 eventbox.launcher-menu-catcher {
     background-color: transparent;
-}
-
-box.launcher-action-menu {
-    background-color: @shell_surface_bg_panel;
-    border: 1px solid @shell_border_strong;
-    border-radius: 10px;
-    padding: 6px;
-    min-width: 196px;
-    box-shadow: 0 8px 20px @shell_shadow;
 }
 
 button.shell-app-menu-item {

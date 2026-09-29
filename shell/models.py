@@ -796,6 +796,10 @@ class DesktopApplication:
     generic_name: str = ""
     terminal: bool = False
     desktop_path: str = ""
+    # Keep the original field for diagnostics. ``exec_cmd`` is deliberately
+    # cleaned before launching, because desktop-entry field codes are not shell
+    # arguments a user can safely paste into a binding.
+    desktop_exec: str = ""
     new_instance_exec: str = ""
 
 
