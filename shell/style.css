@@ -417,6 +417,22 @@ drawingarea.active-window-spectrum {
     background-color: transparent;
 }
 
+image.active-window-player-artwork {
+    min-width: 24px;
+    min-height: 24px;
+}
+
+/* The player cover is sized from the block allocation. These negative margins
+   consume only the normal CAVA chrome, so it begins at the player origin and
+   fills its height without increasing the bar's requested height. */
+eventbox.active-window-widget.active-window-player-mode image.active-window-player-artwork {
+    margin: -5px 0 -5px -6px;
+}
+
+eventbox.active-window-player-hit-zone {
+    background-color: transparent;
+}
+
 /* ==========================================================================
    5c. Widgets — Pinned application dock
    ========================================================================== */

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import gi
 
 gi.require_version("Gtk", "3.0")
@@ -28,6 +30,7 @@ from ...servicios.multimedia.media import (
     MediaService,
     is_strawberry_player,
 )
+from ...ui.image_files import load_cover_pixbuf
 from ..multimedia.audio_spectrum import paint_spectrum
 from ..multimedia.media_format import (
     compact_bar_primary,
@@ -38,10 +41,11 @@ from ..multimedia.media_format import (
 
 ACTIVE_WINDOW_CHANGED = "active_window_changed"
 MEDIA_BAR_CLICKED = "media_bar_clicked"
+_PLAYER_ARTWORK_SIZE = ACTIVE_WINDOW_ICON_SIZE
 
 
 class ActiveWindowWidget(Gtk.EventBox):
-    """Bar cava block: left opens the modes popup; right transport always drives Reproductor."""
+    """Bar cava block with a compact Strawberry player in Reproductor mode."""
 
     def __init__(
         self,
@@ -62,6 +66,9 @@ class ActiveWindowWidget(Gtk.EventBox):
         self._visualizer_snapshot = AudioVisualizerSnapshot.hidden(AUDIO_VISUALIZER_BAR_COUNT)
         self._last_volume_percent: int | None = None
         self._volume_flash_source_id = 0
+        self._player_artwork_key: str | None = None
+        self._player_artwork_size = _PLAYER_ARTWORK_SIZE
+        self._player_artwork_rendered_size = 0
 
         self.get_style_context().add_class("active-window-widget")
         self.set_size_request(ACTIVE_WINDOW_WIDTH, -1)
@@ -69,6 +76,7 @@ class ActiveWindowWidget(Gtk.EventBox):
         self.set_above_child(False)
         self.set_visible_window(True)
         self.connect("draw", self._on_draw_spectrum)
+        self.connect("size-allocate", self._on_size_allocate)
 
         # Same cava chrome, two non-overlapping hit targets:
         #   [ open_zone → popup ] [ transport → Strawberry only ]
@@ -141,6 +149,14 @@ class ActiveWindowWidget(Gtk.EventBox):
         body.pack_start(self._open_zone, True, True, 0)
         body.pack_end(self._transport, False, False, 0)
 
+        # Keep Ventana's tree untouched. Reproductor gets its own compact
+        # overlay so artwork and metadata do not add a row to the bar.
+        self._player_body = self._build_player_body()
+        self._body_stack = Gtk.Stack()
+        self._body_stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        self._body_stack.add_named(body, MEDIA_DISPLAY_WINDOW)
+        self._body_stack.add_named(self._player_body, MEDIA_DISPLAY_PLAYER)
+
         # Volume % sits in the cava panel's bottom-right corner (not in the transport row).
         self._volume_label = Gtk.Label(label="")
         self._volume_label.get_style_context().add_class("active-window-volume")
@@ -153,7 +169,7 @@ class ActiveWindowWidget(Gtk.EventBox):
         self._volume_label.hide()
 
         overlay = Gtk.Overlay()
-        overlay.add(body)
+        overlay.add(self._body_stack)
         overlay.add_overlay(self._volume_label)
         self.add(overlay)
 
@@ -166,6 +182,55 @@ class ActiveWindowWidget(Gtk.EventBox):
 
     def get_anchor_widget(self) -> Gtk.Widget:
         return self
+
+    def _build_player_body(self) -> Gtk.Overlay:
+        """Artwork and metadata over the CAVA painted by the parent widget."""
+        content = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=ACTIVE_WINDOW_CONTENT_SPACING,
+        )
+        content.get_style_context().add_class("active-window-player-body")
+        content.set_hexpand(True)
+
+        self._player_artwork = Gtk.Image()
+        self._player_artwork.get_style_context().add_class("active-window-player-artwork")
+        self._player_artwork.set_size_request(
+            _PLAYER_ARTWORK_SIZE,
+            _PLAYER_ARTWORK_SIZE,
+        )
+        self._player_artwork.set_halign(Gtk.Align.START)
+        self._player_artwork.set_valign(Gtk.Align.FILL)
+
+        metadata = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        metadata.get_style_context().add_class("active-window-player-meta")
+        metadata.set_hexpand(True)
+        metadata.set_valign(Gtk.Align.CENTER)
+        self._player_primary = Gtk.Label()
+        self._player_primary.get_style_context().add_class("active-window-application")
+        self._configure_stable_label(self._player_primary)
+        self._player_artist = Gtk.Label()
+        self._player_artist.get_style_context().add_class("active-window-title")
+        self._configure_stable_label(self._player_artist)
+        metadata.pack_start(self._player_primary, False, False, 0)
+        metadata.pack_start(self._player_artist, False, False, 0)
+
+        content.pack_start(self._player_artwork, False, False, 0)
+        content.pack_start(metadata, True, True, 0)
+
+        overlay = Gtk.Overlay()
+        overlay.add(content)
+        # This is intentionally an overlay, not a three-column layout: the
+        # pointer targets take no space and never change the bar's geometry.
+        hit_zone = Gtk.EventBox()
+        hit_zone.get_style_context().add_class("active-window-player-hit-zone")
+        hit_zone.set_visible_window(False)
+        hit_zone.set_above_child(True)
+        hit_zone.set_hexpand(True)
+        hit_zone.set_vexpand(True)
+        hit_zone.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+        hit_zone.connect("button-press-event", self._on_player_hit_press)
+        overlay.add_overlay(hit_zone)
+        return overlay
 
     def _make_transport_button(self, label: str, tooltip: str) -> Gtk.Button:
         """Text glyphs match the old status style so controls blend into the cava chrome."""
@@ -301,21 +366,23 @@ class ActiveWindowWidget(Gtk.EventBox):
 
     def _render(self) -> bool:
         style = self.get_style_context()
-        # Transport is always shown inside this bar object.
-        self._transport.show_all()
         self._status.hide()
 
         if self._media_service.display_mode == MEDIA_DISPLAY_PLAYER:
             style.add_class("active-window-player-mode")
+            self._body_stack.set_visible_child_name(MEDIA_DISPLAY_PLAYER)
+            self._sync_transport_visibility()
             active = self._media_snapshot.active
             if active is not None and is_strawberry_player(active):
                 style.add_class("active-window-media")
-                self._render_media(active)
+                self._render_player_media(active)
             else:
                 style.add_class("active-window-media")
                 self._render_player_idle()
         else:
             style.remove_class("active-window-player-mode")
+            self._body_stack.set_visible_child_name(MEDIA_DISPLAY_WINDOW)
+            self._sync_transport_visibility()
             if self._showing_media():
                 style.add_class("active-window-media")
                 self._render_media(self._media_snapshot.active)  # type: ignore[arg-type]
@@ -327,12 +394,24 @@ class ActiveWindowWidget(Gtk.EventBox):
         self._sync_volume_badge()
         self.queue_draw()
         self.show_all()
-        self._transport.show_all()
+        self._body_stack.set_visible_child_name(self._media_service.display_mode)
+        self._sync_transport_visibility()
         self._status.hide()
         # Volume badge may stay hidden when Strawberry is offline.
         if self._strawberry_player() is None:
             self._volume_label.hide()
         return False
+
+    def _sync_transport_visibility(self) -> None:
+        """Ventana retains play/pause only; Reproductor owns its overlay zones."""
+        if self._media_service.display_mode == MEDIA_DISPLAY_PLAYER:
+            self._transport.hide()
+            return
+        self._transport.show_all()
+        # These buttons target Strawberry and are inactive in Ventana. Keep the
+        # functional center control without allocating visual controls for them.
+        self._prev_button.hide()
+        self._next_button.hide()
 
     def _on_draw_spectrum(self, widget: Gtk.EventBox, cr) -> bool:
         allocation = widget.get_allocation()
@@ -343,7 +422,25 @@ class ActiveWindowWidget(Gtk.EventBox):
         Gtk.render_frame(style, cr, 0, 0, width, height)
 
         snapshot = self._visualizer_snapshot
-        if self._showing_media() and snapshot.visible and any(snapshot.bars):
+        if not (self._showing_media() and snapshot.visible and any(snapshot.bars)):
+            return False
+        if self._media_service.display_mode == MEDIA_DISPLAY_PLAYER:
+            # The artwork obscures the left edge. Start CAVA at its right edge
+            # so every painted bar remains visible behind the player metadata.
+            spectrum_x = self._player_spectrum_origin(widget)
+            cr.save()
+            cr.translate(spectrum_x, 0)
+            paint_spectrum(
+                cr,
+                width=max(1, width - spectrum_x),
+                height=height,
+                bars=snapshot.bars,
+                colors=snapshot.colors,
+                peaks=snapshot.peaks,
+            )
+            cr.restore()
+        else:
+            # Ventana keeps its original full-bleed CAVA behavior.
             paint_spectrum(
                 cr,
                 width=width,
@@ -368,13 +465,41 @@ class ActiveWindowWidget(Gtk.EventBox):
         self._secondary.set_text(secondary)
         self._secondary.set_no_show_all(not bool(secondary.strip()))
 
+    def _render_player_media(self, player: MediaPlayerSnapshot) -> None:
+        """Render the dedicated, compact in-bar Strawberry player."""
+        self._set_player_artwork(player.artwork_path)
+        self._player_primary.set_text(player.title or player.identity or "Strawberry")
+        artist = player.artist or player.identity
+        self._player_artist.set_text(artist)
+        self._player_artist.set_no_show_all(not bool(artist.strip()))
+
+    def _set_player_artwork(self, artwork_path: str) -> None:
+        """Fill the player block height with cached MPRIS artwork."""
+        key = artwork_path.strip()
+        size = self._player_artwork_size
+        if (
+            key == self._player_artwork_key
+            and size == self._player_artwork_rendered_size
+        ):
+            return
+        self._player_artwork_key = key
+        self._player_artwork_rendered_size = size
+        self._player_artwork.set_size_request(size, size)
+        pixbuf = load_cover_pixbuf(Path(key), size) if key else None
+        if pixbuf is not None:
+            self._player_artwork.set_from_pixbuf(pixbuf)
+            return
+        self._player_artwork.set_from_icon_name(
+            "audio-x-generic-symbolic",
+            Gtk.IconSize.MENU,
+        )
+        self._player_artwork.set_pixel_size(max(16, size - 8))
+
     def _render_player_idle(self) -> None:
-        self._icon.set_from_icon_name("audio-x-generic-symbolic", Gtk.IconSize.MENU)
-        self._icon.set_pixel_size(ACTIVE_WINDOW_ICON_SIZE)
-        self._primary.set_text("Strawberry")
-        self._status.set_text("")
-        self._secondary.set_text("Sin reproducción")
-        self._secondary.set_no_show_all(False)
+        self._set_player_artwork("")
+        self._player_primary.set_text("Strawberry")
+        self._player_artist.set_text("Sin reproducción")
+        self._player_artist.set_no_show_all(False)
 
     def _render_window(self, active_window: ActiveWindow) -> None:
         self._icon.set_from_icon_name(active_window.icon, Gtk.IconSize.MENU)
@@ -383,6 +508,74 @@ class ActiveWindowWidget(Gtk.EventBox):
         self._status.set_text("")
         self._secondary.set_text(window_bar_secondary(active_window))
         self._secondary.set_no_show_all(False)
+
+    def _on_size_allocate(self, _widget: Gtk.Widget, allocation: Gdk.Rectangle) -> None:
+        """Scale cover art to the already allocated player height, never beyond it."""
+        size = max(1, int(allocation.height))
+        if size == self._player_artwork_size:
+            return
+        self._player_artwork_size = size
+        if self._media_service.display_mode == MEDIA_DISPLAY_PLAYER:
+            active = self._media_snapshot.active
+            artwork_path = (
+                active.artwork_path
+                if active is not None and is_strawberry_player(active)
+                else ""
+            )
+            self._set_player_artwork(artwork_path)
+
+    def _player_spectrum_origin(self, widget: Gtk.Widget) -> int:
+        """Return the CAVA start just beyond the allocated artwork slot."""
+        # Matches the player-mode cover's compensation for the normal 6px
+        # leading CAVA padding when coordinate translation is unavailable.
+        fallback = (
+            self._player_artwork_size
+            + ACTIVE_WINDOW_CONTENT_SPACING
+            + 6
+        )
+        try:
+            translated = self._player_artwork.translate_coordinates(widget, 0, 0)
+            artwork_width = max(
+                _PLAYER_ARTWORK_SIZE,
+                self._player_artwork.get_allocated_width(),
+            )
+            if len(translated) == 3:
+                success, x, _y = translated
+                if success:
+                    return max(
+                        0,
+                        int(x)
+                        + artwork_width
+                        + ACTIVE_WINDOW_CONTENT_SPACING,
+                    )
+            elif len(translated) == 2:
+                x, _y = translated
+                return max(
+                    0,
+                    int(x)
+                    + artwork_width
+                    + ACTIVE_WINDOW_CONTENT_SPACING,
+                )
+        except (TypeError, ValueError):
+            pass
+        return fallback
+
+    def _on_player_hit_press(
+        self,
+        widget: Gtk.EventBox,
+        event: Gdk.EventButton,
+    ) -> bool:
+        """Three equal, invisible player controls across the existing block."""
+        if event.button != Gdk.BUTTON_PRIMARY:
+            return True
+        width = max(1, widget.get_allocated_width())
+        if event.x < width / 3:
+            self._media_service.previous_track_player()
+        elif event.x < (2 * width) / 3:
+            self._media_service.play_pause_player()
+        else:
+            self._media_service.next_track_player()
+        return True
 
     def _on_open_zone_press(self, _widget: Gtk.EventBox, event: Gdk.EventButton) -> bool:
         """Left → Ventana popup; right → Reproductor popup. Transport stays separate."""
