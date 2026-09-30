@@ -53,7 +53,7 @@ class LauncherAppRow(Gtk.ListBoxRow):
         on_favorite_toggle: Callable[[str], None],
         on_pin_toggle: Callable[[str], None],
         on_show_information: Callable[[DesktopApplication], Gtk.Widget],
-        on_context_menu: Callable[["LauncherAppRow"], None],
+        on_context_menu: Callable[["LauncherAppRow", int, int], None],
     ) -> None:
         super().__init__()
         self.application = application
@@ -129,10 +129,18 @@ class LauncherAppRow(Gtk.ListBoxRow):
         self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
         self.connect("button-press-event", self._on_button_press)
 
-    def _on_button_press(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
+    def _on_button_press(self, widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
         if event.button != 3:
             return False
-        self._on_context_menu(self)
+        translated = widget.translate_coordinates(self, int(event.x), int(event.y))
+        if translated:
+            if len(translated) == 3:
+                _ok, x, y = translated
+            else:
+                x, y = translated
+        else:
+            x, y = int(event.x), int(event.y)
+        self._on_context_menu(self, int(x), int(y))
         return True
 
     def menu_entries(self):
@@ -392,13 +400,19 @@ class AppLauncherWindow(PickerOverlay):
         if popup is not None:
             popup.popdown()
 
-    def _show_row_menu(self, row: LauncherAppRow) -> None:
+    def _show_row_menu(self, row: LauncherAppRow, x: int, y: int) -> None:
         self._list.select_row(row)
         self._dismiss_action_menu()
+        pointing_to = Gdk.Rectangle()
+        pointing_to.x = x
+        pointing_to.y = y
+        pointing_to.width = 1
+        pointing_to.height = 1
         popup = LauncherContextPopover(
             row,
             row.menu_entries(),
             self._on_context_popover_closed,
+            pointing_to=pointing_to,
         )
         self._context_popup = popup
         popup.popup()
@@ -416,18 +430,28 @@ class AppLauncherWindow(PickerOverlay):
             if self._context_popup is not None:
                 self._dismiss_action_menu()
             return False
+        x = int(event.x)
         y = int(event.y)
         if widget is not self._list:
             translated = widget.translate_coordinates(self._list, int(event.x), int(event.y))
             if not translated:
                 return False
             if len(translated) == 3:
-                _ok, _x, y = translated
+                _ok, x, y = translated
             else:
-                _x, y = translated
+                x, y = translated
         row = self._list.get_row_at_y(int(y))
         if isinstance(row, LauncherAppRow):
-            self._show_row_menu(row)
+            translated = self._list.translate_coordinates(row, int(x), int(y))
+            if translated:
+                if len(translated) == 3:
+                    _ok, row_x, row_y = translated
+                else:
+                    row_x, row_y = translated
+            else:
+                allocation = row.get_allocation()
+                row_x, row_y = int(x) - allocation.x, int(y) - allocation.y
+            self._show_row_menu(row, int(row_x), int(row_y))
             return True
         self._dismiss_action_menu()
         return True

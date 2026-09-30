@@ -36,10 +36,17 @@ class LauncherContextPopover(Gtk.Popover):
         anchor: Gtk.Widget,
         entries: Sequence[LauncherMenuEntry],
         on_closed: Callable[["LauncherContextPopover"], None],
+        *,
+        pointing_to: Gdk.Rectangle | None = None,
     ) -> None:
         super().__init__()
         self.set_relative_to(anchor)
-        self.set_position(Gtk.PositionType.RIGHT)
+        # A row is a large anchor.  Pointing to the actual right-click makes
+        # this popover independent from the launcher side rails and keeps it
+        # spatially connected to the action that opened it.
+        if pointing_to is not None:
+            self.set_pointing_to(pointing_to)
+        self.set_position(Gtk.PositionType.BOTTOM)
         self.set_modal(True)
         self.set_transitions_enabled(False)
         self.get_style_context().add_class("launcher-context-popover")
