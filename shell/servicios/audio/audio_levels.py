@@ -216,10 +216,21 @@ def band_energies_from_magnitudes(
     return tuple(energies)
 
 
-def _level_from_band_energy(energy: float, *, sensitivity: float = 0.008) -> float:
+def _level_from_band_energy(energy: float, *, sensitivity: float = 0.02) -> float:
+    """Map raw band energy to a wider perceptual range without leaving the body full at rest.
+
+    The previous curve used a very low sensitivity and a weak exponent, so even modest
+    energy values were being pushed close to 1.0. This made the contour fill the panel
+    almost continuously. The new curve keeps quiet material near zero while preserving a
+    clear gap between soft, normal, and strong playback.
+    """
+    energy = max(0.0, float(energy))
+    if energy <= 1e-9:
+        return 0.0
+
     normalized = energy / max(1e-9, sensitivity)
-    # Mild compression keeps quiet material visible without clipping everything to 1.
-    return max(0.0, min(1.0, normalized**0.38))
+    mapped = normalized / (1.0 + normalized)
+    return max(0.0, min(1.0, mapped**1.2))
 
 
 def smooth_levels(

@@ -203,6 +203,7 @@ class SettingsManager:
         self._hooks["widgets.workspace_accent_colors_json"] = self._apply_workspace_accents
         self._hooks["barra.keyboard_cat_enabled"] = self._apply_keyboard_cat
         self._hooks["multimedia.visualizer_enabled"] = self._apply_visualizer
+        self._hooks["multimedia.visualizer_style"] = self._apply_visualizer
         self._hooks["ia.watcher_enabled"] = self._apply_task_watcher
 
     def _apply_all(self, *, initial: bool) -> None:

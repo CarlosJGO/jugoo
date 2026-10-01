@@ -722,6 +722,22 @@ def build_settings_catalog() -> tuple[SettingDef, ...]:
             section="Visualizador",
         ),
         SettingDef(
+            key="multimedia.visualizer_style",
+            category=CategoryId.MULTIMEDIA,
+            label="Efecto del panel de audio",
+            description="Elige entre la cava vertical actual o una onda horizontal centrada.",
+            value_type="choice",
+            default=shell_config.AUDIO_VISUALIZER_STYLE,
+            config_attr="AUDIO_VISUALIZER_STYLE",
+            apply=APPLY_LIVE,
+            choices=(
+                ("cava", "Cava vertical"),
+                ("waveform", "Onda horizontal"),
+            ),
+            tier="A",
+            section="Visualizador",
+        ),
+        SettingDef(
             key="multimedia.visualizer_fps",
             category=CategoryId.MULTIMEDIA,
             label="FPS del visualizador",

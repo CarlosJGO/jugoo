@@ -12,6 +12,7 @@ gi.require_version("Pango", "1.0")
 
 from gi.repository import Gdk, GLib, Gtk, Pango
 
+from ... import config as shell_config
 from ...config import (
     ACTIVE_WINDOW_CONTENT_SPACING,
     ACTIVE_WINDOW_ICON_SIZE,
@@ -31,7 +32,7 @@ from ...servicios.multimedia.media import (
     is_strawberry_player,
 )
 from ...ui.image_files import load_cover_pixbuf
-from ..multimedia.audio_spectrum import paint_spectrum
+from ..multimedia.audio_spectrum import paint_spectrum, paint_waveform
 from ..multimedia.media_format import (
     compact_bar_primary,
     compact_bar_secondary,
@@ -424,6 +425,30 @@ class ActiveWindowWidget(Gtk.EventBox):
         snapshot = self._visualizer_snapshot
         if not (self._showing_media() and snapshot.visible and any(snapshot.bars)):
             return False
+        visual_style = str(getattr(shell_config, "AUDIO_VISUALIZER_STYLE", "cava")).lower()
+        if visual_style == "waveform":
+            if self._media_service.display_mode == MEDIA_DISPLAY_PLAYER:
+                spectrum_x = self._player_spectrum_origin(widget)
+                cr.save()
+                cr.translate(spectrum_x, 0)
+                paint_waveform(
+                    cr,
+                    width=max(1, width - spectrum_x),
+                    height=height,
+                    bars=snapshot.bars,
+                    colors=snapshot.colors,
+                )
+                cr.restore()
+            else:
+                paint_waveform(
+                    cr,
+                    width=width,
+                    height=height,
+                    bars=snapshot.bars,
+                    colors=snapshot.colors,
+                )
+            return False
+
         if self._media_service.display_mode == MEDIA_DISPLAY_PLAYER:
             # The artwork obscures the left edge. Start CAVA at its right edge
             # so every painted bar remains visible behind the player metadata.

@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import math
 
+import cairo
 import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 
 from gi.repository import Gtk
+
+from ... import config as shell_config
+from ...ui.theme import active_theme, color_to_rgb
 
 _BAR_GAP = 2
 _MIN_BAR_WIDTH = 2
@@ -84,6 +88,123 @@ def paint_spectrum(
         x += bar_width + gap
 
 
+def paint_waveform(
+    cr,
+    *,
+    width: int,
+    height: int,
+    bars: tuple[float, ...],
+    colors: tuple[tuple[float, float, float, float], ...],
+    line_width: float | None = None,
+) -> None:
+    """Build a breathing nebula-like contour directly from the audio amplitudes."""
+    if width <= 0 or height <= 0 or not bars:
+        return
+
+    def _body_level(level: float) -> float:
+        value = max(0.0, min(1.0, float(level)))
+        if value <= 0.0:
+            return 0.0
+        return max(0.0, min(1.0, (value / (0.24 + value)) ** 1.35))
+
+    theme = active_theme()
+    center_x = width / 2.0
+    center_y = height / 2.0
+    stroke_width = 2.0 if line_width is None else max(1.0, float(line_width))
+    sample_count = len(bars)
+    half_span = width * 0.44
+
+    top_points: list[tuple[float, float]] = []
+    bottom_points: list[tuple[float, float]] = []
+    for index, level in enumerate(bars):
+        normalized = max(0.0, min(1.0, float(level)))
+        left = bars[max(0, index - 1)] if index > 0 else normalized
+        right = bars[min(len(bars) - 1, index + 1)] if index < len(bars) - 1 else normalized
+        local = (normalized * 0.52) + (left * 0.24) + (right * 0.24)
+        body_level = _body_level(local)
+        edge = abs((index / max(1, sample_count - 1)) - 0.5) * 2.0
+        core = max(0.0, 1.0 - edge)
+        x = center_x + (((index / max(1, sample_count - 1)) - 0.5) * width * 0.96)
+
+        # Keep the contour collapsed at rest, but let genuine energy drive a much wider
+        # expansion as the sound gets louder or more transient.
+        radius = 8.0 + (body_level * 52.0) + (core * 16.0)
+        micro = math.sin(index * 1.9 + local * 11.0) * (2.0 + body_level * 16.0)
+        micro2 = math.cos(index * 2.7 + local * 8.5) * (1.5 + body_level * 8.0)
+        top_amp = radius * (0.18 + (0.42 * body_level) + (0.12 * core))
+        bottom_amp = radius * (0.20 + (0.54 * body_level) + (0.16 * core))
+
+        top_y = center_y - top_amp + micro
+        bottom_y = center_y + bottom_amp + micro2
+
+        # Push the strongest motion toward the center while letting the side wings breathe.
+        if core > 0.1:
+            top_y += (1.0 - core) * 10.0
+            bottom_y -= (1.0 - core) * 8.0
+
+        top_points.append((x, top_y))
+        bottom_points.append((x, bottom_y))
+
+    if not top_points:
+        return
+
+    cr.new_path()
+    cr.move_to(top_points[0][0], top_points[0][1])
+    for point in top_points[1:]:
+        cr.line_to(point[0], point[1])
+    for point in reversed(bottom_points[1:]):
+        cr.line_to(point[0], point[1])
+    cr.line_to(bottom_points[0][0], bottom_points[0][1])
+    cr.close_path()
+
+    if theme is not None:
+        accent = color_to_rgb(theme.colors.accent)
+        primary = color_to_rgb(theme.colors.primary)
+        secondary = color_to_rgb(theme.colors.secondary)
+        gradient = cairo.LinearGradient(
+            center_x,
+            center_y - height * 0.35,
+            center_x,
+            center_y + height * 0.35,
+        )
+        gradient.add_color_stop_rgba(0.0, accent[0], accent[1], accent[2], 0.78)
+        gradient.add_color_stop_rgba(0.42, primary[0], primary[1], primary[2], 0.54)
+        gradient.add_color_stop_rgba(1.0, secondary[0], secondary[1], secondary[2], 0.16)
+        cr.set_source(gradient)
+    else:
+        base_color = colors[0] if colors else (0.35, 0.82, 1.0, 1.0)
+        cr.set_source_rgba(base_color[0], base_color[1], base_color[2], 0.6)
+
+    cr.fill_preserve()
+
+    glow_radius = max(24.0, min(width, height) * 0.42)
+    glow = cairo.RadialGradient(center_x, center_y, 0.0, center_x, center_y, glow_radius)
+    if theme is not None:
+        accent = color_to_rgb(theme.colors.accent)
+        primary = color_to_rgb(theme.colors.primary)
+        glow.add_color_stop_rgba(0.0, accent[0], accent[1], accent[2], 0.60)
+        glow.add_color_stop_rgba(0.42, primary[0], primary[1], primary[2], 0.18)
+        glow.add_color_stop_rgba(1.0, primary[0], primary[1], primary[2], 0.0)
+    else:
+        glow.add_color_stop_rgba(0.0, 0.55, 0.88, 1.0, 0.34)
+        glow.add_color_stop_rgba(1.0, 0.20, 0.50, 0.95, 0.0)
+    cr.set_source(glow)
+    cr.arc(center_x, center_y, glow_radius, 0, 2 * math.pi)
+    cr.fill()
+
+    cr.set_source_rgba(0.95, 0.99, 1.0, 0.18)
+    cr.set_line_width(max(1.0, stroke_width * 0.7))
+    cr.set_line_join(cairo.LINE_JOIN_ROUND)
+    cr.set_line_cap(cairo.LINE_CAP_ROUND)
+    cr.stroke()
+
+    cr.set_source_rgba(0.96, 0.98, 1.0, 0.08)
+    cr.set_line_width(1.0)
+    cr.move_to(center_x - half_span, center_y)
+    cr.line_to(center_x + half_span, center_y)
+    cr.stroke()
+
+
 def _rounded_rect(cr, x: float, y: float, width: float, height: float, radius: float) -> None:
     radius = min(radius, width / 2.0, height / 2.0)
     if radius <= 0.5:
@@ -144,6 +265,15 @@ class AudioSpectrumWidget(Gtk.DrawingArea):
 
     def _on_draw(self, widget: Gtk.DrawingArea, cr) -> bool:
         allocation = widget.get_allocation()
+        if str(getattr(shell_config, "AUDIO_VISUALIZER_STYLE", "cava")).lower() == "waveform":
+            paint_waveform(
+                cr,
+                width=max(1, allocation.width),
+                height=max(1, allocation.height),
+                bars=self._bars,
+                colors=self._colors,
+            )
+            return False
         paint_spectrum(
             cr,
             width=max(1, allocation.width),

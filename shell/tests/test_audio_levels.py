@@ -43,6 +43,7 @@ from shell.servicios.audio.pipewire_monitor import (
     resolve_monitor_target,
     sink_node_name,
 )
+from shell.widgets.multimedia.audio_spectrum import paint_waveform
 
 
 def _player(*, status: str = "playing", title: str = "Track") -> MediaPlayerSnapshot:
@@ -165,6 +166,20 @@ def test_frequency_to_rgba_maps_across_theme_palette() -> None:
     assert treble[0] > bass[0]
     assert bass[3] > 0.2
     assert treble[3] > 0.2
+
+
+def test_paint_waveform_draws_filled_wave_body() -> None:
+    cr = mock.Mock()
+    bars = (0.0, 0.2, 0.85, 0.4, 0.55, 0.1, 0.0)
+    colors = tuple((0.2, 0.7, 1.0, 1.0) for _ in bars)
+
+    paint_waveform(cr, width=200, height=80, bars=bars, colors=colors)
+
+    assert cr.move_to.called
+    assert cr.line_to.called
+    assert cr.fill_preserve.called
+    assert cr.stroke.called
+    assert any(args[0] == 0 and args[1] < 40 for args, _kwargs in cr.move_to.call_args_list)
 
 
 def test_smooth_levels_attack_faster_than_release() -> None:
