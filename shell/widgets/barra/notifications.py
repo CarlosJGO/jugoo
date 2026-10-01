@@ -140,6 +140,7 @@ class NotificationsWidget(ShellModule):
         return NotificationPopup(
             self._shell_window,
             self._service,
+            is_sound_enabled=lambda: shell_config.NOTIFICATIONS_SOUND_ENABLED,
             on_mark_read=self._mark_read,
             on_mark_all_read=self._mark_all_read,
             on_dismiss=self._dismiss,
@@ -199,9 +200,11 @@ class NotificationsWidget(ShellModule):
     def _on_settings_changed(self, payload: object) -> None:
         if not isinstance(payload, dict):
             return
-        if payload.get("key") not in _GROUPING_SETTING_KEYS:
-            return
-        GLib.idle_add(self._handle_grouping_settings_changed)
+        key = payload.get("key")
+        if key in _GROUPING_SETTING_KEYS:
+            GLib.idle_add(self._handle_grouping_settings_changed)
+        elif key == "notificaciones.sound_enabled":
+            GLib.idle_add(self._handle_notification_sound_setting_changed)
 
     def _on_fullscreen_changed(self, snapshot: object) -> None:
         if not isinstance(snapshot, HyprlandSnapshot):
@@ -238,6 +241,12 @@ class NotificationsWidget(ShellModule):
         popup = self._popup.maybe
         if popup is not None and popup.get_visible():
             popup.refresh()
+        return False
+
+    def _handle_notification_sound_setting_changed(self) -> bool:
+        popup = self._popup.maybe
+        if popup is not None:
+            popup.refresh_sound_status()
         return False
 
     def _handle_blocked_changed(self) -> bool:

@@ -14,6 +14,7 @@ from gi.repository import Gtk, Pango
 from ...config import NOTIFICATION_POPUP_ICON_SIZE
 from ...models import NotificationSnapshot
 from ...ui.notification_icon import apply_notification_icon
+from .notification_dismiss_drag import connect_right_drag_dismiss
 
 
 class NotificationMiniRow(Gtk.EventBox):
@@ -27,6 +28,8 @@ class NotificationMiniRow(Gtk.EventBox):
     ) -> None:
         super().__init__()
         self._snapshot = snapshot
+        self._dismiss_drag = connect_right_drag_dismiss(self, snapshot.id, on_dismiss)
+        self.set_tooltip_text("Arrastra a izquierda o derecha con clic derecho para eliminar")
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         row.get_style_context().add_class("notification-mini-row")
@@ -73,16 +76,4 @@ class NotificationMiniRow(Gtk.EventBox):
 
         row.pack_start(text_box, True, True, 0)
 
-        dismiss_button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
-        dismiss_button.set_tooltip_text("Eliminar")
-        dismiss_button.get_style_context().add_class("notification-item-action")
-        dismiss_button.set_valign(Gtk.Align.START)
-        dismiss_button.add(
-            Gtk.Image.new_from_icon_name("window-close-symbolic", Gtk.IconSize.MENU)
-        )
-        dismiss_button.connect(
-            "clicked",
-            lambda _button, notification_id=snapshot.id: on_dismiss(notification_id),
-        )
-        row.pack_start(dismiss_button, False, False, 0)
         self.add(row)

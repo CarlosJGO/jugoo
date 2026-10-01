@@ -2247,6 +2247,13 @@ label.notification-popup-paused {
     padding: 0 12px 4px 12px;
 }
 
+label.notification-popup-sound-disabled {
+    color: @shell_text_secondary;
+    font-size: 11px;
+    padding: 4px 8px;
+    border-left: 2px solid @shell_accent;
+}
+
 box.notification-popup-muted-apps {
     padding: 0 12px 4px 12px;
 }

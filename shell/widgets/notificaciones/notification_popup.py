@@ -34,6 +34,7 @@ from ...popup_handle import (
 from ...servicios.notificaciones.notifications import NotificationService
 from ...ui.disfraces import WindowRole, dress_window
 from ...ui.notification_icon import apply_notification_icon
+from .notification_dismiss_drag import connect_right_drag_dismiss
 from ...ui.theme import active_theme
 from ...window_identity import (
     TITLE_NOTIFICATIONS,
@@ -86,6 +87,8 @@ class NotificationItemRow(Gtk.EventBox):
 
         self._snapshot = snapshot
         self._on_invoke_action = on_invoke_action
+        self._dismiss_drag = connect_right_drag_dismiss(self, snapshot.id, on_dismiss)
+        self.set_tooltip_text("Arrastra a izquierda o derecha con clic derecho para eliminar")
         self._default_action = next(
             (action.key for action in snapshot.actions if action.key == "default"),
             snapshot.actions[0].key if snapshot.actions else None,
@@ -197,17 +200,6 @@ class NotificationItemRow(Gtk.EventBox):
             )
             actions.pack_start(read_button, False, False, 0)
 
-        dismiss_button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
-        dismiss_button.set_tooltip_text("Eliminar")
-        dismiss_button.get_style_context().add_class("notification-item-action")
-        dismiss_button.add(
-            Gtk.Image.new_from_icon_name("window-close-symbolic", Gtk.IconSize.MENU)
-        )
-        dismiss_button.connect(
-            "clicked",
-            lambda _btn, nid=snapshot.id: on_dismiss(nid),
-        )
-        actions.pack_start(dismiss_button, False, False, 0)
         header.pack_start(actions, False, False, 0)
         content.pack_start(header, False, False, 0)
 
@@ -263,6 +255,7 @@ class NotificationPopup(Gtk.Window):
         shell_window: Gtk.Window,
         notification_service: NotificationService,
         *,
+        is_sound_enabled: Callable[[], bool],
         on_mark_read: Callable[[int], None],
         on_mark_all_read: Callable[[], None],
         on_dismiss: Callable[[int], None],
@@ -286,6 +279,7 @@ class NotificationPopup(Gtk.Window):
 
         self._shell_window = shell_window
         self._service = notification_service
+        self._is_sound_enabled = is_sound_enabled
         self._on_mark_read = on_mark_read
         self._on_mark_all_read = on_mark_all_read
         self._on_dismiss = on_dismiss
@@ -335,6 +329,17 @@ class NotificationPopup(Gtk.Window):
         self._paused_banner.set_no_show_all(True)
         header.pack_start(self._paused_banner, False, False, 0)
 
+        self._sound_disabled_banner = Gtk.Label(
+            label="Sonido de notificaciones desactivado en Ajustes",
+            xalign=0,
+        )
+        self._sound_disabled_banner.get_style_context().add_class(
+            "notification-popup-sound-disabled"
+        )
+        self._sound_disabled_banner.set_no_show_all(True)
+        header.pack_start(self._sound_disabled_banner, False, False, 0)
+        self.refresh_sound_status()
+
         self._muted_apps_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self._muted_apps_box.get_style_context().add_class("notification-popup-muted-apps")
         self._muted_apps_box.set_no_show_all(True)
@@ -377,6 +382,12 @@ class NotificationPopup(Gtk.Window):
         self._empty_label.get_style_context().add_class("notification-popup-empty")
         self._empty_label.set_margin_top(12)
         self._empty_label.set_margin_bottom(12)
+
+    def refresh_sound_status(self) -> None:
+        if self._is_sound_enabled():
+            self._sound_disabled_banner.hide()
+        else:
+            self._sound_disabled_banner.show()
 
     def open_for(self, anchor_button: Gtk.Widget) -> None:
         self._cancel_progressive_reveal()
@@ -746,6 +757,15 @@ class NotificationGroupRow(Gtk.EventBox):
         self._popover: Gtk.Popover | None = None
         self._popover_leave_timeout_id = 0
         self._hover_opened = False
+        self._dismiss_drag = connect_right_drag_dismiss(
+            self,
+            self._representative.id,
+            lambda _notification_id: self._on_dismiss_group(self._group_snapshots),
+        )
+        subject = "grupo de notificaciones" if len(group_snapshots) > 1 else "notificación"
+        self.set_tooltip_text(
+            f"Arrastra a izquierda o derecha con clic derecho para eliminar {subject}"
+        )
 
         self.add_events(
             Gdk.EventMask.ENTER_NOTIFY_MASK
@@ -902,18 +922,6 @@ class NotificationGroupRow(Gtk.EventBox):
                 lambda _btn: on_mark_group_read(group_snapshots),
             )
             self._tools.pack_start(read_button, False, False, 0)
-
-        dismiss_button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
-        dismiss_button.set_tooltip_text("Eliminar")
-        dismiss_button.get_style_context().add_class("notification-item-action")
-        dismiss_button.add(
-            Gtk.Image.new_from_icon_name("window-close-symbolic", Gtk.IconSize.MENU)
-        )
-        dismiss_button.connect(
-            "clicked",
-            lambda _btn: on_dismiss_group(group_snapshots),
-        )
-        self._tools.pack_start(dismiss_button, False, False, 0)
 
         back_button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
         back_button.get_style_context().add_class("notification-item-action")

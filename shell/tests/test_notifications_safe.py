@@ -1149,8 +1149,14 @@ def test_toast_manager_fullscreen_uses_whisper() -> None:
         mgr.enqueue(b)
         mgr.enqueue(c)
         assert mgr.visible_count == 1
-        assert mgr.pending_count == 1
-        assert mgr.pending_notification_ids == (c.id,)
+        assert mgr.pending_count == 2
+        assert mgr.pending_notification_ids == (b.id, c.id)
+        assert tuple(item.id for item in service.history_snapshots) == (
+            normal.id,
+            a.id,
+            b.id,
+            c.id,
+        )
         assert isinstance(mgr._toasts[a.id], NotificationWhisper)
         assert a.id in mgr._toasts
         assert b.id not in mgr._toasts
@@ -1158,7 +1164,11 @@ def test_toast_manager_fullscreen_uses_whisper() -> None:
 
         mgr._toasts[a.id].dismiss("timeout")
         assert a.id not in mgr._toasts
-        assert b.id not in mgr._toasts
+        assert b.id in mgr._toasts
+        assert c.id not in mgr._toasts
+        assert isinstance(mgr._toasts[b.id], NotificationWhisper)
+        assert mgr._toasts[b.id]._message.get_text() == "intermedio"
+        mgr._toasts[b.id].dismiss("timeout")
         assert c.id in mgr._toasts
         assert isinstance(mgr._toasts[c.id], NotificationWhisper)
         assert mgr._toasts[c.id]._message.get_text() == "ultimo mensaje"
