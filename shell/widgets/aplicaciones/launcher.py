@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Callable
 
 import gi
@@ -48,10 +49,13 @@ class LauncherAppRow(Gtk.ListBoxRow):
         *,
         favorite: bool,
         pinned: bool,
+        ignored: bool,
+        disambiguate: bool,
         on_open: Callable[[str], None],
         on_new_instance: Callable[[str], None],
         on_favorite_toggle: Callable[[str], None],
         on_pin_toggle: Callable[[str], None],
+        on_ignore_toggle: Callable[[str], None],
         on_show_information: Callable[[DesktopApplication], Gtk.Widget],
         on_context_menu: Callable[["LauncherAppRow", int, int], None],
     ) -> None:
@@ -59,10 +63,12 @@ class LauncherAppRow(Gtk.ListBoxRow):
         self.application = application
         self._favorite = favorite
         self._pinned = pinned
+        self._ignored = ignored
         self._on_open = on_open
         self._on_new_instance = on_new_instance
         self._on_favorite_toggle = on_favorite_toggle
         self._on_pin_toggle = on_pin_toggle
+        self._on_ignore_toggle = on_ignore_toggle
         self._on_show_information = on_show_information
         self._on_context_menu = on_context_menu
         self.get_style_context().add_class("launcher-row")
@@ -85,8 +91,12 @@ class LauncherAppRow(Gtk.ListBoxRow):
         name.get_style_context().add_class("launcher-row-name")
         name.set_ellipsize(Pango.EllipsizeMode.END)
         labels.pack_start(name, False, False, 0)
-        if application.comment:
-            comment = Gtk.Label(label=application.comment, xalign=0)
+        secondary_text = launcher_application_secondary_text(
+            application,
+            disambiguate=disambiguate,
+        )
+        if secondary_text:
+            comment = Gtk.Label(label=secondary_text, xalign=0)
             comment.get_style_context().add_class("launcher-row-comment")
             comment.set_ellipsize(Pango.EllipsizeMode.END)
             labels.pack_start(comment, False, False, 0)
@@ -144,20 +154,89 @@ class LauncherAppRow(Gtk.ListBoxRow):
         return True
 
     def menu_entries(self):
-        favorite_label = "Quitar de favoritos" if self._favorite else "Marcar como favorito"
-        pin_label = "Desfijar del dock" if self._pinned else "Fijar en dock"
-        return (
-            ("Abrir", lambda: self._on_open(self.application.id)),
-            ("Nueva instancia", lambda: self._on_new_instance(self.application.id)),
-            None,
-            (favorite_label, lambda: self._on_favorite_toggle(self.application.id)),
-            (pin_label, lambda: self._on_pin_toggle(self.application.id)),
-            None,
-            PopoverPageEntry(
-                "Información de la aplicación",
-                lambda: self._on_show_information(self.application),
-            ),
+        return build_launcher_menu_entries(
+            self.application,
+            favorite=self._favorite,
+            pinned=self._pinned,
+            ignored=self._ignored,
+            on_open=self._on_open,
+            on_new_instance=self._on_new_instance,
+            on_favorite_toggle=self._on_favorite_toggle,
+            on_pin_toggle=self._on_pin_toggle,
+            on_ignore_toggle=self._on_ignore_toggle,
+            on_show_information=self._on_show_information,
         )
+
+
+def build_launcher_menu_entries(
+    application: DesktopApplication,
+    *,
+    favorite: bool,
+    pinned: bool,
+    ignored: bool,
+    on_open: Callable[[str], None],
+    on_new_instance: Callable[[str], None],
+    on_favorite_toggle: Callable[[str], None],
+    on_pin_toggle: Callable[[str], None],
+    on_ignore_toggle: Callable[[str], None],
+    on_show_information: Callable[[DesktopApplication], Gtk.Widget],
+) -> tuple[tuple[str, Callable[[], None]] | PopoverPageEntry | None, ...]:
+    favorite_label = "Quitar de favoritos" if favorite else "Marcar como favorito"
+    pin_label = "Desfijar del dock" if pinned else "Fijar en dock"
+    ignore_label = "No ignorar aplicación" if ignored else "Ignorar aplicación"
+    return (
+        ("Abrir", lambda: on_open(application.id)),
+        ("Nueva instancia", lambda: on_new_instance(application.id)),
+        None,
+        (favorite_label, lambda: on_favorite_toggle(application.id)),
+        (pin_label, lambda: on_pin_toggle(application.id)),
+        (ignore_label, lambda: on_ignore_toggle(application.id)),
+        None,
+        PopoverPageEntry(
+            "Información de la aplicación",
+            lambda: on_show_information(application),
+        ),
+    )
+
+
+def rebuilt_selection_index(
+    previous_ids: tuple[str, ...],
+    current_ids: tuple[str, ...],
+    selected_id: str | None,
+) -> int:
+    if not current_ids:
+        return -1
+    if selected_id in current_ids:
+        return current_ids.index(selected_id)
+    if selected_id in previous_ids:
+        return min(previous_ids.index(selected_id), len(current_ids) - 1)
+    return 0
+
+
+def duplicated_application_ids(
+    applications: tuple[DesktopApplication, ...],
+) -> frozenset[str]:
+    normalized_names = {
+        application.id: " ".join(application.name.casefold().split())
+        for application in applications
+    }
+    name_counts = Counter(normalized_names.values())
+    return frozenset(
+        app_id
+        for app_id, name in normalized_names.items()
+        if name and name_counts[name] > 1
+    )
+
+
+def launcher_application_secondary_text(
+    application: DesktopApplication,
+    *,
+    disambiguate: bool,
+) -> str:
+    parts = [application.comment] if application.comment else []
+    if disambiguate:
+        parts.append(f"ID: {application.id}")
+    return " · ".join(parts)
 
 
 class AppLauncherWindow(PickerOverlay):
@@ -171,6 +250,9 @@ class AppLauncherWindow(PickerOverlay):
         on_new_instance: Callable[[str], None],
         on_pin_toggle: Callable[[str], None],
         on_favorite_toggle: Callable[[str], None],
+        on_ignore_toggle: Callable[[str], None],
+        on_show_hidden_toggle: Callable[[bool], None],
+        on_show_ignored_toggle: Callable[[bool], None],
         on_refresh: Callable[[], ApplicationsSnapshot],
         settings_manager: SettingsManager,
         event_bus: EventBus,
@@ -192,12 +274,15 @@ class AppLauncherWindow(PickerOverlay):
         self._on_new_instance = on_new_instance
         self._on_pin_toggle = on_pin_toggle
         self._on_favorite_toggle = on_favorite_toggle
+        self._on_ignore_toggle = on_ignore_toggle
+        self._on_show_hidden_toggle = on_show_hidden_toggle
+        self._on_show_ignored_toggle = on_show_ignored_toggle
         self._on_refresh = on_refresh
         self._settings_manager = settings_manager
         self._snapshot = ApplicationsSnapshot()
         self._rows: tuple[LauncherAppRow, ...] = ()
         self._rows_by_id: dict[str, LauncherAppRow] = {}
-        self._row_versions: dict[str, tuple[bool, bool, str, str, str]] = {}
+        self._row_versions: dict[str, tuple[bool, bool, bool, bool, str, str, str]] = {}
         self._mode: Destination = SEARCH_DESTINATION
         self._active_settings_category = CategoryId.GENERAL
         self._content_host = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -252,6 +337,18 @@ class AppLauncherWindow(PickerOverlay):
         self._context_popup: LauncherContextPopover | None = None
 
         self._search.connect("focus-in-event", self._on_search_focus)
+        self._show_hidden_toggle = Gtk.CheckButton(label="Ocultas")
+        self._show_hidden_toggle.set_focus_on_click(False)
+        self._show_hidden_toggle.set_tooltip_text("Incluir aplicaciones ocultas en el catálogo")
+        self._show_hidden_toggle.connect("toggled", self._on_show_hidden_toggled)
+        self._search_row.pack_end(self._show_hidden_toggle, False, False, 0)
+
+        self._show_ignored_toggle = Gtk.CheckButton(label="Ignoradas")
+        self._show_ignored_toggle.set_focus_on_click(False)
+        self._show_ignored_toggle.set_tooltip_text("Permite recuperar aplicaciones ignoradas")
+        self._show_ignored_toggle.connect("toggled", self._on_show_ignored_toggled)
+        self._search_row.pack_end(self._show_ignored_toggle, False, False, 0)
+        self._refresh_catalog_toggles()
 
     def open_launcher(self) -> None:
         self.open_search_mode()
@@ -290,9 +387,20 @@ class AppLauncherWindow(PickerOverlay):
 
     def set_snapshot(self, snapshot: ApplicationsSnapshot) -> None:
         self._snapshot = snapshot
+        self._refresh_catalog_toggles()
         if self.get_visible():
             if self._mode == SEARCH_DESTINATION:
                 self._rebuild_rows(keep_selection=True)
+
+    def _refresh_catalog_toggles(self) -> None:
+        self._show_hidden_toggle.set_active(self._snapshot.include_hidden)
+        self._show_ignored_toggle.set_active(self._snapshot.include_ignored)
+
+    def _on_show_hidden_toggled(self, toggle: Gtk.ToggleButton) -> None:
+        self._on_show_hidden_toggle(bool(toggle.get_active()))
+
+    def _on_show_ignored_toggled(self, toggle: Gtk.ToggleButton) -> None:
+        self._on_show_ignored_toggle(bool(toggle.get_active()))
 
     def on_prepare_open(self) -> None:
         # Refresh is deferred right after present for faster perceived open.
@@ -331,6 +439,7 @@ class AppLauncherWindow(PickerOverlay):
     def _rebuild_rows(self, *, keep_selection: bool = False) -> None:
         self._dismiss_action_menu()
         selected_id = None
+        previous_ids = tuple(row.application.id for row in self._rows)
         if keep_selection:
             selected = self._selected_application()
             if selected is not None:
@@ -343,11 +452,19 @@ class AppLauncherWindow(PickerOverlay):
             self._search.get_text(),
             self._snapshot.favorite_ids,
         )
+        duplicate_ids = duplicated_application_ids(self._snapshot.applications)
         rows: list[LauncherAppRow] = []
         for application in matches:
             favorite = self._snapshot.is_favorite(application.id)
             pinned = self._snapshot.is_pinned(application.id)
-            row = self._row_for(application, favorite=favorite, pinned=pinned)
+            ignored = self._snapshot.is_ignored(application.id)
+            row = self._row_for(
+                application,
+                favorite=favorite,
+                pinned=pinned,
+                ignored=ignored,
+                disambiguate=application.id in duplicate_ids,
+            )
             self._list.add(row)
             rows.append(row)
         self._rows = tuple(rows)
@@ -358,11 +475,13 @@ class AppLauncherWindow(PickerOverlay):
             self.set_empty_visible(False)
             self._list.show()
             if keep_selection and selected_id is not None:
-                chosen = next(
-                    (row for row in rows if row.application.id == selected_id),
-                    rows[0],
+                selection_index = rebuilt_selection_index(
+                    previous_ids,
+                    tuple(row.application.id for row in rows),
+                    selected_id,
                 )
-                self.session.select_index(rows.index(chosen))
+                self.session.select_index(selection_index)
+                chosen = rows[selection_index]
             else:
                 index = self.session.selected_index
                 if index < 0 or index >= len(rows):
@@ -520,10 +639,14 @@ class AppLauncherWindow(PickerOverlay):
         *,
         favorite: bool,
         pinned: bool,
+        ignored: bool,
+        disambiguate: bool,
     ) -> LauncherAppRow:
         version = (
             favorite,
             pinned,
+            ignored,
+            disambiguate,
             application.name,
             application.icon,
             application.comment,
@@ -535,10 +658,13 @@ class AppLauncherWindow(PickerOverlay):
             application,
             favorite=favorite,
             pinned=pinned,
+            ignored=ignored,
+            disambiguate=disambiguate,
             on_open=self._open_application,
             on_new_instance=self._new_instance_application,
             on_favorite_toggle=self._on_favorite_toggle,
             on_pin_toggle=self._on_pin_toggle,
+            on_ignore_toggle=self._on_ignore_toggle,
             on_show_information=self._show_application_information,
             on_context_menu=self._show_row_menu,
         )

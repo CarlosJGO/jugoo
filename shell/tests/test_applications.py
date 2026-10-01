@@ -22,9 +22,12 @@ from shell.models import (
 )
 from shell.eventbus import EventBus
 from shell.servicios.aplicaciones.applications import (
+    APP_IGNORE_TOGGLE_REQUESTED,
     APP_PIN_PROMOTE_FROM_OVERFLOW_REQUESTED,
     APP_PIN_REORDER_REQUESTED,
     APP_PIN_SWAP_REQUESTED,
+    APP_SHOW_HIDDEN_TOGGLE_REQUESTED,
+    APP_SHOW_IGNORED_TOGGLE_REQUESTED,
     APPLICATIONS_CHANGED,
     ApplicationsService,
 )
@@ -50,6 +53,123 @@ def _app(app_id: str, name: str, *, wm_class: str = "") -> DesktopApplication:
 def test_normalize_desktop_id_strips_suffix() -> None:
     assert normalize_desktop_id("firefox.desktop") == "firefox"
     assert normalize_desktop_id("  org.kde.dolphin  ") == "org.kde.dolphin"
+
+
+def test_launcher_menu_includes_ignore_toggle() -> None:
+    from shell.widgets.aplicaciones.launcher import build_launcher_menu_entries
+
+    app = DesktopApplication(id="firefox", name="Firefox", icon="firefox")
+    ignored_calls: list[str] = []
+
+    def entries(*, ignored: bool):
+        return build_launcher_menu_entries(
+            app,
+            favorite=False,
+            pinned=False,
+            ignored=ignored,
+            on_open=lambda _app_id: None,
+            on_new_instance=lambda _app_id: None,
+            on_favorite_toggle=lambda _app_id: None,
+            on_pin_toggle=lambda _app_id: None,
+            on_ignore_toggle=ignored_calls.append,
+            on_show_information=lambda _desktop_app: None,
+        )
+
+    visible_entries = entries(ignored=False)
+    visible_labels = [entry[0] for entry in visible_entries if isinstance(entry, tuple)]
+    ignore_action = next(entry[1] for entry in visible_entries if isinstance(entry, tuple) and entry[0] == "Ignorar aplicación")
+    ignore_action()
+    ignored_entries = entries(ignored=True)
+    ignored_labels = [entry[0] for entry in ignored_entries if isinstance(entry, tuple)]
+    unignore_action = next(entry[1] for entry in ignored_entries if isinstance(entry, tuple) and entry[0] == "No ignorar aplicación")
+    unignore_action()
+
+    assert "Ignorar aplicación" in visible_labels
+    assert "No ignorar aplicación" in ignored_labels
+    assert ignored_calls == ["firefox", "firefox"]
+
+
+def test_launcher_rebuild_keeps_selection_near_previous_position() -> None:
+    from shell.widgets.aplicaciones.launcher import rebuilt_selection_index
+
+    assert rebuilt_selection_index(("a", "b", "c"), ("a", "c"), "b") == 1
+    assert rebuilt_selection_index(("a", "b"), ("hidden", "a", "b"), "b") == 2
+    assert rebuilt_selection_index(("a", "b"), ("a",), "b") == 0
+    assert rebuilt_selection_index(("a",), (), "a") == -1
+
+
+def test_launcher_disambiguates_duplicate_application_names() -> None:
+    from shell.widgets.aplicaciones.launcher import (
+        duplicated_application_ids,
+        launcher_application_secondary_text,
+    )
+
+    applications = (
+        DesktopApplication(id="waydroid.calculator", name="Calculator", icon="app"),
+        DesktopApplication(id="org.gnome.Calculator", name=" calculator ", icon="app"),
+        DesktopApplication(id="org.gnome.Settings", name="Settings", icon="app"),
+    )
+    duplicate_ids = duplicated_application_ids(applications)
+
+    assert duplicate_ids == frozenset(
+        {"waydroid.calculator", "org.gnome.Calculator"}
+    )
+    assert launcher_application_secondary_text(
+        applications[0],
+        disambiguate=applications[0].id in duplicate_ids,
+    ) == "ID: waydroid.calculator"
+    assert launcher_application_secondary_text(
+        applications[2],
+        disambiguate=applications[2].id in duplicate_ids,
+    ) == ""
+
+
+def test_applications_service_ignore_recovery_survives_restart(tmp_path: Path) -> None:
+    desktop_dir = tmp_path / "applications"
+    desktop_dir.mkdir()
+    (desktop_dir / "firefox.desktop").write_text(
+        "[Desktop Entry]\nType=Application\nName=Firefox\nExec=firefox\nIcon=firefox\n",
+        encoding="utf-8",
+    )
+    (desktop_dir / "hidden.desktop").write_text(
+        "[Desktop Entry]\nType=Application\nName=Hidden\nExec=hidden\nIcon=hidden\nHidden=true\n",
+        encoding="utf-8",
+    )
+    prefs_path = tmp_path / "application-prefs.json"
+
+    service = ApplicationsService(
+        EventBus(),
+        path=prefs_path,
+        directories=(desktop_dir,),
+        executor=lambda _command: None,
+    )
+    service.start()
+    assert service.snapshot.app_by_id("firefox") is not None
+    assert service.snapshot.app_by_id("hidden") is None
+    service._event_bus.emit(APP_IGNORE_TOGGLE_REQUESTED, "firefox")
+    assert service.snapshot.app_by_id("firefox") is None
+    assert load_application_prefs(prefs_path)[2] == ("firefox",)
+    service.close()
+
+    restarted = ApplicationsService(
+        EventBus(),
+        path=prefs_path,
+        directories=(desktop_dir,),
+        executor=lambda _command: None,
+    )
+    restarted.start()
+    assert restarted.snapshot.app_by_id("firefox") is None
+    assert restarted.snapshot.ignored_ids == ("firefox",)
+    restarted._event_bus.emit(APP_SHOW_IGNORED_TOGGLE_REQUESTED, True)
+    assert restarted.snapshot.include_ignored is True
+    assert restarted.snapshot.is_ignored("firefox")
+    assert restarted.snapshot.app_by_id("firefox") is not None
+    restarted._event_bus.emit(APP_IGNORE_TOGGLE_REQUESTED, "firefox")
+    assert not restarted.snapshot.is_ignored("firefox")
+    assert restarted.snapshot.app_by_id("firefox") is not None
+    restarted._event_bus.emit(APP_SHOW_HIDDEN_TOGGLE_REQUESTED, True)
+    assert restarted.snapshot.app_by_id("hidden") is not None
+    restarted.close()
 
 
 def test_pin_appends_and_ignores_duplicates() -> None:
@@ -348,6 +468,25 @@ def test_read_desktop_application_skips_hidden(tmp_path: Path) -> None:
     assert read_desktop_application(hidden) is None
 
 
+def test_scan_desktop_applications_can_include_hidden_entries(tmp_path: Path) -> None:
+    visible = tmp_path / "visible.desktop"
+    visible.write_text(
+        "[Desktop Entry]\nType=Application\nName=Visible\nExec=visible\nIcon=visible\n",
+        encoding="utf-8",
+    )
+    hidden = tmp_path / "hidden.desktop"
+    hidden.write_text(
+        "[Desktop Entry]\nType=Application\nName=Hidden\nExec=hidden\nIcon=hidden\nHidden=true\n",
+        encoding="utf-8",
+    )
+
+    apps = scan_desktop_applications((tmp_path,))
+    assert [item.id for item in apps] == ["visible"]
+
+    apps_with_hidden = scan_desktop_applications((tmp_path,), include_hidden=True)
+    assert [item.id for item in apps_with_hidden] == ["hidden", "visible"]
+
+
 def test_pinned_store_roundtrip_preserves_order(tmp_path: Path) -> None:
     path = tmp_path / "pinned-apps.json"
     save_pinned_ids(path, ("zen-browser", "org.kde.dolphin", "kitty"))
@@ -360,16 +499,18 @@ def test_pinned_store_roundtrip_preserves_order(tmp_path: Path) -> None:
 
 def test_application_prefs_keep_pins_and_favorites_independent(tmp_path: Path) -> None:
     path = tmp_path / "pinned-apps.json"
-    save_application_prefs(path, ("firefox", "kitty"), ("org.kde.dolphin", "firefox"))
+    save_application_prefs(path, ("firefox", "kitty"), ("org.kde.dolphin", "firefox"), ("hidden-tool",))
 
-    pinned, favorites = load_application_prefs(path)
+    pinned, favorites, ignored = load_application_prefs(path)
     assert pinned == ("firefox", "kitty")
     assert favorites == ("org.kde.dolphin", "firefox")
+    assert ignored == ("hidden-tool",)
 
     save_pinned_ids(path, ("kitty",))
-    pinned, favorites = load_application_prefs(path)
+    pinned, favorites, ignored = load_application_prefs(path)
     assert pinned == ("kitty",)
     assert favorites == ("org.kde.dolphin", "firefox")
+    assert ignored == ("hidden-tool",)
 
 
 def test_application_prefs_load_v1_without_favorites(tmp_path: Path) -> None:
@@ -378,14 +519,16 @@ def test_application_prefs_load_v1_without_favorites(tmp_path: Path) -> None:
         json.dumps({"version": 1, "pinned": ["firefox", "kitty.desktop"]}) + "\n",
         encoding="utf-8",
     )
-    pinned, favorites = load_application_prefs(path)
+    pinned, favorites, ignored = load_application_prefs(path)
     assert pinned == ("firefox", "kitty")
     assert favorites == ()
+    assert ignored == ()
 
     path.write_text(json.dumps(["zen-browser", "org.kde.dolphin"]) + "\n", encoding="utf-8")
-    pinned, favorites = load_application_prefs(path)
+    pinned, favorites, ignored = load_application_prefs(path)
     assert pinned == ("zen-browser", "org.kde.dolphin")
     assert favorites == ()
+    assert ignored == ()
 
 
 def test_new_instance_command_prefers_desktop_action() -> None:
@@ -490,7 +633,7 @@ def test_applications_service_pins_emits_and_launches(tmp_path: Path) -> None:
     service.favorite("firefox")
     assert service.snapshot.pinned_ids == ("kitty",)
     assert service.snapshot.favorite_ids == ("firefox",)
-    pinned, favorites = load_application_prefs(tmp_path / "pinned-apps.json")
+    pinned, favorites, _ignored = load_application_prefs(tmp_path / "pinned-apps.json")
     assert pinned == ("kitty",)
     assert favorites == ("firefox",)
 

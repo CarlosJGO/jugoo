@@ -24,9 +24,17 @@ _NEW_WINDOW_ACTION_IDS = frozenset(
 
 def scan_desktop_applications(
     directories: tuple[Path, ...] | None = None,
+    *,
+    include_hidden: bool = False,
+    ignored_ids: tuple[str, ...] | list[str] | None = None,
 ) -> tuple[DesktopApplication, ...]:
     """Return unique visible applications, first path wins (user overrides system)."""
     apps: dict[str, DesktopApplication] = {}
+    ignored = {
+        normalize_desktop_id(item)
+        for item in (ignored_ids or ())
+        if normalize_desktop_id(item)
+    }
     for directory in directories if directories is not None else application_directories():
         if not directory.is_dir():
             continue
@@ -35,8 +43,8 @@ def scan_desktop_applications(
         except OSError:
             continue
         for desktop_file in desktop_files:
-            application = read_desktop_application(desktop_file)
-            if application is None or application.id in apps:
+            application = read_desktop_application(desktop_file, include_hidden=include_hidden)
+            if application is None or application.id in apps or application.id in ignored:
                 continue
             apps[application.id] = application
     return tuple(sorted(apps.values(), key=lambda item: item.name.casefold()))
@@ -54,7 +62,7 @@ def desktop_directories_stamp(directories: tuple[Path, ...] | None = None) -> tu
     return tuple(stamp)
 
 
-def read_desktop_application(path: Path) -> DesktopApplication | None:
+def read_desktop_application(path: Path, *, include_hidden: bool = False) -> DesktopApplication | None:
     parser = configparser.ConfigParser(interpolation=None)
     try:
         parser.read(path, encoding="utf-8")
@@ -63,7 +71,7 @@ def read_desktop_application(path: Path) -> DesktopApplication | None:
         return None
     if entry.get("Type", "Application").strip() not in {"", "Application"}:
         return None
-    if not _should_show(entry):
+    if not include_hidden and not _should_show(entry):
         return None
 
     ident = normalize_desktop_id(path.stem)

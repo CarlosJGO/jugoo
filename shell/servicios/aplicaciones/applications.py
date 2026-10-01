@@ -35,6 +35,9 @@ APP_PIN_SEND_TO_OVERFLOW_REQUESTED = "app_pin_send_to_overflow_requested"
 APP_PIN_PROMOTE_FROM_OVERFLOW_REQUESTED = "app_pin_promote_from_overflow_requested"
 APP_PIN_SWAP_REQUESTED = "app_pin_swap_requested"
 APP_FAVORITE_TOGGLE_REQUESTED = "app_favorite_toggle_requested"
+APP_IGNORE_TOGGLE_REQUESTED = "app_ignore_toggle_requested"
+APP_SHOW_HIDDEN_TOGGLE_REQUESTED = "app_show_hidden_toggle_requested"
+APP_SHOW_IGNORED_TOGGLE_REQUESTED = "app_show_ignored_toggle_requested"
 LAUNCHER_TOGGLE_REQUESTED = "launcher_toggle_requested"
 
 LaunchExecutor = Callable[[Sequence[str]], None]
@@ -59,6 +62,9 @@ class ApplicationsService:
         self._applications: tuple[DesktopApplication, ...] = ()
         self._pinned_ids: tuple[str, ...] = ()
         self._favorite_ids: tuple[str, ...] = ()
+        self._ignored_ids: tuple[str, ...] = ()
+        self._include_hidden = False
+        self._include_ignored = False
         self._dir_stamp: tuple[tuple[str, int], ...] = ()
         self._event_bus.subscribe(APP_PIN_TOGGLE_REQUESTED, self._on_pin_toggle)
         self._event_bus.subscribe(APP_PIN_REORDER_REQUESTED, self._on_pin_reorder)
@@ -69,6 +75,9 @@ class ApplicationsService:
         )
         self._event_bus.subscribe(APP_PIN_SWAP_REQUESTED, self._on_pin_swap)
         self._event_bus.subscribe(APP_FAVORITE_TOGGLE_REQUESTED, self._on_favorite_toggle)
+        self._event_bus.subscribe(APP_IGNORE_TOGGLE_REQUESTED, self._on_ignore_toggle)
+        self._event_bus.subscribe(APP_SHOW_HIDDEN_TOGGLE_REQUESTED, self._on_show_hidden_toggle)
+        self._event_bus.subscribe(APP_SHOW_IGNORED_TOGGLE_REQUESTED, self._on_show_ignored_toggle)
         self._event_bus.subscribe(APP_NEW_INSTANCE_REQUESTED, self._on_new_instance)
 
     @property
@@ -78,7 +87,7 @@ class ApplicationsService:
 
     def start(self) -> None:
         with self._lock:
-            self._pinned_ids, self._favorite_ids = load_application_prefs(self._path)
+            self._pinned_ids, self._favorite_ids, self._ignored_ids = load_application_prefs(self._path)
             self._reload_catalog_locked()
         self._emit()
 
@@ -92,6 +101,9 @@ class ApplicationsService:
         )
         self._event_bus.unsubscribe(APP_PIN_SWAP_REQUESTED, self._on_pin_swap)
         self._event_bus.unsubscribe(APP_FAVORITE_TOGGLE_REQUESTED, self._on_favorite_toggle)
+        self._event_bus.unsubscribe(APP_IGNORE_TOGGLE_REQUESTED, self._on_ignore_toggle)
+        self._event_bus.unsubscribe(APP_SHOW_HIDDEN_TOGGLE_REQUESTED, self._on_show_hidden_toggle)
+        self._event_bus.unsubscribe(APP_SHOW_IGNORED_TOGGLE_REQUESTED, self._on_show_ignored_toggle)
         self._event_bus.unsubscribe(APP_NEW_INSTANCE_REQUESTED, self._on_new_instance)
 
     def refresh_catalog(self, *, force: bool = False) -> ApplicationsSnapshot:
@@ -157,6 +169,48 @@ class ApplicationsService:
         else:
             self.favorite(ident)
 
+    def ignore(self, app_id: str) -> None:
+        ident = normalize_desktop_id(app_id)
+        if not ident:
+            return
+        self._set_ignored(
+            tuple(item for item in self.snapshot.ignored_ids if normalize_desktop_id(item)) + (ident,)
+        )
+
+    def unignore(self, app_id: str) -> None:
+        ident = normalize_desktop_id(app_id)
+        if not ident:
+            return
+        self._set_ignored(
+            tuple(item for item in self.snapshot.ignored_ids if normalize_desktop_id(item) != ident)
+        )
+
+    def toggle_ignore(self, app_id: str) -> None:
+        ident = normalize_desktop_id(app_id)
+        if ident in self.snapshot.ignored_ids:
+            self.unignore(ident)
+        else:
+            self.ignore(ident)
+
+    def set_include_hidden(self, show_hidden: bool) -> None:
+        with self._lock:
+            if bool(show_hidden) == self._include_hidden:
+                return
+            self._include_hidden = bool(show_hidden)
+            self._reload_catalog_locked()
+            snapshot = self._snapshot_locked()
+        self._persist()
+        self._emit(snapshot)
+
+    def set_include_ignored(self, show_ignored: bool) -> None:
+        with self._lock:
+            if bool(show_ignored) == self._include_ignored:
+                return
+            self._include_ignored = bool(show_ignored)
+            self._reload_catalog_locked()
+            snapshot = self._snapshot_locked()
+        self._emit(snapshot)
+
     def launch(self, app_id: str) -> None:
         application = self.snapshot.app_by_id(app_id)
         if application is None:
@@ -216,6 +270,18 @@ class ApplicationsService:
         if isinstance(app_id, str):
             self.toggle_favorite(app_id)
 
+    def _on_ignore_toggle(self, app_id: object) -> None:
+        if isinstance(app_id, str):
+            self.toggle_ignore(app_id)
+
+    def _on_show_hidden_toggle(self, value: object) -> None:
+        if isinstance(value, bool):
+            self.set_include_hidden(value)
+
+    def _on_show_ignored_toggle(self, value: object) -> None:
+        if isinstance(value, bool):
+            self.set_include_ignored(value)
+
     def _on_new_instance(self, app_id: object) -> None:
         if isinstance(app_id, str):
             self.launch_new_instance(app_id)
@@ -238,21 +304,40 @@ class ApplicationsService:
         self._persist()
         self._emit(snapshot)
 
+    def _set_ignored(self, ignored_ids: tuple[str, ...]) -> None:
+        with self._lock:
+            unique = tuple(dict.fromkeys(normalize_desktop_id(item) for item in ignored_ids if normalize_desktop_id(item)))
+            if unique == self._ignored_ids:
+                return
+            self._ignored_ids = unique
+            self._reload_catalog_locked()
+            snapshot = self._snapshot_locked()
+        self._persist()
+        self._emit(snapshot)
+
     def _persist(self) -> None:
         with self._lock:
             pinned = self._pinned_ids
             favorites = self._favorite_ids
-        save_application_prefs(self._path, pinned, favorites)
+            ignored = self._ignored_ids
+        save_application_prefs(self._path, pinned, favorites, ignored)
 
     def _snapshot_locked(self) -> ApplicationsSnapshot:
         return ApplicationsSnapshot(
             applications=self._applications,
             pinned_ids=self._pinned_ids,
             favorite_ids=self._favorite_ids,
+            ignored_ids=self._ignored_ids,
+            include_hidden=self._include_hidden,
+            include_ignored=self._include_ignored,
         )
 
     def _reload_catalog_locked(self, stamp: tuple[tuple[str, int], ...] | None = None) -> None:
-        self._applications = scan_desktop_applications(self._directories)
+        self._applications = scan_desktop_applications(
+            self._directories,
+            include_hidden=self._include_hidden,
+            ignored_ids=() if self._include_ignored else self._ignored_ids,
+        )
         self._dir_stamp = stamp if stamp is not None else desktop_directories_stamp(self._directories)
 
     def _emit(self, snapshot: ApplicationsSnapshot | None = None) -> None:

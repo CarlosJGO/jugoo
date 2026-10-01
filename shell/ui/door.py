@@ -9,6 +9,7 @@ re-laid-out every tick (that was the ~15 fps stutter).
 
 from __future__ import annotations
 
+from math import cos, pi
 from typing import Callable, Literal
 
 import gi
@@ -23,16 +24,15 @@ from .theme import active_theme
 DoorAxis = Literal["vertical", "horizontal"]
 
 # Door needs a bit more time than opacity fades to read as motion, not a pop.
-_DOOR_MIN_DURATION_MS = 220
-_DOOR_MAX_DURATION_MS = 360
+_DOOR_MIN_DURATION_MS = 300
+_DOOR_MAX_DURATION_MS = 420
 _MIN_MEASURED_PX = 48
 
 
 def _ease(t: float) -> float:
-    """Ease-out cubic — snappy start, soft settle."""
+    """Cosine ease-in-out with gradual acceleration and deceleration."""
     t = max(0.0, min(1.0, t))
-    u = 1.0 - t
-    return 1.0 - u * u * u
+    return 0.5 - 0.5 * cos(pi * t)
 
 
 def _animation_duration_ms() -> int:
@@ -44,8 +44,8 @@ def _animation_duration_ms() -> int:
     base = int(theme.animation.duration)
     if base <= 0:
         return 0
-    # Theme fade duration is tuned for opacity; door motion wants a touch longer.
-    return max(_DOOR_MIN_DURATION_MS, min(_DOOR_MAX_DURATION_MS, int(base * 1.6)))
+    # Door motion needs more frames than the theme's short opacity fades.
+    return max(_DOOR_MIN_DURATION_MS, min(_DOOR_MAX_DURATION_MS, int(base * 2.0)))
 
 
 class DoorClip(Gtk.ScrolledWindow):

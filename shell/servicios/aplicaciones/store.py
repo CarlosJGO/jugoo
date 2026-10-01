@@ -1,4 +1,4 @@
-"""Atomic JSON persistence for pinned dock apps and launcher favorites."""
+"""Atomic JSON persistence for pinned dock apps, launcher favorites, and hidden/ignored apps."""
 
 from __future__ import annotations
 
@@ -7,42 +7,44 @@ from pathlib import Path
 
 from ...models import normalize_desktop_id
 
-APPLICATION_PREFS_VERSION = 2
+APPLICATION_PREFS_VERSION = 3
 
 
 def load_pinned_ids(path: Path) -> tuple[str, ...]:
-    pinned, _favorites = load_application_prefs(path)
+    pinned, _favorites, _ignored = load_application_prefs(path)
     return pinned
 
 
-def load_application_prefs(path: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Return ``(pinned, favorites)``. Version 1 files only have pinned."""
+def load_application_prefs(path: Path) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """Return ``(pinned, favorites, ignored)``. Version 1 files only have pinned."""
     if not path.is_file():
-        return (), ()
+        return (), (), ()
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         print(f"shell: applications: could not load app prefs {path}: {error}")
-        return (), ()
+        return (), (), ()
 
     if isinstance(payload, dict):
         pinned = _unique_ids(payload.get("pinned", []))
         favorites = _unique_ids(payload.get("favorites", []))
-        return pinned, favorites
+        ignored = _unique_ids(payload.get("ignored", []))
+        return pinned, favorites, ignored
     if isinstance(payload, list):
-        return _unique_ids(payload), ()
-    return (), ()
+        return _unique_ids(payload), (), ()
+    return (), (), ()
 
 
 def save_pinned_ids(path: Path, pinned_ids: tuple[str, ...]) -> None:
-    _favorites = load_application_prefs(path)[1]
-    save_application_prefs(path, pinned_ids, _favorites)
+    _favorites, _ignored = load_application_prefs(path)[1:]
+    save_application_prefs(path, pinned_ids, _favorites, _ignored)
 
 
 def save_application_prefs(
     path: Path,
     pinned_ids: tuple[str, ...],
     favorite_ids: tuple[str, ...],
+    ignored_ids: tuple[str, ...] = (),
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -50,6 +52,9 @@ def save_application_prefs(
         "pinned": [normalize_desktop_id(item) for item in pinned_ids if normalize_desktop_id(item)],
         "favorites": [
             normalize_desktop_id(item) for item in favorite_ids if normalize_desktop_id(item)
+        ],
+        "ignored": [
+            normalize_desktop_id(item) for item in ignored_ids if normalize_desktop_id(item)
         ],
     }
     tmp_path = path.with_suffix(path.suffix + ".tmp")

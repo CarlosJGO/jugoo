@@ -21,8 +21,11 @@ from ..settings.schema import CategoryId
 from ..servicios.aplicaciones.applications import (
     APP_ACTIVATE_REQUESTED,
     APP_FAVORITE_TOGGLE_REQUESTED,
+    APP_IGNORE_TOGGLE_REQUESTED,
     APP_NEW_INSTANCE_REQUESTED,
     APP_PIN_TOGGLE_REQUESTED,
+    APP_SHOW_HIDDEN_TOGGLE_REQUESTED,
+    APP_SHOW_IGNORED_TOGGLE_REQUESTED,
     APPLICATIONS_CHANGED,
     LAUNCHER_TOGGLE_REQUESTED,
     ApplicationsService,
@@ -55,6 +58,9 @@ class ApplicationsController:
                 on_new_instance=self._new_instance,
                 on_pin_toggle=self._toggle_pin,
                 on_favorite_toggle=self._toggle_favorite,
+                on_ignore_toggle=self._toggle_ignore,
+                on_show_hidden_toggle=self._toggle_show_hidden,
+                on_show_ignored_toggle=self._toggle_show_ignored,
                 on_refresh=self._applications.refresh_catalog,
                 settings_manager=settings_manager,
                 event_bus=event_bus,
@@ -105,6 +111,15 @@ class ApplicationsController:
 
     def _toggle_favorite(self, app_id: str) -> None:
         self._event_bus.emit(APP_FAVORITE_TOGGLE_REQUESTED, app_id)
+
+    def _toggle_ignore(self, app_id: str) -> None:
+        self._event_bus.emit(APP_IGNORE_TOGGLE_REQUESTED, app_id)
+
+    def _toggle_show_hidden(self, show_hidden: bool) -> None:
+        self._event_bus.emit(APP_SHOW_HIDDEN_TOGGLE_REQUESTED, show_hidden)
+
+    def _toggle_show_ignored(self, show_ignored: bool) -> None:
+        self._event_bus.emit(APP_SHOW_IGNORED_TOGGLE_REQUESTED, show_ignored)
 
     def _new_instance(self, app_id: str) -> None:
         self._event_bus.emit(APP_NEW_INSTANCE_REQUESTED, app_id)

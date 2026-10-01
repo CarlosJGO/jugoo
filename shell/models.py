@@ -805,11 +805,14 @@ class DesktopApplication:
 
 @dataclass(frozen=True)
 class ApplicationsSnapshot:
-    """Service-owned application catalog, dock pins, and launcher favorites."""
+    """Service-owned application catalog, dock pins, launcher favorites, and ignored apps."""
 
     applications: tuple[DesktopApplication, ...] = ()
     pinned_ids: tuple[str, ...] = ()
     favorite_ids: tuple[str, ...] = ()
+    ignored_ids: tuple[str, ...] = ()
+    include_hidden: bool = False
+    include_ignored: bool = False
 
     def app_by_id(self, app_id: str) -> DesktopApplication | None:
         wanted = normalize_desktop_id(app_id)
@@ -833,6 +836,9 @@ class ApplicationsSnapshot:
 
     def is_favorite(self, app_id: str) -> bool:
         return normalize_desktop_id(app_id) in self.favorite_ids
+
+    def is_ignored(self, app_id: str) -> bool:
+        return normalize_desktop_id(app_id) in self.ignored_ids
 
 
 TASK_REPEAT_NONE = "none"
