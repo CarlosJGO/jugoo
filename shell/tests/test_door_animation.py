@@ -15,21 +15,27 @@ def test_door_easing_is_symmetric_and_monotonic() -> None:
     assert abs(samples[5] + samples[15] - 1.0) < 1e-9
 
 
-def test_door_duration_gives_launcher_panel_more_frames() -> None:
+def test_pop_easing_overshoots_and_settles() -> None:
+    assert abs(door._ease_pop(0.0)) < 1e-9
+    assert abs(door._ease_pop(1.0) - 1.0) < 1e-9
+    assert door._ease_pop(0.6) > 1.0
+
+
+def test_pop_duration_stays_short() -> None:
     previous_theme_provider = door.active_theme
     try:
         door.active_theme = lambda: SimpleNamespace(
             animation=SimpleNamespace(enabled=True, duration=160)
         )
-        assert door._animation_duration_ms() == 320
+        assert door._animation_duration_ms() == 160
         door.active_theme = lambda: SimpleNamespace(
             animation=SimpleNamespace(enabled=True, duration=180)
         )
-        assert door._animation_duration_ms() == 360
+        assert door._animation_duration_ms() == 180
         door.active_theme = lambda: SimpleNamespace(
             animation=SimpleNamespace(enabled=True, duration=1000)
         )
-        assert door._animation_duration_ms() == 420
+        assert door._animation_duration_ms() == 220
         door.active_theme = lambda: SimpleNamespace(
             animation=SimpleNamespace(enabled=False, duration=180)
         )

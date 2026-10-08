@@ -18,12 +18,9 @@
 
 ## Puertas (pickers centrados)
 
-Search (menú/launcher), Clipboard y Emoji comparten [`PickerOverlay`](../../shell/widgets/pickers/overlay.py). Se abren y cierran con animación tipo puerta desde el centro de la tarjeta:
+Search (menú/launcher), Clipboard y Emoji comparten [`PickerOverlay`](../../shell/widgets/pickers/overlay.py). La tarjeta hace un POP corto con escala y opacidad, con un pequeño rebote al abrir. El layout permanece fijo durante la animación; no se redimensiona ni se desplaza el contenido por frame.
 
-- Eje vertical (por defecto): menú y clipboard.
-- Eje horizontal: emoji (`door_axis="horizontal"`).
-
-La lógica vive en [`shell/ui/door.py`](../../shell/ui/door.py) (`DoorClip`).
+La lógica vive en [`shell/ui/door.py`](../../shell/ui/door.py) (`BubblePop`).
 
 Hyprland no debe animar estas layers (`layers` → `slide` las hace “caer” desde arriba). En `~/.config/hypr/config/windowrules.lua` hay `layer_rule` `jugoo-puertas-no-anim`.
 

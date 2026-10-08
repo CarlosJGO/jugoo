@@ -15,7 +15,7 @@ gi.require_version("GtkLayerShell", "0.1")
 from gi.repository import Gdk, GLib, Gtk, GtkLayerShell
 
 from ...config import LAUNCHER_MAX_HEIGHT, LAUNCHER_WIDTH
-from ...ui.door import DoorAxis, DoorClip
+from ...ui.door import BubblePop
 from ...ui.starfield import install_starfield, resolve_event_bus
 from ...ui.theme import active_theme
 from ...window_identity import configure_interactive_popup, configure_toplevel, register_shell_popup
@@ -38,7 +38,6 @@ class PickerOverlay(Gtk.Window):
         layout: str = "simple",
         card_width: int | None = None,
         card_height: int = -1,
-        door_axis: DoorAxis = "vertical",
     ) -> None:
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
         self._session = session
@@ -85,7 +84,7 @@ class PickerOverlay(Gtk.Window):
         aligner.set_valign(Gtk.Align.CENTER)
         backdrop.add(aligner)
 
-        self._door = DoorClip(axis=door_axis)
+        self._door = BubblePop()
         aligner.pack_start(self._door, False, False, 0)
 
         card = Gtk.EventBox()

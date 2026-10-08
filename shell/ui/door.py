@@ -10,7 +10,7 @@ re-laid-out every tick (that was the ~15 fps stutter).
 from __future__ import annotations
 
 from math import cos, pi
-from typing import Callable, Literal
+from typing import Callable
 
 import gi
 
@@ -21,52 +21,51 @@ from gi.repository import Gdk, GLib, Gtk
 
 from .theme import active_theme
 
-DoorAxis = Literal["vertical", "horizontal"]
-
-# Door needs a bit more time than opacity fades to read as motion, not a pop.
-_DOOR_MIN_DURATION_MS = 300
-_DOOR_MAX_DURATION_MS = 420
+# Keep the card allocation stable; only its drawing and opacity change per frame.
+_POP_MIN_DURATION_MS = 140
+_POP_MAX_DURATION_MS = 220
+_POP_START_SCALE = 0.78
 _MIN_MEASURED_PX = 48
 
 
 def _ease(t: float) -> float:
-    """Cosine ease-in-out with gradual acceleration and deceleration."""
+    """Cosine ease-in-out, used for the close transition."""
     t = max(0.0, min(1.0, t))
     return 0.5 - 0.5 * cos(pi * t)
+
+
+def _ease_pop(t: float) -> float:
+    """Ease out with a small overshoot, like a bubble settling into place."""
+    t = max(0.0, min(1.0, t))
+    if t >= 1.0:
+        return 1.0
+    overshoot = 1.70158
+    return 1.0 + (overshoot + 1.0) * (t - 1.0) ** 3 + overshoot * (t - 1.0) ** 2
 
 
 def _animation_duration_ms() -> int:
     theme = active_theme()
     if theme is None:
-        return 260
+        return 190
     if not theme.animation.enabled:
         return 0
     base = int(theme.animation.duration)
     if base <= 0:
         return 0
-    # Door motion needs more frames than the theme's short opacity fades.
-    return max(_DOOR_MIN_DURATION_MS, min(_DOOR_MAX_DURATION_MS, int(base * 2.0)))
+    return max(_POP_MIN_DURATION_MS, min(_POP_MAX_DURATION_MS, base))
 
 
-class DoorClip(Gtk.ScrolledWindow):
-    """Clips a child to a centered strip that grows like a door."""
+class BubblePop(Gtk.Bin):
+    """Animate a card with a centered scale and opacity, without relayout."""
 
-    def __init__(self, axis: DoorAxis = "vertical") -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.get_style_context().add_class("picker-door-clip")
-        # EXTERNAL: scroll via adjustments, never show bars, never squash the child.
-        self.set_policy(Gtk.PolicyType.EXTERNAL, Gtk.PolicyType.EXTERNAL)
-        self.set_shadow_type(Gtk.ShadowType.NONE)
-        self.set_overlay_scrolling(True)
-        self.set_hexpand(False)
-        self.set_vexpand(False)
+        self.set_has_window(False)
 
-        self._axis: DoorAxis = axis
         self._progress = 1.0
+        self._scale = 1.0
         self._full_w = 1
         self._full_h = 1
-        self._view_w = 1
-        self._view_h = 1
         self._child: Gtk.Widget | None = None
         self._tick_id = 0
         self._anim_from = 1.0
@@ -75,15 +74,6 @@ class DoorClip(Gtk.ScrolledWindow):
         self._anim_duration_ms = 0
         self._on_complete: Callable[[bool], None] | None = None
         self._opening = True
-        self.connect("size-allocate", self._on_size_allocate)
-
-    @property
-    def axis(self) -> DoorAxis:
-        return self._axis
-
-    @axis.setter
-    def axis(self, value: DoorAxis) -> None:
-        self._axis = value
 
     @property
     def progress(self) -> float:
@@ -143,24 +133,23 @@ class DoorClip(Gtk.ScrolledWindow):
         return self._full_w >= _MIN_MEASURED_PX and self._full_h >= _MIN_MEASURED_PX
 
     def apply(self, progress: float) -> None:
-        """Apply a door frame. ``progress`` 0 is shut, 1 is fully open."""
+        """Apply a pop frame. ``progress`` 0 is hidden, 1 is fully open."""
         if self._child is None:
             return
         self._progress = max(0.0, min(1.0, progress))
-        fw, fh = self._full_w, self._full_h
-        if self._axis == "vertical":
-            width = fw
-            height = max(1, int(round(fh * self._progress)))
-        else:
-            width = max(1, int(round(fw * self._progress)))
-            height = fh
-        if width == self._view_w and height == self._view_h:
-            self._center_scroll()
-            return
-        self._view_w = width
-        self._view_h = height
-        self.set_size_request(width, height)
-        self._center_scroll()
+        self._scale = _POP_START_SCALE + (1.0 - _POP_START_SCALE) * self._progress
+        self.set_opacity(self._progress)
+        self.queue_draw()
+
+    def do_draw(self, cr: object) -> bool:
+        allocation = self.get_allocation()
+        cr.save()
+        cr.translate(allocation.width * 0.5, allocation.height * 0.5)
+        cr.scale(self._scale, self._scale)
+        cr.translate(-allocation.width * 0.5, -allocation.height * 0.5)
+        drawn = Gtk.Bin.do_draw(self, cr)
+        cr.restore()
+        return drawn
 
     def open(
         self,
@@ -251,9 +240,13 @@ class DoorClip(Gtk.ScrolledWindow):
     def _on_tick(self, _widget: Gtk.Widget, _clock: Gdk.FrameClock) -> bool:
         elapsed_ms = (GLib.get_monotonic_time() - self._anim_started_us) / 1000.0
         t = min(1.0, elapsed_ms / self._anim_duration_ms)
-        eased = _ease(t)
+        eased = _ease_pop(t) if self._opening else _ease(t)
         progress = self._anim_from + (self._anim_to - self._anim_from) * eased
-        self.apply(progress)
+        self._progress = max(0.0, min(1.0, progress))
+        scale_progress = max(0.0, min(1.12, progress))
+        self._scale = _POP_START_SCALE + (1.0 - _POP_START_SCALE) * scale_progress
+        self.set_opacity(self._progress)
+        self.queue_draw()
         if t < 1.0:
             return GLib.SOURCE_CONTINUE
         self._tick_id = 0

@@ -157,9 +157,9 @@ def _walk_find_style(widget: Gtk.Widget, class_names: tuple[str, ...]) -> Gtk.Wi
 
 def _content_widget(window: Gtk.Window) -> Gtk.Widget:
     """The visible card/clip — never the fullscreen backdrop layer."""
-    door = getattr(window, "_door", None)
-    if isinstance(door, Gtk.Widget) and door.get_mapped():
-        return door
+    bubble = getattr(window, "_door", None)
+    if isinstance(bubble, Gtk.Widget) and bubble.get_mapped():
+        return bubble
     card_host = getattr(window, "_card_host", None)
     if isinstance(card_host, Gtk.Widget) and card_host.get_mapped():
         return card_host

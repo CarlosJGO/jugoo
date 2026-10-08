@@ -46,6 +46,34 @@ class SettingsStoreTests(unittest.TestCase):
         self.assertIn("notificaciones.grouping_mode", settings_by_key())
         self.assertIn("notificaciones.grouping_exceptions", settings_by_key())
 
+    def test_notification_sound_settings_are_exposed_in_layer_menu(self) -> None:
+        catalog = build_settings_catalog()
+        by_key = settings_by_key(catalog)
+        sound_settings = {
+            item.key
+            for item in catalog
+            if item.category is CategoryId.NOTIFICACIONES and item.section == "Sonido"
+        }
+
+        self.assertEqual(
+            sound_settings,
+            {
+                "notificaciones.sound_enabled",
+                "notificaciones.sound_max_executions_per_window",
+                "notificaciones.sound_window_seconds",
+                "notificaciones.sound_block_duration_seconds",
+            },
+        )
+        self.assertEqual(
+            by_key["notificaciones.sound_max_executions_per_window"].minimum,
+            1,
+        )
+        self.assertEqual(by_key["notificaciones.sound_window_seconds"].unit, "s")
+        self.assertEqual(
+            by_key["notificaciones.sound_block_duration_seconds"].unit,
+            "s",
+        )
+
     def test_layout_defaults_include_settings_slot(self) -> None:
         ids = {slot.id for slot in DEFAULT_LAYOUT}
         self.assertIn("settings", ids)

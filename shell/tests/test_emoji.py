@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 from shell.servicios.emojis.catalogo import EmojiRecord, load_emojis, search_emojis
+from shell.servicios.emojis.recientes import EmojiRecentStore
 
 
 def _catalog() -> tuple[EmojiRecord, ...]:
@@ -47,6 +51,29 @@ def test_selection_keeps_the_glyph() -> None:
 
 def test_unknown_query_is_empty() -> None:
     assert search_emojis(_catalog(), "xyzzy-no-emoji") == ()
+
+
+def test_recent_emojis_persist_in_most_recent_order() -> None:
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "recent.json"
+        store = EmojiRecentStore(path, limit=3)
+        catalog = _catalog()
+        store.remember("😀")
+        store.remember("❤️")
+        store.remember("😀")
+
+        reloaded = EmojiRecentStore(path, limit=3)
+        assert [emoji.glyph for emoji in reloaded.recent(catalog)] == ["😀", "❤️"]
+
+
+def test_recent_emojis_ignore_unknown_catalog_entries() -> None:
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "recent.json"
+        store = EmojiRecentStore(path)
+        store.remember("missing")
+        store.remember("🐱")
+
+        assert [emoji.glyph for emoji in store.recent(_catalog())] == ["🐱"]
 
 
 def test_local_catalog_is_substantial() -> None:

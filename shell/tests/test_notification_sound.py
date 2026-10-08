@@ -60,6 +60,41 @@ def test_sound_gate_prevents_overlap_and_enforces_minimum_interval() -> None:
     gate.finish()
 
 
+def test_sound_gate_blocks_after_three_executions_for_configured_duration() -> None:
+    gate = notification_sound.NotificationSoundGate(
+        minimum_interval=0.0,
+        max_executions_per_window=3,
+        window_seconds=60.0,
+        block_duration_seconds=60.0,
+    )
+
+    for now in (10.0, 11.0, 12.0):
+        assert gate.try_start(now=now) is True
+        gate.finish()
+
+    assert gate.try_start(now=13.0) is False
+    assert gate.try_start(now=72.0) is True
+    gate.finish()
+
+
+def test_sound_gate_reads_modified_config_values_at_runtime() -> None:
+    from shell import config as shell_config
+
+    with (
+        patch.object(shell_config, "NOTIFICATIONS_SOUND_MAX_EXECUTIONS_PER_WINDOW", 2),
+        patch.object(shell_config, "NOTIFICATIONS_SOUND_WINDOW_SECONDS", 10.0),
+        patch.object(shell_config, "NOTIFICATIONS_SOUND_BLOCK_DURATION_SECONDS", 5.0),
+    ):
+        gate = notification_sound.NotificationSoundGate(minimum_interval=0.0)
+        assert gate.try_start(now=10.0) is True
+        gate.finish()
+        assert gate.try_start(now=11.0) is True
+        gate.finish()
+        assert gate.try_start(now=12.0) is False
+        assert gate.try_start(now=17.0) is True
+        gate.finish()
+
+
 def test_incoming_notification_requests_sound_playback() -> None:
     from shell import config as shell_config
     from shell.models import NOTIFICATION_KIND_NORMAL

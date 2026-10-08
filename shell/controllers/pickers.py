@@ -14,6 +14,7 @@ from gi.repository import GLib, Gtk
 from ..eventbus import EventBus
 from ..popup_handle import PopupHandle
 from ..servicios.emojis.catalogo import load_emojis
+from ..servicios.emojis.recientes import EmojiRecentStore
 from ..servicios.escritorio.hyprland import HyprlandService
 from ..servicios.portapapeles.servicio import (
     CLIPBOARD_CHANGED,
@@ -24,6 +25,7 @@ from ..servicios.portapapeles.servicio import (
 )
 from ..widgets.pickers.clipboard import ClipboardPickerWindow
 from ..widgets.pickers.emoji import EmojiPickerWindow
+from ..runtime_paths import emoji_recents_path
 
 
 class PickersController:
@@ -43,6 +45,7 @@ class PickersController:
         self._hyprland = hyprland
         self._close_launcher = close_launcher
         self._emojis = None
+        self._emoji_recents = EmojiRecentStore(emoji_recents_path())
         self._paste_target = ""
         self._clipboard_picker = PopupHandle(
             lambda: ClipboardPickerWindow(
@@ -56,6 +59,7 @@ class PickersController:
             lambda: EmojiPickerWindow(
                 shell_window,
                 on_refresh=self._emoji_catalog,
+                on_recent=self._recent_emoji_catalog,
                 on_copy=self._select_emoji,
             )
         )
@@ -111,6 +115,9 @@ class PickersController:
             self._emojis = load_emojis()
         return self._emojis
 
+    def _recent_emoji_catalog(self):
+        return self._emoji_recents.recent(self._emoji_catalog())
+
     def _remember_paste_target(self) -> None:
         snapshot = self._hyprland.snapshot
         self._paste_target = snapshot.active_window.address if snapshot is not None else ""
@@ -125,6 +132,7 @@ class PickersController:
         self._copy_and_paste(entry.text, lambda: self._clipboard.remember_text(entry.text))
 
     def _select_emoji(self, text: str) -> None:
+        self._emoji_recents.remember(text)
         self._copy_and_paste(text)
 
     def _copy_and_paste(self, text: str, after_copy: Callable[[], object] | None = None) -> None:

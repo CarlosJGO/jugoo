@@ -57,6 +57,10 @@ def clipboard_history_path() -> Path:
     return xdg_data_dir() / CLIPBOARD_HISTORY_PATH
 
 
+def emoji_recents_path() -> Path:
+    return xdg_data_dir() / "emoji_recents.json"
+
+
 def clipboard_images_dir() -> Path:
     """Binary clipboard image store (relative paths live under this tree)."""
     return xdg_data_dir() / CLIPBOARD_IMAGES_DIR

@@ -6,28 +6,96 @@ import shutil
 import subprocess
 import threading
 import time
+from collections import deque
 from pathlib import Path
+
+from ... import config
 
 _PLAYBACK_TIMEOUT_SEC = 5.0
 MIN_SOUND_INTERVAL_SEC = 1.5
 
 
 class NotificationSoundGate:
-    """Prevent overlapping notification sounds and enforce a minimum start gap."""
+    """Prevent overlapping sounds and limit repeated notification sounds."""
 
-    def __init__(self, minimum_interval: float = MIN_SOUND_INTERVAL_SEC) -> None:
+    def __init__(
+        self,
+        minimum_interval: float = MIN_SOUND_INTERVAL_SEC,
+        *,
+        max_executions_per_window: int | None = None,
+        window_seconds: float | None = None,
+        block_duration_seconds: float | None = None,
+    ) -> None:
         self._minimum_interval = max(0.0, float(minimum_interval))
+        self._use_config_max_executions = max_executions_per_window is None
+        self._use_config_window = window_seconds is None
+        self._use_config_block_duration = block_duration_seconds is None
+        self._max_executions_per_window = max(
+            1,
+            int(
+                max_executions_per_window
+                if not self._use_config_max_executions
+                else config.NOTIFICATIONS_SOUND_MAX_EXECUTIONS_PER_WINDOW
+            ),
+        )
+        self._window_seconds = max(
+            0.0,
+            float(
+                window_seconds
+                if not self._use_config_window
+                else config.NOTIFICATIONS_SOUND_WINDOW_SECONDS
+            ),
+        )
+        self._block_duration_seconds = max(
+            0.0,
+            float(
+                block_duration_seconds
+                if not self._use_config_block_duration
+                else config.NOTIFICATIONS_SOUND_BLOCK_DURATION_SECONDS
+            ),
+        )
         self._lock = threading.Lock()
         self._playing = False
         self._last_started_at = float("-inf")
+        self._started_at: deque[float] = deque()
+        self._blocked_until = float("-inf")
 
     def try_start(self, now: float | None = None) -> bool:
         current_time = time.monotonic() if now is None else float(now)
         with self._lock:
+            if self._use_config_max_executions:
+                self._max_executions_per_window = max(
+                    1, int(config.NOTIFICATIONS_SOUND_MAX_EXECUTIONS_PER_WINDOW)
+                )
+            if self._use_config_window:
+                self._window_seconds = max(
+                    0.0, float(config.NOTIFICATIONS_SOUND_WINDOW_SECONDS)
+                )
+            if self._use_config_block_duration:
+                self._block_duration_seconds = max(
+                    0.0, float(config.NOTIFICATIONS_SOUND_BLOCK_DURATION_SECONDS)
+                )
+
+            if current_time < self._blocked_until:
+                return False
             if self._playing or current_time - self._last_started_at < self._minimum_interval:
                 return False
+
+            cutoff = current_time - self._window_seconds
+            while self._started_at and self._started_at[0] <= cutoff:
+                self._started_at.popleft()
+
+            if len(self._started_at) >= self._max_executions_per_window:
+                self._blocked_until = current_time + self._block_duration_seconds
+                self._started_at.clear()
+                return False
+
+            self._started_at.append(current_time)
             self._playing = True
             self._last_started_at = current_time
+            if len(self._started_at) >= self._max_executions_per_window:
+                self._blocked_until = current_time + self._block_duration_seconds
+                self._started_at.clear()
             return True
 
     def finish(self) -> None:

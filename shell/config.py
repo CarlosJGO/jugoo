@@ -234,6 +234,9 @@ NOTIFICATIONS_GROUPING_EXCEPTIONS = ""
 # Sound (non-blocking; shell works without the file).
 NOTIFICATIONS_SOUND_ENABLED = True
 NOTIFICATIONS_SOUND_PATH = "assets/notification.ogg"
+NOTIFICATIONS_SOUND_MAX_EXECUTIONS_PER_WINDOW = 3
+NOTIFICATIONS_SOUND_WINDOW_SECONDS = 60
+NOTIFICATIONS_SOUND_BLOCK_DURATION_SECONDS = 60
 
 # Icon cache for image-data hints (outside the config tree).
 NOTIFICATIONS_ICON_CACHE_DIR = ".cache/waybar-shell/notification-icons"

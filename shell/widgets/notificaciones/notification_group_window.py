@@ -357,6 +357,7 @@ class NotificationGroupWindow(Gtk.Window):
         # Last placed screen coords (X stays fixed while Y animates between parents).
         self._placed_x: int | None = None
         self._placed_y: int | None = None
+        self._placed_height: int | None = None
         # Shared transition timeline (content slide + window Y).
         self._shared_tick_id = 0
         self._shared_using_frame_clock = False
@@ -660,6 +661,12 @@ class NotificationGroupWindow(Gtk.Window):
             ideal_y = parent_center_y - window_height // 2
 
         top = self._clamp_y(ideal_y, window_height, panel_top, panel_bottom)
+        if (
+            self._placed_y is not None
+            and self._placed_height is not None
+            and window_height < self._placed_height
+        ):
+            top = self._placed_y
         return left, top
 
     def _panel_vertical_bounds(
@@ -741,6 +748,7 @@ class NotificationGroupWindow(Gtk.Window):
                 x=nx,
                 y=ny,
             )
+        self._placed_height = self.get_size_request().height
 
     def _shared_raw_t(self) -> float:
         duration = float(max(1, NOTIFICATION_GROUP_SLIDE_DURATION_MS))
