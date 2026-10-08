@@ -444,7 +444,7 @@ class ClipboardPickerWindow(PickerOverlay):
 
     def _select_entry(self, entry: ClipboardEntry) -> None:
         self._on_copy(entry.id)
-        self.close_picker()
+        self.dismiss_immediately()
 
     def _on_row_selected(
         self, _list: Gtk.ListBox, row: Gtk.ListBoxRow | None

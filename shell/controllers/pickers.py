@@ -145,7 +145,7 @@ class PickersController:
                 after_copy()
             paste_text_to_window(target)
 
-        threading.Thread(target=worker, name="picker-copy-paste", daemon=True).start()
+        self._start_paste_worker(worker)
 
     def _copy_and_paste_image(self, entry) -> None:
         target = self._paste_target
@@ -164,7 +164,22 @@ class PickersController:
             self._clipboard.remember_image(payload, mime=mime)
             paste_text_to_window(target)
 
-        threading.Thread(target=worker, name="picker-copy-paste-image", daemon=True).start()
+        self._start_paste_worker(worker)
+
+    def _start_paste_worker(self, worker: Callable[[], None]) -> None:
+        """Hide the puerta before Ctrl+V so the shortcut reaches the previous entry."""
+        self._dismiss_for_paste()
+
+        def launch() -> bool:
+            threading.Thread(target=worker, name="picker-copy-paste", daemon=True).start()
+            return False
+
+        GLib.timeout_add(50, launch)
+
+    def _dismiss_for_paste(self) -> None:
+        for picker in (self._clipboard_picker.maybe, self._emoji_picker.maybe):
+            if picker is not None:
+                picker.dismiss_immediately()
 
     def _on_clipboard_changed(self, entries: object) -> None:
         picker = self._clipboard_picker.maybe

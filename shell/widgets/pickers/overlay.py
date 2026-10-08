@@ -433,7 +433,24 @@ class PickerOverlay(Gtk.Window):
         theme = active_theme()
         return theme is None or theme.animation.enabled
 
+    def dismiss_immediately(self) -> None:
+        """Unmap without the close animation and drop the keyboard grab.
+
+        Clipboard and emoji paste a Ctrl+V into the previous window. The door
+        animation would keep this layer mapped with exclusive keyboard, so the
+        shortcut would land here instead of in the entry the user was typing.
+        """
+        self._session.close_session()
+        self._present_generation += 1
+        self._opening = False
+        self._closing = False
+        self._cancel_size_anim()
+        self._door.cancel()
+        GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.NONE)
+        self.hide()
+
     def _present_door(self) -> None:
+        GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.EXCLUSIVE)
         # Already fully open: refresh size after content changes, do not replay the door.
         if (
             self.get_visible()

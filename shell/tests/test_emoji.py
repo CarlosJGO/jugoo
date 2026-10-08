@@ -5,6 +5,8 @@ from tempfile import TemporaryDirectory
 
 from shell.servicios.emojis.catalogo import EmojiRecord, load_emojis, search_emojis
 from shell.servicios.emojis.recientes import EmojiRecentStore
+from shell.widgets.pickers.emoji import _origin_in
+from shell.widgets.pickers.session import scroll_to_reveal
 
 
 def _catalog() -> tuple[EmojiRecord, ...]:
@@ -86,6 +88,56 @@ def test_local_catalog_is_substantial() -> None:
     spanish_hits = search_emojis(emojis, "sonrisa")
     grinning_hits = search_emojis(emojis, "grinning")
     assert spanish_hits or grinning_hits
+
+
+class _Alloc:
+    def __init__(self, x: int, y: int) -> None:
+        self.x = x
+        self.y = y
+
+
+class _Node:
+    def __init__(self, x: int, y: int, parent: "_Node | None" = None, translated=None) -> None:
+        self._alloc = _Alloc(x, y)
+        self._parent = parent
+        self._translated = translated
+
+    def translate_coordinates(self, _ancestor: object, _x: int, _y: int):
+        return self._translated
+
+    def get_allocation(self) -> _Alloc:
+        return self._alloc
+
+    def get_parent(self) -> "_Node | None":
+        return self._parent
+
+
+def test_scroll_follows_emoji_below_the_page() -> None:
+    value = scroll_to_reveal(0, 200, 400, 36)
+    assert value == 240
+    assert 400 >= value
+    assert 400 + 36 <= value + 200
+
+
+def test_scroll_follows_emoji_above_the_page() -> None:
+    assert scroll_to_reveal(300, 200, 10, 36) == 6
+
+
+def test_scroll_keeps_emoji_already_visible() -> None:
+    assert scroll_to_reveal(100, 200, 120, 36) == 100
+
+
+def test_origin_reads_the_xy_pair() -> None:
+    content = _Node(0, 0)
+    cell = _Node(0, 0, content, translated=(12, 480))
+    assert _origin_in(cell, content) == (12, 480)
+
+
+def test_origin_sums_allocations_when_translation_is_unavailable() -> None:
+    content = _Node(0, 0)
+    flow = _Node(4, 40, content)
+    cell = _Node(8, 120, flow)
+    assert _origin_in(cell, content) == (12, 160)
 
 
 def _run() -> None:

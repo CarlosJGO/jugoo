@@ -28,6 +28,7 @@ from .session import (
     KEY_RIGHT,
     KEY_UP,
     PickerSession,
+    scroll_to_reveal,
 )
 
 
@@ -275,21 +276,45 @@ class EmojiPickerWindow(PickerOverlay):
 
     def _select_emoji(self, emoji: EmojiRecord) -> None:
         self._on_copy(emoji.glyph)
-        self.close_picker()
+        self.dismiss_immediately()
 
     def _on_child_activated(self, _flow: Gtk.FlowBox, child: Gtk.FlowBoxChild) -> None:
         if isinstance(child, EmojiCell):
             self._select_emoji(child.emoji)
 
-    def _ensure_child_visible(self, child: Gtk.FlowBoxChild) -> bool:
-        translated, _x, y = child.translate_coordinates(self._content, 0, 0)
-        adj = self._scrolled.get_vadjustment()
-        if not translated or adj is None:
+    def _ensure_child_visible(self, child: Gtk.FlowBoxChild, attempt: int = 0) -> bool:
+        origin = _origin_in(child, self._content)
+        adjustment = self._scrolled.get_vadjustment()
+        height = child.get_allocated_height()
+        page = 0.0 if adjustment is None else adjustment.get_page_size()
+        if origin is None or adjustment is None or height <= 0 or page <= 0:
+            if attempt < 2:
+                GLib.idle_add(self._ensure_child_visible, child, attempt + 1)
             return False
-        value = adj.get_value()
-        page = adj.get_page_size()
-        if y < value:
-            adj.set_value(y)
-        elif y + child.get_allocated_height() > value + page:
-            adj.set_value(y + child.get_allocated_height() - page)
+        _x, y = origin
+        target = scroll_to_reveal(adjustment.get_value(), page, y, height)
+        if abs(target - adjustment.get_value()) > 0.5:
+            adjustment.set_value(target)
         return False
+
+
+def _origin_in(widget: Gtk.Widget, ancestor: Gtk.Widget) -> tuple[int, int] | None:
+    """Position of ``widget`` inside ``ancestor``.
+
+    ``translate_coordinates`` returns ``(x, y)`` or ``None``. Unpacking a
+    success flag from that pair used to abort the scroll callback.
+    """
+    translated = widget.translate_coordinates(ancestor, 0, 0)
+    if translated is not None:
+        return int(translated[0]), int(translated[1])
+    x = 0
+    y = 0
+    current: Gtk.Widget | None = widget
+    while current is not None and current is not ancestor:
+        allocation = current.get_allocation()
+        x += int(allocation.x)
+        y += int(allocation.y)
+        current = current.get_parent()
+    if current is not ancestor:
+        return None
+    return x, y

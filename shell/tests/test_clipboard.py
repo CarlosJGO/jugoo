@@ -467,7 +467,7 @@ def test_paste_text_to_window_sends_shortcut_to_address() -> None:
         seen.append(command)
         return _Result()
 
-    assert paste_text_to_window("0x123", runner=runner) is True
+    assert paste_text_to_window("0x123", runner=runner, settle_seconds=0) is True
     assert seen == [
         [
             "hyprctl",
@@ -476,6 +476,35 @@ def test_paste_text_to_window_sends_shortcut_to_address() -> None:
         ],
         ["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"],
     ]
+
+
+def test_paste_sends_shortcut_when_focus_fails() -> None:
+    seen: list[object] = []
+
+    class _Result:
+        def __init__(self, code: int) -> None:
+            self.returncode = code
+
+    def runner(command, **kwargs):
+        seen.append(command)
+        return _Result(1 if command[0] == "hyprctl" else 0)
+
+    assert paste_text_to_window("0x123", runner=runner, settle_seconds=0) is True
+    assert [command[0] for command in seen] == ["hyprctl", "wtype"]
+
+
+def test_paste_without_address_still_sends_shortcut() -> None:
+    seen: list[object] = []
+
+    class _Result:
+        returncode = 0
+
+    def runner(command, **kwargs):
+        seen.append(command)
+        return _Result()
+
+    assert paste_text_to_window("  ", runner=runner, settle_seconds=0) is True
+    assert seen == [["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"]]
 
 
 def _run() -> None:

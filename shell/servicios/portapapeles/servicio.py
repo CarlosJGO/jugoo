@@ -50,26 +50,33 @@ def paste_text_to_window(
     address: str,
     *,
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    settle_seconds: float = 0.15,
 ) -> bool:
-    """Focus the previous window and send Ctrl+V without blocking GTK."""
-    if not address.strip():
-        return False
-    escaped_address = address.strip().replace("\\", "\\\\").replace('"', '\\"')
+    """Focus the previous window, then send Ctrl+V.
+
+    The picker must already have released its exclusive keyboard grab. A failed
+    focus dispatch still sends the shortcut: unmapping that layer returns the
+    keyboard to the client the user was typing in.
+    """
+    if address.strip():
+        escaped_address = address.strip().replace("\\", "\\\\").replace('"', '\\"')
+        try:
+            runner(
+                [
+                    "hyprctl",
+                    "dispatch",
+                    f'hl.dsp.focus({{ window = "address:{escaped_address}" }})',
+                ],
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    if settle_seconds > 0:
+        time.sleep(settle_seconds)
     try:
-        focused = runner(
-            [
-                "hyprctl",
-                "dispatch",
-                f'hl.dsp.focus({{ window = "address:{escaped_address}" }})',
-            ],
-            capture_output=True,
-            text=True,
-            timeout=2.0,
-            check=False,
-        )
-        if focused.returncode != 0:
-            return False
-        time.sleep(0.15)
         pasted = runner(
             ["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"],
             capture_output=True,

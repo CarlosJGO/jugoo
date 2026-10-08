@@ -104,3 +104,29 @@ class PickerSession:
             self.move(*_HORIZONTAL[key])
             return ACTION_MOVED
         return ACTION_IGNORE
+
+
+def scroll_to_reveal(
+    value: float,
+    page: float,
+    y: float,
+    height: float,
+    *,
+    margin: float = 4.0,
+) -> float:
+    """Return the vertical adjustment that keeps ``y``..``y + height`` on screen.
+
+    Mirrors ``Gtk.Adjustment.clamp_page``: if the range is taller than the page,
+    the top edge wins so the focused row stays anchored in view.
+    """
+    if page <= 0 or height <= 0:
+        return value
+    top = y - margin
+    bottom = y + height + margin
+    if value + page < bottom:
+        value = bottom - page
+    if value > top:
+        value = top
+    if value < 0:
+        return 0.0
+    return value
