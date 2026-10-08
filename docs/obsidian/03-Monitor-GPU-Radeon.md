@@ -20,10 +20,10 @@
 
 ## Umbrales actuales
 
-En `system.py`:
+Los valores vivos están en `shell/config.py` y se editan en el apartado Estadísticas. Por defecto:
 
-- `GPU_TEMP_RANGES`: hasta 49 °C `cold`, hasta 72 °C `normal`, desde 73 °C `hot`.
-- `GPU_FAN_START_TEMP`: desde 50 °C se anima el ventilador.
+- `STATS_GPU_COLD_C` / `STATS_GPU_NORMAL_C`: hasta 49 °C `cold`, hasta 72 °C `normal`, desde 73 °C `hot`.
+- `STATS_GPU_FAN_START_C`: desde 50 °C se anima el ventilador.
 - El hot spot no decide el color ni el giro; se muestra como dato adicional del tooltip.
 
 ## Cambiar el tooltip

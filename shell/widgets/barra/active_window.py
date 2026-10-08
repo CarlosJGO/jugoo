@@ -199,8 +199,18 @@ class ActiveWindowWidget(Gtk.EventBox):
             _PLAYER_ARTWORK_SIZE,
             _PLAYER_ARTWORK_SIZE,
         )
-        self._player_artwork.set_halign(Gtk.Align.START)
-        self._player_artwork.set_valign(Gtk.Align.FILL)
+        self._player_artwork.set_halign(Gtk.Align.CENTER)
+        self._player_artwork.set_valign(Gtk.Align.CENTER)
+        self._player_art_slot = Gtk.Overlay()
+        self._player_art_slot.set_size_request(_PLAYER_ARTWORK_SIZE, _PLAYER_ARTWORK_SIZE)
+        self._player_spinner = Gtk.Spinner()
+        self._player_spinner.get_style_context().add_class("track-change-spinner")
+        self._player_spinner.set_halign(Gtk.Align.CENTER)
+        self._player_spinner.set_valign(Gtk.Align.CENTER)
+        self._player_spinner.set_size_request(22, 22)
+        self._player_spinner.set_no_show_all(True)
+        self._player_art_slot.add(self._player_artwork)
+        self._player_art_slot.add_overlay(self._player_spinner)
 
         metadata = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         metadata.get_style_context().add_class("active-window-player-meta")
@@ -215,7 +225,7 @@ class ActiveWindowWidget(Gtk.EventBox):
         metadata.pack_start(self._player_primary, False, False, 0)
         metadata.pack_start(self._player_artist, False, False, 0)
 
-        content.pack_start(self._player_artwork, False, False, 0)
+        content.pack_start(self._player_art_slot, False, False, 0)
         content.pack_start(metadata, True, True, 0)
 
         overlay = Gtk.Overlay()
@@ -492,11 +502,23 @@ class ActiveWindowWidget(Gtk.EventBox):
 
     def _render_player_media(self, player: MediaPlayerSnapshot) -> None:
         """Render the dedicated, compact in-bar Strawberry player."""
-        self._set_player_artwork(player.artwork_path)
+        self._set_player_transport_busy(self._media_service.transport_busy)
+        if not self._media_service.transport_busy:
+            self._set_player_artwork(player.artwork_path)
         self._player_primary.set_text(player.title or player.identity or "Strawberry")
         artist = player.artist or player.identity
         self._player_artist.set_text(artist)
         self._player_artist.set_no_show_all(not bool(artist.strip()))
+
+    def _set_player_transport_busy(self, busy: bool) -> None:
+        if busy:
+            self._player_artwork.hide()
+            self._player_spinner.show()
+            self._player_spinner.start()
+            return
+        self._player_spinner.stop()
+        self._player_spinner.hide()
+        self._player_artwork.show()
 
     def _set_player_artwork(self, artwork_path: str) -> None:
         """Fill the player block height with cached MPRIS artwork."""
@@ -521,6 +543,7 @@ class ActiveWindowWidget(Gtk.EventBox):
         self._player_artwork.set_pixel_size(max(16, size - 8))
 
     def _render_player_idle(self) -> None:
+        self._set_player_transport_busy(False)
         self._set_player_artwork("")
         self._player_primary.set_text("Strawberry")
         self._player_artist.set_text("Sin reproducción")
@@ -559,10 +582,10 @@ class ActiveWindowWidget(Gtk.EventBox):
             + 6
         )
         try:
-            translated = self._player_artwork.translate_coordinates(widget, 0, 0)
+            translated = self._player_art_slot.translate_coordinates(widget, 0, 0)
             artwork_width = max(
                 _PLAYER_ARTWORK_SIZE,
-                self._player_artwork.get_allocated_width(),
+                self._player_art_slot.get_allocated_width(),
             )
             if len(translated) == 3:
                 success, x, _y = translated

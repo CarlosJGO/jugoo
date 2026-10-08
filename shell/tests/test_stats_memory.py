@@ -158,3 +158,54 @@ def test_stats_widget_uses_total_system_ram_usage_not_app_only() -> None:
 
     assert widget._memory_percent_label.text == "RAM 60%"
     assert widget._memory_value_label.text == "6 KB"
+
+
+def test_thermal_colors_follow_editable_thresholds() -> None:
+    import shell.config as shell_config
+    from shell.servicios.sistema.system import CpuStats, GpuStats
+
+    saved = (
+        shell_config.STATS_CPU_COLD_C,
+        shell_config.STATS_CPU_NORMAL_C,
+        shell_config.STATS_CPU_WARM_C,
+        shell_config.STATS_GPU_COLD_C,
+        shell_config.STATS_GPU_NORMAL_C,
+        shell_config.STATS_GPU_FAN_START_C,
+    )
+    try:
+        shell_config.STATS_CPU_COLD_C = 40
+        shell_config.STATS_CPU_NORMAL_C = 60
+        shell_config.STATS_CPU_WARM_C = 70
+        assert CpuStats(temperature_c=40).temperature_level == "cold"
+        assert CpuStats(temperature_c=41).temperature_level == "normal"
+        assert CpuStats(temperature_c=70).temperature_level == "warm"
+        assert CpuStats(temperature_c=71).temperature_level == "hot"
+
+        shell_config.STATS_CPU_COLD_C = 90
+        shell_config.STATS_CPU_NORMAL_C = 50
+        shell_config.STATS_CPU_WARM_C = 60
+        assert CpuStats(temperature_c=90).temperature_level == "cold"
+        assert CpuStats(temperature_c=91).temperature_level == "hot"
+
+        shell_config.STATS_GPU_COLD_C = 45
+        shell_config.STATS_GPU_NORMAL_C = 70
+        shell_config.STATS_GPU_FAN_START_C = 55
+        assert GpuStats(temperature_c=45).temperature_level == "cold"
+        assert GpuStats(temperature_c=71).temperature_level == "hot"
+        assert GpuStats(temperature_c=54).fan_spinning is False
+        assert GpuStats(temperature_c=55).fan_spinning is True
+    finally:
+        (
+            shell_config.STATS_CPU_COLD_C,
+            shell_config.STATS_CPU_NORMAL_C,
+            shell_config.STATS_CPU_WARM_C,
+            shell_config.STATS_GPU_COLD_C,
+            shell_config.STATS_GPU_NORMAL_C,
+            shell_config.STATS_GPU_FAN_START_C,
+        ) = saved
+
+
+if __name__ == "__main__":
+    test_stats_widget_uses_total_system_ram_usage_not_app_only()
+    test_thermal_colors_follow_editable_thresholds()
+    print("stats memory tests OK")

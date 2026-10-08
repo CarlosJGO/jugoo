@@ -6,7 +6,7 @@ import logging
 import subprocess
 import time
 from dataclasses import replace
-from typing import Any
+from typing import Any, Callable
 
 import gi
 
@@ -16,6 +16,7 @@ gi.require_version("GLib", "2.0")
 from gi.repository import Gio, GLib
 
 _DBUS_TIMEOUT_MS = 3_000
+_TRANSPORT_WAIT_MS = 8_000
 
 from ...config import (
     MEDIA_DBUS_PROPERTIES,
@@ -328,10 +329,20 @@ class MediaService:
         self._volume_flush_source_id = 0
         self._volume_write_generation = 0
         self._volume_inflight = False
+        self._transport_busy = False
+        self._transport_token = 0
+        self._transport_baseline = ("", "")
+        self._transport_polls_left = 0
+        self._clear_transport_on_refresh = False
 
     @property
     def snapshot(self) -> MediaSnapshot:
         return self._snapshot
+
+    @property
+    def transport_busy(self) -> bool:
+        """True while Next/Previous is in flight and the new track is not ready."""
+        return self._transport_busy
 
     @property
     def manual_player(self) -> str | None:
@@ -465,12 +476,7 @@ class MediaService:
         if state is None:
             return
 
-        def run_transport() -> bool:
-            self._player_method_idle(state.player_proxy, "Previous")
-            self._schedule_track_change_refresh()
-            return False
-
-        GLib.idle_add(run_transport)
+        self._start_track_transport(state.player_proxy, "Previous", bus_name)
 
     def next_track_player(self) -> None:
         """Bar cava transport: next track on Strawberry only."""
@@ -484,12 +490,7 @@ class MediaService:
         if state is None:
             return
 
-        def run_transport() -> bool:
-            self._player_method_idle(state.player_proxy, "Next")
-            self._schedule_track_change_refresh()
-            return False
-
-        GLib.idle_add(run_transport)
+        self._start_track_transport(state.player_proxy, "Next", bus_name)
 
     def volume_up_player(self) -> None:
         """Bar/global bind: raise Strawberry MPRIS volume."""
@@ -711,12 +712,7 @@ class MediaService:
         if state is None:
             return
 
-        def run_transport() -> bool:
-            self._player_method_idle(state.player_proxy, method)
-            self._schedule_track_change_refresh()
-            return False
-
-        GLib.idle_add(run_transport)
+        self._start_track_transport(state.player_proxy, method, active)
 
     def seek(self, offset_usec: int) -> None:
         if self._bus is None:
@@ -907,17 +903,86 @@ class MediaService:
 
     @staticmethod
     def _player_method_idle(proxy: Gio.DBusProxy, method: str) -> bool:
+        MediaService._call_player_method(proxy, method, lambda _ok: None)
+        return False
+
+    @staticmethod
+    def _call_player_method(
+        proxy: Gio.DBusProxy,
+        method: str,
+        on_done: Callable[[bool], None],
+    ) -> None:
+        """Send an MPRIS method without blocking the GTK thread."""
+
+        def _finish(source: Gio.DBusProxy, result: Gio.AsyncResult, _data: object) -> None:
+            try:
+                source.call_finish(result)
+            except GLib.Error as exc:
+                _logger.debug("MPRIS %s failed: %s", method, exc.message)
+                on_done(False)
+                return
+            on_done(True)
+
         try:
-            proxy.call_sync(
+            proxy.call(
                 method,
                 None,
                 Gio.DBusCallFlags.NONE,
                 _DBUS_TIMEOUT_MS,
                 None,
+                _finish,
+                None,
             )
         except GLib.Error as exc:
             _logger.debug("MPRIS %s failed: %s", method, exc.message)
+            on_done(False)
+            return
+        # Test doubles record the call and never reply. A real proxy replies later.
+        if not isinstance(proxy, Gio.DBusProxy):
+            on_done(True)
+
+    def _start_track_transport(self, proxy: Gio.DBusProxy, method: str, _bus_name: str) -> None:
+        self._arm_transport_wait()
+
+        def after(ok: bool) -> None:
+            if not ok:
+                self._clear_transport_wait()
+                return
+            self._clear_transport_on_refresh = True
+            self._schedule_track_change_refresh()
+
+        self._call_player_method(proxy, method, after)
+
+    def _arm_transport_wait(self) -> None:
+        self._transport_token += 1
+        token = self._transport_token
+        active = self._snapshot.active
+        self._transport_baseline = (
+            "" if active is None else active.title,
+            "" if active is None else active.artwork_path,
+        )
+        self._transport_polls_left = 12
+        if not self._transport_busy:
+            self._transport_busy = True
+            self._event_bus.emit(MEDIA_CHANGED, self._snapshot)
+
+        def expire() -> bool:
+            return self._expire_transport_wait(token)
+
+        GLib.timeout_add(_TRANSPORT_WAIT_MS, expire)
+
+    def _expire_transport_wait(self, token: int) -> bool:
+        if token == self._transport_token:
+            self._clear_transport_on_refresh = False
+            self._clear_transport_wait()
         return False
+
+    def _clear_transport_wait(self) -> None:
+        self._transport_token += 1
+        if not self._transport_busy:
+            return
+        self._transport_busy = False
+        self._event_bus.emit(MEDIA_CHANGED, self._snapshot)
 
     def _seek_idle(self, proxy: Gio.DBusProxy, offset_usec: int) -> bool:
         try:
@@ -1221,7 +1286,22 @@ class MediaService:
         self._track_refresh_source_id = 0
         self._cancel_refresh()
         self._refresh_snapshot(emit=True)
+        if not self._clear_transport_on_refresh:
+            return False
+        if self._transport_track_ready() or self._transport_polls_left <= 0:
+            self._clear_transport_on_refresh = False
+            self._clear_transport_wait()
+            return False
+        self._transport_polls_left -= 1
+        self._schedule_track_change_refresh()
         return False
+
+    def _transport_track_ready(self) -> bool:
+        active = self._snapshot.active
+        if active is None:
+            return True
+        title, artwork = self._transport_baseline
+        return active.title != title or active.artwork_path != artwork
 
     def _cancel_track_change_refresh(self) -> None:
         if self._track_refresh_source_id:

@@ -10,8 +10,12 @@ gi.require_version("GLib", "2.0")
 
 from gi.repository import GdkPixbuf, GLib
 
+from unittest import mock
+
 from shell.servicios.bandeja.tray import (
     SystemTrayService,
+    TrayItemSnapshot,
+    _TrayItemState,
     _argb32_to_rgba,
     _human_label,
     _looks_like_sni_address,
@@ -179,6 +183,39 @@ def test_snapshot_prefers_tooltip_over_chromium_id() -> None:
     assert "StatusNotifierItem" not in snapshot.title
 
 
+def test_context_menu_returns_before_the_item_replies() -> None:
+    service = SystemTrayService()
+    proxy = mock.Mock()
+    snapshot = TrayItemSnapshot(
+        address="addr",
+        bus_name=":1.9",
+        object_path="/StatusNotifierItem",
+        item_id="unityhub",
+        title="Unity Hub",
+        tooltip="",
+        status="Active",
+        icon_name=None,
+        icon_pixbuf=None,
+        menu_bus=None,
+        menu_path=None,
+        item_is_menu=False,
+        supports_context_menu=True,
+    )
+    service._items["addr"] = _TrayItemState(
+        address="addr",
+        bus_name=":1.9",
+        object_path="/StatusNotifierItem",
+        proxy=proxy,
+        snapshot=snapshot,
+        methods=frozenset({"ContextMenu"}),
+    )
+
+    assert service.context_menu("addr", 4, 8) is True
+    proxy.call.assert_called_once()
+    assert proxy.call.call_args.args[0] == "ContextMenu"
+    proxy.call_sync.assert_not_called()
+
+
 def test_resolve_named_icon_absolute_path(tmp_path) -> None:
     icon_path = tmp_path / "app.png"
     pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, 2, 2)
@@ -199,4 +236,5 @@ if __name__ == "__main__":
     test_tray_service_refreshes_on_property_changes()
     test_human_labels_hide_dbus_noise()
     test_snapshot_never_exposes_dbus_address_as_tooltip()
+    test_context_menu_returns_before_the_item_replies()
     print("tray safe tests OK")

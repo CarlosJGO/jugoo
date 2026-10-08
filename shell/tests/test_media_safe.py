@@ -14,6 +14,7 @@ from gi.repository import GLib
 from shell.eventbus import EventBus
 from shell.models import MediaPlayerSnapshot, MediaSnapshot
 from shell.servicios.multimedia.media import (
+    MEDIA_CHANGED,
     MEDIA_DISPLAY_PLAYER,
     MEDIA_DISPLAY_WINDOW,
     MediaService,
@@ -1031,8 +1032,9 @@ def test_play_pause_calls_mpris_method() -> None:
     with mock.patch("shell.servicios.multimedia.media.GLib.idle_add", side_effect=lambda fn, *args: fn(*args) or False):
         service.play_pause()
 
-    proxy.call_sync.assert_called_once()
-    assert proxy.call_sync.call_args.args[0] == "PlayPause"
+    proxy.call.assert_called_once()
+    assert proxy.call.call_args.args[0] == "PlayPause"
+    proxy.call_sync.assert_not_called()
 
 
 def test_media_popup_dimensions_are_standardized() -> None:
@@ -1286,6 +1288,37 @@ def test_pending_play_poll_uses_strawberry_status_not_window_active() -> None:
     assert play_calls == []
 
 
+def test_track_change_shows_busy_until_refresh_without_call_sync() -> None:
+    service = MediaService(EventBus())
+    service._display_mode = MEDIA_DISPLAY_PLAYER
+    strawberry = _player(
+        bus_name=STRAWBERRY,
+        identity="Strawberry",
+        status="playing",
+        title="Before",
+    )
+    state = _install_player(service, strawberry)
+    service._snapshot = compose_media_snapshot(
+        (strawberry,),
+        manual=None,
+        previous=None,
+        activity_rank={},
+        display_mode=MEDIA_DISPLAY_PLAYER,
+    )
+    seen: list[bool] = []
+    service._event_bus.subscribe(MEDIA_CHANGED, lambda _snapshot: seen.append(service.transport_busy))
+
+    idle, timeout = _run_transport_timers()
+    with idle, timeout, mock.patch.object(service, "_refresh_snapshot"):
+        service.next_track_player()
+
+    state.player_proxy.call.assert_called_once()
+    assert state.player_proxy.call.call_args.args[0] == "Next"
+    state.player_proxy.call_sync.assert_not_called()
+    assert True in seen
+    assert service.transport_busy is False
+
+
 def test_set_volume_is_async_and_coalesced() -> None:
     from shell.config import MEDIA_VOLUME_FLUSH_MS
     from shell.servicios.multimedia.media import MEDIA_DISPLAY_PLAYER
@@ -1393,5 +1426,6 @@ if __name__ == "__main__":
     test_parse_metadata_variant_from_glib_variant()
     test_pause_arms_strawberry_idle_kill_and_stops_pending_play()
     test_pending_play_poll_uses_strawberry_status_not_window_active()
+    test_track_change_shows_busy_until_refresh_without_call_sync()
     test_set_volume_is_async_and_coalesced()
     print("media safe tests OK")

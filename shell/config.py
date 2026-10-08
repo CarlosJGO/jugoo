@@ -132,12 +132,19 @@ TASK_WATCHER_COMPUTE_OVERHEAD_BYTES = 64 * 1024 * 1024
 TASK_WATCHER_QUIET_AFTER_INTERVALS = 2
 TASK_WATCHER_STALE_AFTER_INTERVALS = 3
 
-# System statistics module. Thermal thresholds live in shell/servicios/sistema/system.py.
+# System statistics module. Color steps and the GPU fan start are editable
+# from the Estadísticas settings page; the service reads these live.
 SYSTEM_STATS_UPDATE_INTERVAL = 1
 STATS_SECTION_SPACING = 12
 STATS_CPU_BAR_WIDTH = 52
 STATS_CPU_BAR_TEMP_MIN_C = 30.0
 STATS_CPU_BAR_TEMP_MAX_C = 95.0
+STATS_CPU_COLD_C = 50
+STATS_CPU_NORMAL_C = 75
+STATS_CPU_WARM_C = 85
+STATS_GPU_COLD_C = 49
+STATS_GPU_NORMAL_C = 72
+STATS_GPU_FAN_START_C = 50
 STATS_GPU_FAN_ICON_SIZE = 20
 
 # System tray module.

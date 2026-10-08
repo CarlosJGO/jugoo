@@ -1249,6 +1249,12 @@ image.media-popup-artwork {
     min-height: 0;
 }
 
+spinner.track-change-spinner {
+    opacity: 0.92;
+    min-width: 22px;
+    min-height: 22px;
+}
+
 label.media-popup-title {
     color: @shell_text_primary;
     font-size: 16px;

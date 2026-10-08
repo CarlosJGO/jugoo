@@ -716,19 +716,29 @@ class SystemTrayService:
             return False
         if method not in state.methods:
             return False
+
+        def _on_done(proxy: Gio.DBusProxy, result: Gio.AsyncResult, _data: object) -> None:
+            try:
+                proxy.call_finish(result)
+            except GLib.Error as error:
+                # Unity Hub (and other Electron indicators) often answer ContextMenu
+                # only after their menu closes. A sync call froze the whole bar.
+                if _is_stale_dbus_error(error):
+                    GLib.idle_add(self._remove_item, address)
+
         try:
-            state.proxy.call_sync(
+            state.proxy.call(
                 method,
                 parameters,
                 Gio.DBusCallFlags.NONE,
                 5000,
                 None,
+                _on_done,
+                None,
             )
-            return True
-        except GLib.Error as error:
-            if _is_stale_dbus_error(error):
-                GLib.idle_add(self._remove_item, address)
+        except GLib.Error:
             return False
+        return True
 
     def _notify_listener(self) -> None:
         if self._listener is None:

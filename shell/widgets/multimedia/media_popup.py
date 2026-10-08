@@ -226,7 +226,17 @@ class MediaPopup(Gtk.Window):
             Gtk.IconSize.DIALOG,
         )
         self._artwork.get_style_context().add_class("media-popup-artwork")
-        artwork_frame.pack_start(self._artwork, True, True, 0)
+        self._artwork_spinner = Gtk.Spinner()
+        self._artwork_spinner.get_style_context().add_class("track-change-spinner")
+        self._artwork_spinner.set_halign(Gtk.Align.CENTER)
+        self._artwork_spinner.set_valign(Gtk.Align.CENTER)
+        self._artwork_spinner.set_size_request(36, 36)
+        self._artwork_spinner.set_no_show_all(True)
+        art_overlay = Gtk.Overlay()
+        art_overlay.set_size_request(artwork_size, artwork_size)
+        art_overlay.add(self._artwork)
+        art_overlay.add_overlay(self._artwork_spinner)
+        artwork_frame.pack_start(art_overlay, True, True, 0)
         chrome.pack_start(artwork_frame, False, False, 0)
 
         meta = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -390,13 +400,16 @@ class MediaPopup(Gtk.Window):
         self._artist.set_visible(True)
         self._album.set_text(album if album else " ")
         self._album.set_visible(True)
-        self._apply_artwork(self._artwork, player, self._artwork_size, "_artwork_key")
+        self._set_artwork_busy(self._service.transport_busy)
+        if not self._service.transport_busy:
+            self._apply_artwork(self._artwork, player, self._artwork_size, "_artwork_key")
         self._sync_progress(player)
         self._sync_controls(player)
         self._sync_loop(player)
         self._sync_volume(player)
 
     def _refresh_player_idle(self) -> None:
+        self._set_artwork_busy(False)
         self._artwork_key = ""
         self._artwork.set_from_icon_name("audio-x-generic-symbolic", Gtk.IconSize.DIALOG)
         self._artwork.set_pixel_size(self._artwork_size)
@@ -621,6 +634,16 @@ class MediaPopup(Gtk.Window):
         elif bus_name:
             self._service.set_active_player(str(bus_name))
         self._source_popover.popdown()
+
+    def _set_artwork_busy(self, busy: bool) -> None:
+        if busy:
+            self._artwork.hide()
+            self._artwork_spinner.show()
+            self._artwork_spinner.start()
+            return
+        self._artwork_spinner.stop()
+        self._artwork_spinner.hide()
+        self._artwork.show()
 
     def _apply_artwork(
         self,

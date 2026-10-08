@@ -676,6 +676,9 @@ class AppLauncherWindow(PickerOverlay):
         self._mode = destination
         self._update_mode_ui()
         if destination == SEARCH_DESTINATION:
+            # Settings-first opens never ran the deferred search refresh.
+            self._snapshot = self._on_refresh()
+            self._refresh_catalog_toggles()
             self.on_query_changed(self._search.get_text())
             self.focus_search()
             return
@@ -726,7 +729,9 @@ class AppLauncherWindow(PickerOverlay):
         if launcher_page is not None:
             launcher_page.set_no_show_all(not search_mode)
             if search_mode:
-                launcher_page.show()
+                # show() leaves a blank page when options were mapped first:
+                # no_show_all skipped this subtree, so its children were never shown.
+                launcher_page.show_all()
             else:
                 launcher_page.hide()
         if settings_page is not None:
@@ -734,7 +739,7 @@ class AppLauncherWindow(PickerOverlay):
             if search_mode:
                 settings_page.hide()
             else:
-                settings_page.show()
+                settings_page.show_all()
         self.set_search_row_visible(search_mode)
         if not search_mode:
             self.set_empty_visible(False)

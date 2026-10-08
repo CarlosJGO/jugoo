@@ -76,6 +76,44 @@ def test_search_destination_constant() -> None:
     assert SEARCH_DESTINATION == "__search__"
 
 
+def test_search_row_reveals_entry_and_checks_after_settings_first() -> None:
+    """Opening options first skips the search row; switching back must show it."""
+    import gi
+
+    gi.require_version("Gtk", "3.0")
+    from gi.repository import Gtk
+
+    from shell.widgets.pickers.overlay import PickerOverlay
+
+    if not Gtk.init_check()[0]:
+        raise AssertionError("GTK could not initialize")
+
+    window = Gtk.Window()
+    root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    entry = Gtk.SearchEntry()
+    hidden = Gtk.CheckButton(label="Ocultas")
+    ignored = Gtk.CheckButton(label="Ignoradas")
+    row.pack_start(entry, True, True, 0)
+    row.pack_end(hidden, False, False, 0)
+    row.pack_end(ignored, False, False, 0)
+    root.pack_start(row, False, False, 0)
+    window.add(root)
+
+    host = type("Host", (), {"_search_row": row})()
+    PickerOverlay.set_search_row_visible(host, False)
+    window.show_all()
+    assert entry.get_visible() is False
+    assert hidden.get_visible() is False
+    assert ignored.get_visible() is False
+
+    PickerOverlay.set_search_row_visible(host, True)
+    assert entry.get_visible() is True
+    assert hidden.get_visible() is True
+    assert ignored.get_visible() is True
+    window.destroy()
+
+
 if __name__ == "__main__":
     test_settings_controller_routes_to_general()
     test_ordered_categories_keeps_general_first()
@@ -83,4 +121,5 @@ if __name__ == "__main__":
     test_schema_contains_machine_and_profile_settings()
     test_profile_fields_round_trip()
     test_search_destination_constant()
+    test_search_row_reveals_entry_and_checks_after_settings_first()
     print("ok")

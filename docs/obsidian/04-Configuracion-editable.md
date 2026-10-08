@@ -10,8 +10,9 @@
 | --- | --- |
 | `SYSTEM_STATS_UPDATE_INTERVAL` | Frecuencia de lectura de CPU, RAM y GPU. |
 | `STATS_GPU_FAN_ICON_SIZE` | Tamaño del icono Radeon. |
-| `GPU_FAN_START_TEMP` | Temperatura desde la que el icono gira. Está en `system.py`. |
-| `GPU_TEMP_RANGES` | Límites de color térmico. Está en `system.py`. |
+| `STATS_GPU_FAN_START_C` | Temperatura desde la que el icono gira. Editable en Estadísticas. |
+| `STATS_CPU_COLD_C` / `STATS_CPU_NORMAL_C` / `STATS_CPU_WARM_C` | Escalones de color de la barra de CPU. |
+| `STATS_GPU_COLD_C` / `STATS_GPU_NORMAL_C` | Escalones de color del abanico de la GPU. |
 | `CONTROL_CENTER_POPUP_WIDTH` | Ancho del centro de control. |
 | `MEDIA_POPUP_WIDTH` | Ancho del popup multimedia. |
 | `NOTIFICATION_POPUP_WIDTH` | Ancho del popup de notificaciones. |

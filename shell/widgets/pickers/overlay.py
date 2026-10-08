@@ -299,7 +299,10 @@ class PickerOverlay(Gtk.Window):
     def set_search_row_visible(self, visible: bool) -> None:
         self._search_row.set_no_show_all(not visible)
         if visible:
-            self._search_row.show()
+            # show() only flips this box. If options were the first map,
+            # no_show_all skipped the entry and the checks, so they stay blank
+            # until show_all() walks that subtree.
+            self._search_row.show_all()
         else:
             self._search_row.hide()
 

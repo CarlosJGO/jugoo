@@ -21,6 +21,8 @@ from pathlib import Path
 import socket
 import time
 
+from ... import config as shell_config
+
 HWMON_ROOT = Path("/sys/class/hwmon")
 DRM_ROOT = Path("/sys/class/drm")
 PROC_STAT = Path("/proc/stat")
@@ -82,6 +84,47 @@ def temperature_level(
     return None
 
 
+def _monotonic_bounds(*values: float) -> tuple[float, ...]:
+    """Keep each color step at or above the previous one."""
+    ordered: list[float] = []
+    previous = 0.0
+    for value in values:
+        current = max(previous, float(value))
+        ordered.append(current)
+        previous = current
+    return tuple(ordered)
+
+
+def cpu_temperature_ranges() -> TemperatureRanges:
+    cold, normal, warm = _monotonic_bounds(
+        shell_config.STATS_CPU_COLD_C,
+        shell_config.STATS_CPU_NORMAL_C,
+        shell_config.STATS_CPU_WARM_C,
+    )
+    return (
+        (cold, TEMPERATURE_COLD),
+        (normal, TEMPERATURE_NORMAL),
+        (warm, TEMPERATURE_WARM),
+        (None, TEMPERATURE_HOT),
+    )
+
+
+def gpu_temperature_ranges() -> TemperatureRanges:
+    cold, normal = _monotonic_bounds(
+        shell_config.STATS_GPU_COLD_C,
+        shell_config.STATS_GPU_NORMAL_C,
+    )
+    return (
+        (cold, TEMPERATURE_COLD),
+        (normal, TEMPERATURE_NORMAL),
+        (None, TEMPERATURE_HOT),
+    )
+
+
+def gpu_fan_start_c() -> float:
+    return max(0.0, float(shell_config.STATS_GPU_FAN_START_C))
+
+
 @dataclass(frozen=True)
 class CpuStats:
     usage_percent: float | None = None
@@ -89,7 +132,7 @@ class CpuStats:
 
     @property
     def temperature_level(self) -> str | None:
-        return temperature_level(self.temperature_c, CPU_TEMP_RANGES)
+        return temperature_level(self.temperature_c, cpu_temperature_ranges())
 
 
 @dataclass(frozen=True)
@@ -133,11 +176,11 @@ class GpuStats:
 
     @property
     def temperature_level(self) -> str | None:
-        return temperature_level(self.temperature_c, GPU_TEMP_RANGES)
+        return temperature_level(self.temperature_c, gpu_temperature_ranges())
 
     @property
     def fan_spinning(self) -> bool:
-        return self.temperature_c is not None and self.temperature_c >= GPU_FAN_START_TEMP
+        return self.temperature_c is not None and self.temperature_c >= gpu_fan_start_c()
 
 
 @dataclass(frozen=True)
