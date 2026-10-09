@@ -283,7 +283,7 @@ class EmojiPickerWindow(PickerOverlay):
             self._select_emoji(child.emoji)
 
     def _ensure_child_visible(self, child: Gtk.FlowBoxChild, attempt: int = 0) -> bool:
-        origin = _origin_in(child, self._content)
+        origin = origin_in(child, self._content)
         adjustment = self._scrolled.get_vadjustment()
         height = child.get_allocated_height()
         page = 0.0 if adjustment is None else adjustment.get_page_size()
@@ -298,7 +298,7 @@ class EmojiPickerWindow(PickerOverlay):
         return False
 
 
-def _origin_in(widget: Gtk.Widget, ancestor: Gtk.Widget) -> tuple[int, int] | None:
+def origin_in(widget: Gtk.Widget, ancestor: Gtk.Widget) -> tuple[int, int] | None:
     """Position of ``widget`` inside ``ancestor``.
 
     ``translate_coordinates`` returns ``(x, y)`` or ``None``. Unpacking a

@@ -64,6 +64,10 @@ ACTIONS: tuple[ShellAction, ...] = (
         legacy_flags=("--toggle-emoji",),
     ),
     ShellAction(
+        "steam",
+        "Toggle Steam games panel (right screen edge)",
+    ),
+    ShellAction(
         "playStopMusic",
         "Play or pause music in Strawberry",
     ),
@@ -274,6 +278,7 @@ def dispatch_action(
         "launcher": lambda: shell.toggle_launcher(),
         "clipboard": lambda: shell.toggle_clipboard_picker(),
         "emoji": lambda: shell.toggle_emoji_picker(),
+        "steam": lambda: shell.toggle_steam_games(),
         "playStopMusic": lambda: shell.media_service.play_pause_player(),
         "musicVolumeUp": lambda: shell.media_service.volume_up_player(),
         "musicVolumeDown": lambda: shell.media_service.volume_down_player(),

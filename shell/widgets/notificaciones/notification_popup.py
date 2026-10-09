@@ -21,8 +21,8 @@ from ...config import (
     NOTIFICATION_POPUP_REVEAL_STAGGER_MS,
     NOTIFICATION_POPUP_ROW_APPEAR_MS,
     NOTIFICATION_POPUP_ROW_BODY_LINES,
-    NOTIFICATION_POPUP_ROW_SLIDE_PX,
     NOTIFICATION_POPUP_WIDTH,
+    POPUP_EDGE_MARGIN,
 )
 from ...models import NotificationSnapshot
 from ...popup_handle import (
@@ -44,27 +44,30 @@ from ...window_identity import (
     popup_window_size,
     register_shell_popup,
     schedule_popup_position,
+    shell_window_bottom,
     monitor_containing_point,
     anchor_button_geometry,
     reposition_popup,
+    reposition_popup_live,
 )
 from ...popup_spawn import publish_popup_spawn
 from .notification_grouping import group_notification_snapshots
+from .notification_mini_row import NotificationMiniRow
 
 _URGENCY_LABELS = {
     0: "Baja",
     1: "Normal",
     2: "Urgente",
 }
-_ROW_APPEAR_TICK_MS = 16
+# One frame so the mapped chrome paints before the first block is built.
+_FIRST_BLOCK_DELAY_MS = 32
+# Grace so the pointer can move from a row into the stack pane.
+_STACK_HIDE_MS = 80
 
 
-def _ease_in_out_cubic(t: float) -> float:
-    t = max(0.0, min(1.0, t))
-    if t < 0.5:
-        return 4.0 * t * t * t
-    u = -2.0 * t + 2.0
-    return 1.0 - (u * u * u) / 2.0
+def stack_pane_left(closed_right: int, width: int) -> int:
+    """Keep the list's right edge fixed while the window grows to the left."""
+    return int(closed_right) - int(width)
 
 
 class NotificationItemRow(Gtk.EventBox):
@@ -299,17 +302,83 @@ class NotificationPopup(Gtk.Window):
         self._pending_groups: list[list[NotificationSnapshot]] = []
         self._reveal_index = 0
         self._reveal_source_id = 0
+        self._pinned_size: tuple[int, int] = (0, 0)
+        self._pin_dirty = False
+        self._pin_source_id = 0
+        self._closed_right: int | None = None
+        self._stack_open = False
+        self._stacked_ids: tuple[int, ...] = ()
+        self._stack_hide_id = 0
+        self.connect("size-allocate", self._on_size_allocate_pin_top)
 
         self.set_name("shell-notifications")
         register_shell_popup(self, shell_window)
         configure_toplevel(self, title=TITLE_NOTIFICATIONS)
         configure_interactive_popup(self)
         self.set_default_size(NOTIFICATION_POPUP_WIDTH, -1)
+        self.set_size_request(NOTIFICATION_POPUP_WIDTH, -1)
 
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        outer.set_size_request(NOTIFICATION_POPUP_WIDTH, -1)
+        outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         outer.get_style_context().add_class("notification-popup-content")
+        outer.get_style_context().add_class("notification-popup-split")
         dress_window(self, WindowRole.NOTIFICATIONS_POPUP, outer)
+
+        self._stack_revealer = Gtk.Revealer()
+        self._stack_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_LEFT)
+        self._stack_revealer.set_transition_duration(NOTIFICATION_POPUP_ROW_APPEAR_MS)
+        self._stack_revealer.set_reveal_child(False)
+        self._stack_revealer.set_vexpand(True)
+        self._stack_revealer.set_hexpand(False)
+        outer.pack_start(self._stack_revealer, False, False, 0)
+
+        self._stack_event = Gtk.EventBox()
+        self._stack_event.add_events(
+            Gdk.EventMask.ENTER_NOTIFY_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK
+        )
+        self._stack_event.connect("enter-notify-event", self._on_stack_enter)
+        self._stack_event.connect("leave-notify-event", self._on_stack_leave)
+        self._stack_revealer.add(self._stack_event)
+
+        stack_pane = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        stack_pane.get_style_context().add_class("notification-stack-pane")
+        stack_pane.set_size_request(NOTIFICATION_POPUP_WIDTH, -1)
+        stack_pane.set_vexpand(True)
+        self._stack_pane = stack_pane
+        self._stack_event.add(stack_pane)
+
+        self._stack_title = Gtk.Label(xalign=0)
+        self._stack_title.get_style_context().add_class("notification-stack-title")
+        self._stack_title.set_ellipsize(Pango.EllipsizeMode.END)
+        stack_pane.pack_start(self._stack_title, False, False, 0)
+
+        self._stack_scrolled = Gtk.ScrolledWindow()
+        self._stack_scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        # Height follows the parent list. Extra stacked rows scroll inside it.
+        self._stack_scrolled.set_propagate_natural_height(False)
+        self._stack_scrolled.set_vexpand(True)
+        self._stack_scrolled.get_style_context().add_class("notification-popup-scroll")
+        stack_pane.pack_start(self._stack_scrolled, True, True, 0)
+
+        self._stack_list = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=NOTIFICATION_POPUP_LIST_SPACING,
+        )
+        self._stack_list.get_style_context().add_class("notification-group-window-list")
+        self._stack_scrolled.add(self._stack_list)
+
+        main = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        main.get_style_context().add_class("notification-popup-main")
+        # Fixed geometry: the parent list never grows, shrinks, or reflows
+        # when the stack pane opens or closes.
+        main.set_size_request(NOTIFICATION_POPUP_WIDTH, -1)
+        main.set_hexpand(False)
+        main.set_vexpand(False)
+        main.set_halign(Gtk.Align.END)
+        main.set_valign(Gtk.Align.START)
+        self._main = main
+        main.add_events(Gdk.EventMask.POINTER_MOTION_MASK)
+        main.connect("motion-notify-event", self._on_main_motion)
+        outer.pack_end(main, False, False, 0)
 
         header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         header.get_style_context().add_class("notification-popup-header")
@@ -362,14 +431,14 @@ class NotificationPopup(Gtk.Window):
         clear_all.connect("clicked", lambda _btn: self._on_clear_all())
         actions_row.pack_start(clear_all, False, False, 0)
         header.pack_start(actions_row, False, False, 0)
-        outer.pack_start(header, False, False, 0)
+        main.pack_start(header, False, False, 0)
 
         self._scrolled = Gtk.ScrolledWindow()
         self._scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self._scrolled.set_propagate_natural_height(True)
         self._scrolled.set_max_content_height(NOTIFICATION_POPUP_MAX_HEIGHT)
         self._scrolled.get_style_context().add_class("notification-popup-scroll")
-        outer.pack_start(self._scrolled, False, False, 0)
+        main.pack_start(self._scrolled, False, False, 0)
 
         self._list_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
@@ -391,9 +460,13 @@ class NotificationPopup(Gtk.Window):
 
     def open_for(self, anchor_button: Gtk.Widget) -> None:
         self._cancel_progressive_reveal()
+        self._cancel_top_pin()
         self._anchor_button = anchor_button
         self._fixed_popup_top = None
+        self._pinned_size = (0, 0)
+        self._closed_right = None
         self._position = None
+        self.hide_stacked()
         # Chrome first (header + empty list) so the window is never blank/invisible
         # while packages are materialised.
         self._prepare_open_shell()
@@ -410,12 +483,18 @@ class NotificationPopup(Gtk.Window):
         else:
             present_popup(self, fade=False)
             schedule_popup_position(self._position_after_show)
-        GLib.idle_add(self._start_progressive_reveal)
+        # The window is already on screen. Blocks are built later, one per tick.
+        self._arm_progressive_reveal()
 
     def close_popup(self) -> None:
         self._cancel_progressive_reveal()
+        self._cancel_top_pin()
         self._anchor_button = None
         self._fixed_popup_top = None
+        self._pinned_size = (0, 0)
+        self._closed_right = None
+        self._pin_dirty = False
+        self.hide_stacked()
         hide_popup(self)
 
     def pointer_is_inside(self) -> bool:
@@ -426,7 +505,14 @@ class NotificationPopup(Gtk.Window):
         return self._position
 
     def refresh(self) -> None:
-        """Rebuild the list synchronously (live updates while the panel is open)."""
+        """Rebuild the list. An in-progress open keeps stacking one block at a time."""
+        self.hide_stacked()
+        if self.get_visible() and self._anchor_button is not None and (
+            self._reveal_source_id or self._pending_groups
+        ):
+            self._prepare_open_shell()
+            self._arm_progressive_reveal()
+            return
         self._cancel_progressive_reveal()
         self._sync_paused_ui()
         self._sync_muted_apps_ui()
@@ -506,6 +592,13 @@ class NotificationPopup(Gtk.Window):
             on_open_group_window=self._on_open_group_window,
         )
 
+    def _arm_progressive_reveal(self) -> None:
+        self._cancel_progressive_reveal()
+        self._reveal_source_id = GLib.timeout_add(
+            _FIRST_BLOCK_DELAY_MS,
+            self._start_progressive_reveal,
+        )
+
     def _cancel_progressive_reveal(self) -> None:
         if self._reveal_source_id:
             GLib.source_remove(self._reveal_source_id)
@@ -514,6 +607,7 @@ class NotificationPopup(Gtk.Window):
         self._reveal_index = 0
 
     def _start_progressive_reveal(self) -> bool:
+        self._reveal_source_id = 0
         if self._anchor_button is None:
             return False
         snapshots = self._sorted_history()
@@ -522,7 +616,6 @@ class NotificationPopup(Gtk.Window):
             if self._on_preload_group_pages is not None:
                 self._on_preload_group_pages([])
             self._scrolled.queue_resize()
-            schedule_popup_position(self._position_after_show)
             return False
 
         if self._empty_label.get_parent() is not None:
@@ -530,7 +623,6 @@ class NotificationPopup(Gtk.Window):
         self._empty_label.hide()
         self._pending_groups = list(group_notification_snapshots(snapshots))
         self._reveal_index = 0
-        # First package immediately; remaining on a stagger so they stack in.
         self._reveal_next_group()
         if self._reveal_index < len(self._pending_groups):
             self._reveal_source_id = GLib.timeout_add(
@@ -550,21 +642,33 @@ class NotificationPopup(Gtk.Window):
 
         group = self._pending_groups[self._reveal_index]
         self._reveal_index += 1
-        row = self._build_group_row(group)
-        row.set_opacity(0.0)
-        row.set_margin_top(-NOTIFICATION_POPUP_ROW_SLIDE_PX)
-        self._list_box.pack_start(row, False, False, 0)
-        row.show_all()
-        self._animate_row_appear(row)
-
-        if self._reveal_index == 1 or self._reveal_index % 4 == 0:
-            schedule_popup_position(self._position_after_show)
+        self._pack_growing_row(self._build_group_row(group))
 
         if self._reveal_index >= len(self._pending_groups):
             self._reveal_source_id = 0
             self._finish_progressive_reveal()
             return False
         return True
+
+    def _pack_growing_row(self, row: Gtk.Widget) -> None:
+        """Slide one block in so the window lengthens with it, up to the scrolled max."""
+        revealer = Gtk.Revealer()
+        revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        revealer.set_transition_duration(self._row_grow_ms())
+        revealer.set_reveal_child(False)
+        revealer.add(row)
+        self._list_box.pack_start(revealer, False, False, 0)
+        revealer.show_all()
+        revealer.set_reveal_child(True)
+
+    def _row_grow_ms(self) -> int:
+        theme = active_theme()
+        if theme is not None and not theme.animation.enabled:
+            return 0
+        duration = NOTIFICATION_POPUP_ROW_APPEAR_MS
+        if theme is not None and theme.animation.duration > 0:
+            return min(duration, theme.animation.duration)
+        return duration
 
     def _finish_progressive_reveal(self) -> None:
         groups = self._pending_groups
@@ -576,38 +680,117 @@ class NotificationPopup(Gtk.Window):
         if parent is not None:
             parent.queue_resize()
         if self.get_visible() and self._anchor_button is not None:
-            schedule_popup_position(self._position_after_show)
+            self._pin_top_to_bar()
 
-    def _animate_row_appear(self, row: Gtk.Widget) -> None:
-        theme = active_theme()
-        if theme is not None and not theme.animation.enabled:
-            row.set_opacity(1.0)
-            row.set_margin_top(0)
+    def _on_size_allocate_pin_top(self, _window: Gtk.Widget, allocation: Gdk.Rectangle) -> None:
+        """Hyprland grows floating windows from their center, so each taller
+        frame would slide the panel up over the bar. Re-pin the top every time.
+        """
+        size = (int(allocation.width), int(allocation.height))
+        if self._fixed_popup_top is None or self._anchor_button is None:
             return
+        if size[0] <= 1 or size[1] <= 1 or size == self._pinned_size:
+            return
+        self._pinned_size = size
+        # One correction per size. Extra passes restart Hyprland's move and
+        # the parent list appears to bounce.
+        self._pin_top_to_bar()
 
-        duration = NOTIFICATION_POPUP_ROW_APPEAR_MS
-        if theme is not None and theme.animation.duration > 0:
-            duration = min(duration, theme.animation.duration)
-        step = min(1.0, _ROW_APPEAR_TICK_MS / max(duration, 1))
-        setattr(row, "_appear_progress", 0.0)
+    def _pin_top_to_bar(self) -> None:
+        self._position_after_show(live=True)
 
-        def _tick() -> bool:
-            if self._anchor_button is None or not row.get_parent():
-                return False
-            progress = min(1.0, float(getattr(row, "_appear_progress", 0.0)) + step)
-            setattr(row, "_appear_progress", progress)
-            eased = _ease_in_out_cubic(progress)
-            row.set_opacity(eased)
-            row.set_margin_top(
-                int(round(-NOTIFICATION_POPUP_ROW_SLIDE_PX * (1.0 - eased)))
+    def _cancel_top_pin(self) -> None:
+        self._pin_dirty = False
+        if self._pin_source_id:
+            GLib.source_remove(self._pin_source_id)
+            self._pin_source_id = 0
+
+    def show_stacked(self, group: list[NotificationSnapshot]) -> None:
+        """Open the left pane on this group's stacked notifications."""
+        if len(group) < 2:
+            self.hide_stacked()
+            return
+        self._cancel_stack_hide()
+        ids = tuple(snapshot.id for snapshot in group)
+        if ids != self._stacked_ids:
+            self._fill_stack(group)
+            self._stacked_ids = ids
+        self._stack_open = True
+        self._stack_revealer.set_transition_duration(self._row_grow_ms())
+        self._stack_revealer.set_reveal_child(True)
+
+    def hide_stacked(self) -> None:
+        if not self._stack_open and (
+            getattr(self, "_stack_revealer", None) is None
+            or not self._stack_revealer.get_reveal_child()
+        ):
+            return
+        self._cancel_stack_hide()
+        self._stack_open = False
+        self._stacked_ids = ()
+        self._stack_revealer.set_transition_duration(self._row_grow_ms())
+        self._stack_revealer.set_reveal_child(False)
+
+    def schedule_hide_stacked(self) -> None:
+        if not self._stack_open or self._stack_hide_id:
+            return
+        self._stack_hide_id = GLib.timeout_add(_STACK_HIDE_MS, self._hide_stacked_if_pointer_left)
+
+    def _hide_stacked_if_pointer_left(self) -> bool:
+        self._stack_hide_id = 0
+        if pointer_inside_widget(self._stack_event) or self._pointer_on_grouped_row():
+            return False
+        self.hide_stacked()
+        return False
+
+    def _cancel_stack_hide(self) -> None:
+        if self._stack_hide_id:
+            GLib.source_remove(self._stack_hide_id)
+            self._stack_hide_id = 0
+
+    def _fill_stack(self, group: list[NotificationSnapshot]) -> None:
+        for child in list(self._stack_list.get_children()):
+            self._stack_list.remove(child)
+        head = group[0]
+        label = head.summary or head.app_name
+        self._stack_title.set_text(f"{label}  ·  {len(group)}")
+        for snapshot in group:
+            self._stack_list.pack_start(
+                NotificationMiniRow(snapshot, on_dismiss=self._on_dismiss),
+                False,
+                False,
+                0,
             )
-            if progress >= 1.0:
-                row.set_opacity(1.0)
-                row.set_margin_top(0)
-                return False
-            return True
+        self._stack_list.show_all()
 
-        GLib.timeout_add(_ROW_APPEAR_TICK_MS, _tick)
+    def _pointer_on_grouped_row(self) -> bool:
+        for child in self._list_box.get_children():
+            row = child.get_child() if isinstance(child, Gtk.Revealer) else child
+            if (
+                isinstance(row, NotificationGroupRow)
+                and len(row._group_snapshots) > 1
+                and pointer_inside_widget(row)
+            ):
+                return True
+        return False
+
+    def _on_main_motion(self, _widget: Gtk.Widget, _event: Gdk.EventMotion) -> bool:
+        if not self._stack_open or self._pointer_on_grouped_row():
+            return False
+        self.schedule_hide_stacked()
+        return False
+
+    def _on_stack_enter(self, _widget: Gtk.Widget, event: Gdk.EventCrossing) -> bool:
+        if getattr(event, "detail", None) == Gdk.NotifyType.INFERIOR:
+            return False
+        self._cancel_stack_hide()
+        return False
+
+    def _on_stack_leave(self, _widget: Gtk.Widget, event: Gdk.EventCrossing) -> bool:
+        if not is_pointer_leaving_surface(event):
+            return False
+        self.schedule_hide_stacked()
+        return False
 
     def _sync_paused_ui(self) -> None:
         paused = self._service.paused
@@ -691,25 +874,35 @@ class NotificationPopup(Gtk.Window):
         self._blocked_apps_box.set_no_show_all(False)
         self._blocked_apps_box.show_all()
 
-    def _position_after_show(self) -> bool:
+    def _position_after_show(self, *, live: bool = False) -> bool:
         if self._anchor_button is None:
             return False
         geometry = anchor_button_geometry(self._anchor_button)
         if geometry is None:
             return False
-        width, height = popup_window_size(self)
+        _alloc_width, height = popup_window_size(self)
         monitor = monitor_containing_point(geometry.center_x, geometry.bottom)
-        left, top = compute_popup_top_left(
+        closed_left, top = compute_popup_top_left(
             button_center_x=geometry.center_x,
             button_bottom=geometry.bottom,
-            popup_width=width,
+            popup_width=NOTIFICATION_POPUP_WIDTH,
             popup_height=height,
             offset=NOTIFICATION_POPUP_OFFSET,
             fixed_top=self._fixed_popup_top,
             monitor=monitor,
+            floor_top=shell_window_bottom(self._anchor_button),
         )
+        if self._closed_right is None:
+            self._closed_right = closed_left + NOTIFICATION_POPUP_WIDTH
+        width = _alloc_width if _alloc_width > 1 else NOTIFICATION_POPUP_WIDTH
+        left = stack_pane_left(self._closed_right, width)
+        if monitor is not None:
+            left = max(monitor.x + POPUP_EDGE_MARGIN, left)
         self._position = (left, top, width)
-        reposition_popup(self, title=TITLE_NOTIFICATIONS, x=left, y=top)
+        if live:
+            reposition_popup_live(self, title=TITLE_NOTIFICATIONS, x=left, y=top)
+        else:
+            reposition_popup(self, title=TITLE_NOTIFICATIONS, x=left, y=top)
         if self._fixed_popup_top is None:
             self._fixed_popup_top = top
         return False
@@ -947,14 +1140,18 @@ class NotificationGroupRow(Gtk.EventBox):
         mode = getattr(event, "mode", None)
         if mode in (Gdk.CrossingMode.GRAB, Gdk.CrossingMode.UNGRAB):
             return False
-        # Moving among children still counts as being inside the card.
+        host = self._host_popup()
+        if len(self._group_snapshots) <= 1:
+            if host is not None:
+                host.hide_stacked()
+            return False
+        # Moving among children of this same grouped card.
         if getattr(event, "detail", None) == Gdk.NotifyType.INFERIOR:
             return False
         if self._tools_visible():
             return False
-        if len(self._group_snapshots) > 1:
-            self._open_group_window()
-            self._hover_opened = True
+        self._open_group_window()
+        self._hover_opened = True
         return False
 
     def _on_leave_notify(self, _widget: Gtk.Widget, event: Gdk.EventCrossing) -> bool:
@@ -965,12 +1162,29 @@ class NotificationGroupRow(Gtk.EventBox):
         self._hover_opened = False
         if self._popover is not None and self._popover.get_visible():
             self._popover.hide()
+        host = self._host_popup()
+        if host is not None:
+            host.schedule_hide_stacked()
         return False
+
+    def pointer_wants_stack(self) -> bool:
+        return self._hover_opened and len(self._group_snapshots) > 1
+
+    def _host_popup(self) -> NotificationPopup | None:
+        toplevel = self.get_toplevel()
+        if isinstance(toplevel, NotificationPopup):
+            return toplevel
+        return None
 
     def _on_motion_notify(self, _widget: Gtk.Widget, _event: Gdk.EventMotion) -> bool:
         if self._tools_visible():
             return False
-        if len(self._group_snapshots) > 1 and not self._hover_opened:
+        if len(self._group_snapshots) <= 1:
+            host = self._host_popup()
+            if host is not None:
+                host.hide_stacked()
+            return False
+        if not self._hover_opened:
             self._open_group_window()
             self._hover_opened = True
         return False

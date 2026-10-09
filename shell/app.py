@@ -28,6 +28,7 @@ from .controllers.control_center import ControlCenterController
 from .controllers.pickers import PickersController
 from .controllers.media import MediaController
 from .controllers.settings import SettingsController
+from .controllers.steam import SteamController
 from .controllers.volume_osd import VolumeOsdController
 from .controllers.workspace_interaction import WorkspaceInteractionController
 from .eventbus import EventBus
@@ -35,6 +36,8 @@ from .identity import project_root
 from .layout import ShellLayout
 from .runtime_paths import settings_path
 from .servicios.aplicaciones.applications import ApplicationsService
+from .servicios.steam.launch import SteamGameLauncher
+from .servicios.steam.service import SteamGamesService
 from .servicios.portapapeles.servicio import ClipboardService
 from .servicios.audio.audio import AudioService
 from .servicios.audio.audio_visualizer import AudioVisualizerService
@@ -113,6 +116,8 @@ class ShellApplication(Gtk.Window):
         )
         self.hyprland = HyprlandService(self.event_bus, PERSISTENT_WORKSPACES)
         self.applications = ApplicationsService(self.event_bus)
+        self.steam_games = SteamGamesService(self.event_bus)
+        self.steam_launcher = SteamGameLauncher(self.event_bus)
         self.clipboard_service = ClipboardService(self.event_bus)
         self.audio_service = AudioService(self.event_bus)
         self.system_stats = SystemStatsService()
@@ -265,6 +270,13 @@ class ShellApplication(Gtk.Window):
             close_launcher=self.applications_controller.close_launcher,
             hyprland=self.hyprland,
         )
+        self.steam_controller = SteamController(
+            self.event_bus,
+            self.steam_games,
+            self,
+            close_other_overlays=self._close_overlays_for_steam,
+            notify=self._notify_steam,
+        )
         self.ai_prompt_controller = AiPromptController(
             self,
             self.notification_service,
@@ -286,6 +298,8 @@ class ShellApplication(Gtk.Window):
         self.connect("destroy", self._on_destroy)
 
         self.applications.start()
+        self.steam_games.start()
+        self.steam_launcher.start()
         self.clipboard_service.start()
         self.hyprland.start()
         self.audio_service.start()
@@ -315,6 +329,7 @@ class ShellApplication(Gtk.Window):
         self.control_center_controller.close_popup()
 
     def toggle_control_center(self) -> None:
+        self.steam_controller.close_panel()
         self.control_center_controller.toggle_full_control_center()
 
     def toggle_bluetooth_panel(self) -> None:
@@ -353,6 +368,7 @@ class ShellApplication(Gtk.Window):
     def toggle_launcher(self) -> None:
         self.ai_prompt_controller.close()
         self.pickers_controller.close_pickers()
+        self.steam_controller.close_panel()
         self.applications_controller.toggle_launcher()
 
     def toggle_ai_prompt(self) -> None:
@@ -360,16 +376,37 @@ class ShellApplication(Gtk.Window):
 
     def _close_overlays_for_ai_prompt(self) -> None:
         self.pickers_controller.close_pickers()
+        self.steam_controller.close_panel()
         self.applications_controller.close_control_center()
         self.applications_controller.close_launcher()
 
+    def toggle_steam_games(self) -> None:
+        self.steam_controller.toggle()
+
+    def _notify_steam(self, summary: str, body: str) -> None:
+        self.notification_service.post(
+            app_name="Jugoo",
+            summary=summary,
+            body=body,
+            app_icon="com.jugoo.Shell",
+        )
+
+    def _close_overlays_for_steam(self) -> None:
+        self.ai_prompt_controller.close()
+        self.pickers_controller.close_pickers()
+        self.applications_controller.close_control_center()
+        self.applications_controller.close_launcher()
+        self.control_center_controller.close_popup()
+
     def toggle_clipboard_picker(self) -> None:
         self.ai_prompt_controller.close()
+        self.steam_controller.close_panel()
         self.applications_controller.close_control_center()
         self.pickers_controller.toggle_clipboard()
 
     def toggle_emoji_picker(self) -> None:
         self.ai_prompt_controller.close()
+        self.steam_controller.close_panel()
         self.applications_controller.close_control_center()
         self.pickers_controller.toggle_emoji()
 
@@ -379,6 +416,7 @@ class ShellApplication(Gtk.Window):
     def toggle_settings(self) -> None:
         self.ai_prompt_controller.close()
         self.pickers_controller.close_pickers()
+        self.steam_controller.close_panel()
         self.settings_controller.toggle()
 
     def open_tasks_panel(self) -> None:
@@ -499,9 +537,12 @@ class ShellApplication(Gtk.Window):
         self.tasks_service.close()
         self.settings_controller.close()
         self.pickers_controller.close()
+        self.steam_controller.close()
         self.applications_controller.close_launcher()
         self.clipboard_service.close()
         self.applications.close()
+        self.steam_launcher.close()
+        self.steam_games.close()
         self.keyboard_activity.close()
         self.hyprland.close()
 

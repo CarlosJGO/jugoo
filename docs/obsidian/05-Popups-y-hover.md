@@ -24,6 +24,10 @@ La lógica vive en [`shell/ui/door.py`](../../shell/ui/door.py) (`BubblePop`).
 
 Hyprland no debe animar estas layers (`layers` → `slide` las hace “caer” desde arriba). En `~/.config/hypr/config/windowrules.lua` hay `layer_rule` `jugoo-puertas-no-anim`.
 
+## Salida desde la barra
+
+Los popups anclados a un bloque de la barra son ventanas normales. Jugoo publica su sitio (centrado en el bloque si cabe, y por debajo de la barra) y Hyprland las coloca y anima la entrada y la salida (`jugoo_popup_place.lua`, `popin`). Las puertas centradas no entran aquí. Las notificaciones apiladas no son otra ventana: el mismo panel crece a la izquierda y muestra solo el grupo bajo el cursor.
+
 ## Dónde localizar cada popup
 
 | Popup | Widget | Controller o dueño |

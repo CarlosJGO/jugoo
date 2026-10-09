@@ -28,10 +28,13 @@ _POP_START_SCALE = 0.78
 _MIN_MEASURED_PX = 48
 
 
-def _ease(t: float) -> float:
-    """Cosine ease-in-out, used for the close transition."""
+def symmetric_ease(t: float) -> float:
+    """Cosine ease-in-out, used for the close transition and the edge slide."""
     t = max(0.0, min(1.0, t))
     return 0.5 - 0.5 * cos(pi * t)
+
+
+_ease = symmetric_ease
 
 
 def _ease_pop(t: float) -> float:

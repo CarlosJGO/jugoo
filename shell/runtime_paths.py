@@ -6,7 +6,13 @@ import os
 import shutil
 from pathlib import Path
 
-from .config import CLIPBOARD_HISTORY_PATH, CLIPBOARD_IMAGES_DIR, PINNED_APPS_PATH, TASKS_PATH
+from .config import (
+    CLIPBOARD_HISTORY_PATH,
+    CLIPBOARD_IMAGES_DIR,
+    PINNED_APPS_PATH,
+    STEAM_PREFS_PATH,
+    TASKS_PATH,
+)
 
 _APP_DIRECTORY = "waybar-shell"
 
@@ -32,6 +38,10 @@ def notifications_history_path() -> Path:
 
 def pinned_apps_path() -> Path:
     return xdg_data_dir() / PINNED_APPS_PATH
+
+
+def steam_prefs_path() -> Path:
+    return xdg_data_dir() / STEAM_PREFS_PATH
 
 
 def tasks_path() -> Path:
@@ -72,6 +82,10 @@ def settings_path() -> Path:
 
 def notification_icons_dir() -> Path:
     return xdg_cache_dir() / "notification-icons"
+
+
+def steam_artwork_dir() -> Path:
+    return xdg_cache_dir() / "steam-artwork"
 
 
 def media_artwork_dir() -> Path:

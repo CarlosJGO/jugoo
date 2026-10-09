@@ -28,7 +28,6 @@ from ...popup_handle import (
     PopupHandle,
     PopupOutsideDismiss,
     pointer_inside_widget,
-    pointer_inside_window,
 )
 from ...servicios.aplicaciones.applications import APP_ACTIVATE_REQUESTED
 from ...servicios.escritorio.hyprland import (
@@ -113,9 +112,7 @@ class NotificationsWidget(ShellModule):
             on_mark_read=self._mark_read,
         )
         self._outside_click = PopupOutsideDismiss()
-        self._group_window: Gtk.Window | None = None
         self._refresh_source_id = 0
-        self._preload_source_id = 0
         self._sound_path = assets_dir() / Path(NOTIFICATIONS_SOUND_PATH).name
 
         self._event_bus.subscribe(NOTIFICATIONS_CHANGED, self._on_notifications_changed)
@@ -153,7 +150,7 @@ class NotificationsWidget(ShellModule):
             on_toggle_paused=self._toggle_paused,
             on_toggle_app_sound_mute=self._toggle_app_sound_mute,
             on_toggle_app_blocked=self._toggle_app_blocked,
-            on_preload_group_pages=self._preload_group_pages,
+            on_preload_group_pages=None,
         )
 
     def _on_destroy(self, *_args) -> None:
@@ -161,9 +158,6 @@ class NotificationsWidget(ShellModule):
         if self._refresh_source_id:
             GLib.source_remove(self._refresh_source_id)
             self._refresh_source_id = 0
-        if self._preload_source_id:
-            GLib.source_remove(self._preload_source_id)
-            self._preload_source_id = 0
         self._event_bus.unsubscribe(NOTIFICATIONS_CHANGED, self._on_notifications_changed)
         self._event_bus.unsubscribe(NOTIFICATION_RECEIVED, self._on_notification_received)
         self._event_bus.unsubscribe(NOTIFICATIONS_PAUSED_CHANGED, self._on_paused_changed)
@@ -326,16 +320,12 @@ class NotificationsWidget(ShellModule):
         self._ensure_shell_press_handler()
         popup = self._popup.get()
         popup.open_for(self._button)
-        extra_windows = ()
-        if self._group_window is not None:
-            extra_windows = (self._group_window,)
         self._outside_click.install(
             popup,
             self._shell_window,
             (self._button,),
             self.close_popup,
             self._event_bus,
-            extra_windows=extra_windows,
         )
 
     def toggle_popup(self) -> None:
@@ -392,87 +382,22 @@ class NotificationsWidget(ShellModule):
             ),
         )
 
-    def _ensure_group_window(self):
-        from ..notificaciones.notification_group_window import NotificationGroupWindow
-
-        created = False
-        if self._group_window is None:
-            self._group_window = NotificationGroupWindow(
-                self._shell_window,
-                self._service,
-                on_invoke_action=self._invoke_action,
-                on_dismiss=self._dismiss,
-                on_open_app=self._open_app,
-            )
-            created = True
-        return self._group_window, created
-
-    def _preload_group_pages(
-        self,
-        groups: list[list[NotificationSnapshot]],
-    ) -> None:
-        """Warm block pages after the panel is already visible (never on the click path)."""
-        if self._preload_source_id:
-            GLib.source_remove(self._preload_source_id)
-            self._preload_source_id = 0
-        if not groups:
-            return
-        self._preload_source_id = GLib.idle_add(self._preload_group_pages_now, groups)
-
-    def _preload_group_pages_now(
-        self,
-        groups: list[list[NotificationSnapshot]],
-    ) -> bool:
-        self._preload_source_id = 0
-        if not self._popup.is_visible():
-            return False
-        window, _created = self._ensure_group_window()
-        window.preload_groups(groups)
-        return False
-
     def _open_group_window(
         self,
         group_snapshots: list[NotificationSnapshot],
-        anchor: Gtk.Widget,
+        _anchor: Gtk.Widget,
         popup: Gtk.Window,
     ) -> None:
-        window, created = self._ensure_group_window()
-        window.bind_anchor(
-            anchor,
-            popup,
-            notifications_position=popup.position,
-        )
-        was_visible = bool(window.get_visible())
-        same_parent = was_visible and window.same_group(group_snapshots)
-        if same_parent:
-            current_ids = window.snapshot_ids
-            next_ids = tuple(snapshot.id for snapshot in group_snapshots)
-            if current_ids != next_ids:
-                window.show_group(group_snapshots, animate=False)
-            window.follow_parent(anchor, popup, animate=False)
-            return
-
-        animate = was_visible and bool(window.group_key)
-        window.show_group(group_snapshots, animate=animate)
-
-        if created or not was_visible:
-            self._outside_click.set_extra_windows((window,))
-            window.present_group()
-        else:
-            # Content slide + window Y follow start together (700ms, same easing).
-            window.follow_parent(anchor, popup, animate=animate)
+        if isinstance(popup, NotificationPopup):
+            popup.show_stacked(group_snapshots)
 
     def _close_group_window(self) -> None:
-        if self._group_window is not None:
-            self._group_window.destroy_group()
-            self._group_window = None
+        popup = self._popup.maybe
+        if popup is not None:
+            popup.hide_stacked()
 
     def _sync_group_window(self) -> None:
-        window = self._group_window
-        if window is None or not window.get_visible():
-            return
-        if not window.sync_from_history():
-            self._close_group_window()
+        return None
 
     def _toggle_paused(self) -> None:
         self._service.toggle_paused()
@@ -497,8 +422,6 @@ class NotificationsWidget(ShellModule):
             return False
 
         if pointer_inside_widget(self._button) or popup.pointer_is_inside():
-            return False
-        if self._group_window is not None and pointer_inside_window(self._group_window):
             return False
 
         self.close_popup()

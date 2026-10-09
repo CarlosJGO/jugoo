@@ -841,6 +841,53 @@ class ApplicationsSnapshot:
         return normalize_desktop_id(app_id) in self.ignored_ids
 
 
+@dataclass(frozen=True)
+class SteamGame:
+    """One fully installed Steam game. Not a ``DesktopApplication``: it launches by appid."""
+
+    appid: str
+    name: str
+    library_path: str
+    install_dir: str = ""
+    image_path: str = ""
+    # "vertical" (600x900 capsule), "header" (horizontal fallback) or "" when none.
+    image_kind: str = ""
+    # A better image is downloading; the UI shows a spinner over the placeholder.
+    image_pending: bool = False
+
+
+@dataclass(frozen=True)
+class SteamCatalogSnapshot:
+    """Service-owned Steam catalog plus what the scan could and could not reach."""
+
+    games: tuple[SteamGame, ...] = ()
+    libraries: tuple[str, ...] = ()
+    unavailable_libraries: tuple[str, ...] = ()
+    steam_found: bool = False
+    ignored_appids: tuple[str, ...] = ()
+    include_ignored: bool = False
+    scanned: bool = False
+
+    def game_by_appid(self, appid: str) -> SteamGame | None:
+        wanted = normalize_steam_appid(appid)
+        for game in self.games:
+            if game.appid == wanted:
+                return game
+        return None
+
+    def is_ignored(self, appid: str) -> bool:
+        return normalize_steam_appid(appid) in self.ignored_appids
+
+
+def normalize_steam_appid(value: object) -> str:
+    """Steam appids are positive integers; anything else is not an appid."""
+    text = str(value).strip() if value is not None else ""
+    if not text.isdigit():
+        return ""
+    normalized = str(int(text))
+    return "" if normalized == "0" else normalized
+
+
 TASK_REPEAT_NONE = "none"
 TASK_REPEAT_DAILY = "daily"
 TASK_REPEAT_MONTHLY = "monthly"

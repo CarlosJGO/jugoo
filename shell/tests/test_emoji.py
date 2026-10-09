@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 
 from shell.servicios.emojis.catalogo import EmojiRecord, load_emojis, search_emojis
 from shell.servicios.emojis.recientes import EmojiRecentStore
-from shell.widgets.pickers.emoji import _origin_in
+from shell.widgets.pickers.emoji import origin_in
 from shell.widgets.pickers.session import scroll_to_reveal
 
 
@@ -130,14 +130,14 @@ def test_scroll_keeps_emoji_already_visible() -> None:
 def test_origin_reads_the_xy_pair() -> None:
     content = _Node(0, 0)
     cell = _Node(0, 0, content, translated=(12, 480))
-    assert _origin_in(cell, content) == (12, 480)
+    assert origin_in(cell, content) == (12, 480)
 
 
 def test_origin_sums_allocations_when_translation_is_unavailable() -> None:
     content = _Node(0, 0)
     flow = _Node(4, 40, content)
     cell = _Node(8, 120, flow)
-    assert _origin_in(cell, content) == (12, 160)
+    assert origin_in(cell, content) == (12, 160)
 
 
 def _run() -> None:

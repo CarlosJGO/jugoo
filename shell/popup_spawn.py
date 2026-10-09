@@ -26,6 +26,7 @@ from .window_identity import (
     anchor_button_geometry,
     compute_popup_top_left,
     popup_window_size,
+    shell_window_bottom,
 )
 
 
@@ -49,6 +50,20 @@ class SpawnPlacement:
     local_x: int
     local_y: int
     monitor: str
+    width: int = 0
+    height: int = 0
+    origin_x: int = 0
+    origin_y: int = 0
+    origin_w: int = 0
+    origin_h: int = 0
+    union_x: int = 0
+    union_y: int = 0
+    union_w: int = 0
+    union_h: int = 0
+    union_local_x: int = 0
+    union_local_y: int = 0
+    origin_local_x: int = 0
+    origin_local_y: int = 0
 
     def to_dict(self) -> dict[str, int | str]:
         return {
@@ -57,7 +72,25 @@ class SpawnPlacement:
             "local_x": self.local_x,
             "local_y": self.local_y,
             "monitor": self.monitor,
+            "width": self.width,
+            "height": self.height,
+            "origin_x": self.origin_x,
+            "origin_y": self.origin_y,
+            "origin_w": self.origin_w,
+            "origin_h": self.origin_h,
+            "union_x": self.union_x,
+            "union_y": self.union_y,
+            "union_w": self.union_w,
+            "union_h": self.union_h,
+            "union_local_x": self.union_local_x,
+            "union_local_y": self.union_local_y,
+            "origin_local_x": self.origin_local_x,
+            "origin_local_y": self.origin_local_y,
         }
+
+    @property
+    def emerges_from_bar(self) -> bool:
+        return self.origin_w >= 8 and self.origin_h >= 8
 
 
 def spawn_state_path() -> Path:
@@ -106,8 +139,16 @@ def placement_for_anchor(
     fixed_top: int | None = None,
     margin: int | None = None,
     extra_y_offset: int = 0,
+    origin: tuple[int, int, int, int] | None = None,
+    floor_top: int | None = None,
 ) -> SpawnPlacement | None:
-    """Top-left spawn coordinates, global and monitor-local."""
+    """Top-left spawn coordinates, global and monitor-local.
+
+    ``origin`` is the bar block that opened the popup, in the same global
+    coordinates as the popup. When it is present, ``union_*`` is the rectangle
+    that contains both, so the window can be born there and the card can grow
+    out of the block.
+    """
     monitor = monitor_containing(button_center_x, button_bottom, monitors)
     rect = None
     if monitor is not None:
@@ -126,23 +167,61 @@ def placement_for_anchor(
         fixed_top=(fixed_top + extra_y_offset) if fixed_top is not None else None,
         monitor=rect,
         margin=margin,
+        floor_top=floor_top,
     )
-    if monitor is None:
-        return SpawnPlacement(
-            title=title,
-            x=left,
-            y=top,
-            local_x=left,
-            local_y=top,
-            monitor="",
+    origin_x = origin_y = origin_w = origin_h = 0
+    origin_local_x = origin_local_y = 0
+    union_x = union_y = union_w = union_h = 0
+    union_local_x = union_local_y = 0
+    if origin is not None and origin[2] >= 8 and origin[3] >= 8:
+        from .ui.bar_popup_motion import union_of
+
+        origin_x, origin_y, origin_w, origin_h = (int(v) for v in origin)
+        if monitor is None:
+            origin_local_x, origin_local_y = origin_x, origin_y
+        else:
+            origin_local_x = origin_x - monitor.x
+            origin_local_y = origin_y - monitor.y
+        union_x, union_y, union_w, union_h = union_of(
+            (origin_x, origin_y, origin_w, origin_h),
+            (left, top, int(popup_width), int(popup_height)),
         )
-    return SpawnPlacement(
+        if monitor is None:
+            union_local_x, union_local_y = union_x, union_y
+        else:
+            union_local_x = union_x - monitor.x
+            union_local_y = union_y - monitor.y
+    shared = dict(
         title=title,
         x=left,
         y=top,
+        width=int(popup_width),
+        height=int(popup_height),
+        origin_x=origin_x,
+        origin_y=origin_y,
+        origin_w=origin_w,
+        origin_h=origin_h,
+        origin_local_x=origin_local_x,
+        origin_local_y=origin_local_y,
+        union_x=union_x,
+        union_y=union_y,
+        union_w=union_w,
+        union_h=union_h,
+        union_local_x=union_local_x,
+        union_local_y=union_local_y,
+    )
+    if monitor is None:
+        return SpawnPlacement(
+            local_x=left,
+            local_y=top,
+            monitor="",
+            **shared,
+        )
+    return SpawnPlacement(
         local_x=left - monitor.x,
         local_y=top - monitor.y,
         monitor=monitor.name,
+        **shared,
     )
 
 
@@ -233,7 +312,17 @@ def publish_popup_spawn(
     if geometry is None:
         return None
 
+    from .ui.bar_popup_motion import bar_motion_enabled
+
     popup_width, popup_height = popup_window_size(window)
+    floor_top = shell_window_bottom(anchor)
+    origin = None
+    if (
+        bar_motion_enabled()
+        and geometry.width >= 8
+        and geometry.height >= 8
+    ):
+        origin = (geometry.left, geometry.top, geometry.width, geometry.height)
     placement = placement_for_anchor(
         title=title,
         button_center_x=geometry.center_x,
@@ -245,6 +334,8 @@ def publish_popup_spawn(
         fixed_top=fixed_top,
         margin=margin,
         extra_y_offset=extra_y_offset,
+        origin=origin,
+        floor_top=floor_top,
     )
     if placement is None:
         return None

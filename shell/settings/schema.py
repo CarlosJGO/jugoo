@@ -31,6 +31,7 @@ class CategoryId(str, Enum):
     ESTADISTICAS = "estadisticas"
     IA = "ia"
     MODO_NOCHE = "modo_noche"
+    JUEGOS = "juegos"
     COMPORTAMIENTO = "comportamiento"
     AVANZADO = "avanzado"
 
@@ -48,6 +49,7 @@ CATEGORY_META: dict[CategoryId, tuple[str, str]] = {
     CategoryId.ESTADISTICAS: ("Estadísticas", "CPU, RAM, GPU y sensores"),
     CategoryId.IA: ("IA", "llama-cli y recordatorios inteligentes"),
     CategoryId.MODO_NOCHE: ("Modo noche", "Luz cálida de pantalla"),
+    CategoryId.JUEGOS: ("Juegos", "Catálogo de Steam y bibliotecas"),
     CategoryId.COMPORTAMIENTO: ("Comportamiento", "Timers y políticas generales"),
     CategoryId.AVANZADO: ("Avanzado", "Rendimiento e integraciones"),
 }
@@ -1111,6 +1113,81 @@ def build_settings_catalog() -> tuple[SettingDef, ...]:
             step=1,
             tier="A",
             section="Horario",
+        ),
+        # —— Juegos ——
+        SettingDef(
+            key="juegos.steam_extra_library_paths",
+            category=CategoryId.JUEGOS,
+            label="Bibliotecas extra de Steam",
+            description=(
+                "Rutas separadas por ; que se suman a las de libraryfolders.vdf. "
+                "Solo hacen falta si Steam no lista alguna biblioteca."
+            ),
+            value_type="string",
+            default=shell_config.STEAM_EXTRA_LIBRARY_PATHS,
+            config_attr="STEAM_EXTRA_LIBRARY_PATHS",
+            apply=APPLY_LIVE,
+            tier="A",
+            section="Steam",
+        ),
+        SettingDef(
+            key="juegos.steam_artwork_download",
+            category=CategoryId.JUEGOS,
+            label="Descargar carátulas",
+            description=(
+                "Si un juego no tiene carátula en la caché de Steam, se descarga del CDN de Steam "
+                "y se guarda en la caché de Jugoo. Desactivado usa solo imágenes locales."
+            ),
+            value_type="bool",
+            default=shell_config.STEAM_ARTWORK_DOWNLOAD_ENABLED,
+            config_attr="STEAM_ARTWORK_DOWNLOAD_ENABLED",
+            apply=APPLY_LIVE,
+            tier="A",
+            section="Steam",
+        ),
+        SettingDef(
+            key="juegos.steam_panel_width",
+            category=CategoryId.JUEGOS,
+            label="Ancho del panel de juegos",
+            description="Ancho del panel lateral derecho. Se aplica la próxima vez que se abre.",
+            value_type="int",
+            default=shell_config.STEAM_PANEL_WIDTH,
+            config_attr="STEAM_PANEL_WIDTH",
+            apply=APPLY_LIVE,
+            minimum=300,
+            maximum=900,
+            step=10,
+            tier="A",
+            section="Steam",
+            unit="px",
+        ),
+        SettingDef(
+            key="juegos.steam_ignored_appids",
+            category=CategoryId.JUEGOS,
+            label="Juegos ignorados",
+            description=(
+                "AppIDs de Steam que no se muestran en el panel (por ejemplo 431960 para "
+                "Wallpaper Engine), separados por ; o espacios. Se suman a los guardados en "
+                "steam-prefs.json. Se aplica la próxima vez que se abre el panel."
+            ),
+            value_type="string",
+            default=shell_config.STEAM_IGNORED_APPIDS,
+            config_attr="STEAM_IGNORED_APPIDS",
+            apply=APPLY_LIVE,
+            tier="A",
+            section="Steam",
+        ),
+        SettingDef(
+            key="juegos.steam_show_ignored",
+            category=CategoryId.JUEGOS,
+            label="Mostrar juegos ignorados",
+            description="Muestra también los juegos ignorados. Se aplica la próxima vez que se abre el panel.",
+            value_type="bool",
+            default=shell_config.STEAM_SHOW_IGNORED,
+            config_attr="STEAM_SHOW_IGNORED",
+            apply=APPLY_LIVE,
+            tier="A",
+            section="Steam",
         ),
         # —— Comportamiento ——
         SettingDef(

@@ -192,10 +192,11 @@ NOTIFICATION_POPUP_MAX_HEIGHT = 540
 NOTIFICATION_POPUP_ICON_SIZE = 20
 NOTIFICATION_POPUP_ROW_BODY_LINES = 4
 NOTIFICATION_POPUP_LIST_SPACING = 8
-# Progressive open: chrome first, then staggered package appear + stack.
-NOTIFICATION_POPUP_REVEAL_STAGGER_MS = 40
-NOTIFICATION_POPUP_ROW_APPEAR_MS = 180
-NOTIFICATION_POPUP_ROW_SLIDE_PX = 12
+# Chrome maps first. Each block then slides in on its own; the next one waits
+# this long so a batch already in memory still stacks one by one. The row
+# duration is how long that block (and the window) takes to grow.
+NOTIFICATION_POPUP_REVEAL_STAGGER_MS = 120
+NOTIFICATION_POPUP_ROW_APPEAR_MS = 200
 
 # Stacked group window: whole-block page slide when changing parent.
 # Deliberately long so rapid parent changes feel like continuous navigation.
@@ -293,6 +294,21 @@ LAUNCHER_WIDTH = 440
 LAUNCHER_MAX_HEIGHT = 520
 LAUNCHER_ROW_ICON_SIZE = 28
 LAUNCHER_LIST_SPACING = 2
+
+# Steam games catalog. Libraries come from Steam's libraryfolders.vdf; these
+# extra paths (separated by ";" or ":") only back it up when it misses one.
+STEAM_EXTRA_LIBRARY_PATHS = ""
+STEAM_PREFS_PATH = "steam-prefs.json"
+# Missing covers come from Steam's CDN by appid unless this is off (local only).
+STEAM_ARTWORK_DOWNLOAD_ENABLED = True
+STEAM_ARTWORK_DOWNLOAD_TIMEOUT_SEC = 8
+# Right-edge games panel (full height). Card covers keep Steam's 2:3 capsule ratio.
+STEAM_PANEL_WIDTH = 460
+# Minimum cover width: the grid fits as many columns as allow it, then widens covers to fill the row.
+STEAM_CARD_WIDTH = 112
+# Extra appids to hide (separated by ; , or spaces), added to those in steam-prefs.json.
+STEAM_IGNORED_APPIDS = ""
+STEAM_SHOW_IGNORED = False
 
 # Clipboard picker (Super+V). History is local-only and never logged.
 # Limits apply only to Jugoo persistence — never to the system clipboard.

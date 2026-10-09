@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import socket
 import subprocess
 from dataclasses import dataclass
 from typing import Callable
@@ -151,6 +153,26 @@ def configure_passive_popup(window: Gtk.Window) -> None:
     window.set_type_hint(Gdk.WindowTypeHint.NOTIFICATION)
 
 
+def shell_window_bottom(anchor: Gtk.Widget) -> int | None:
+    """Bottom edge of the bar window that contains ``anchor``.
+
+    The shell window is only as tall as the bar. A popup whose top is above
+    this edge is covered by the bar.
+    """
+    toplevel = anchor.get_toplevel()
+    if not isinstance(toplevel, Gtk.Window) or not toplevel.get_realized():
+        return None
+    gdk_window = toplevel.get_window()
+    if gdk_window is None:
+        return None
+    origin = gdk_window.get_origin()
+    if len(origin) == 3:
+        _ok, _root_x, root_y = origin
+    else:
+        _root_x, root_y = origin
+    return int(root_y) + max(1, int(toplevel.get_allocated_height()))
+
+
 def anchor_button_geometry(anchor: Gtk.Widget) -> AnchorButtonGeometry | None:
     """Root/screen geometry for a bar button used as a popup anchor."""
     toplevel = anchor.get_toplevel()
@@ -209,11 +231,14 @@ def compute_popup_top_left(
     fixed_top: int | None = None,
     monitor: MonitorRect | None = None,
     margin: int | None = None,
+    floor_top: int | None = None,
 ) -> tuple[int, int]:
     """Top-left popup coordinates: centered on the anchor, top below the button."""
     edge = shell_config.POPUP_EDGE_MARGIN if margin is None else margin
     popup_left = button_center_x - popup_width // 2
     popup_top = fixed_top if fixed_top is not None else button_bottom + offset
+    if floor_top is not None:
+        popup_top = max(popup_top, int(floor_top))
 
     if monitor is not None:
         mon_left = monitor.x
@@ -312,6 +337,7 @@ def position_popup_below_anchor(
         fixed_top=(fixed_top + extra_y_offset) if fixed_top is not None else None,
         monitor=monitor,
         margin=margin,
+        floor_top=shell_window_bottom(anchor),
     )
     reposition_popup(window, title=title, x=popup_left, y=popup_top)
     return popup_top
@@ -334,11 +360,15 @@ def reposition_popup_live(window: Gtk.Window, *, title: str, x: int, y: int) -> 
     """Per-frame move during animation: one compositor call, no retry storm."""
     window.move(int(x), int(y))
     if is_wayland_session():
-        _hyprland_move_popup(title, int(x), int(y))
+        _hyprland_move_popup_fast(title, int(x), int(y))
 
 
 def schedule_hyprland_popup_move(title: str, x: int, y: int) -> None:
-    """Move a floating shell popup through Hyprland after map."""
+    """Move a floating shell popup through Hyprland after map.
+
+    The first dispatch often runs before the client exists. Later repeats of
+    the same point are what place the notification group beside its parent.
+    """
 
     def move_once() -> bool:
         _hyprland_move_popup(title, x, y)
@@ -349,12 +379,16 @@ def schedule_hyprland_popup_move(title: str, x: int, y: int) -> None:
         GLib.timeout_add(delay_ms, move_once)
 
 
-def _hyprland_move_popup(title: str, x: int, y: int) -> None:
+def _hyprland_move_expression(title: str, x: int, y: int) -> str:
     safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
-    expression = (
+    return (
         f'hl.dsp.window.move({{ window = "title:^{safe_title}$", '
         f"x = {x}, y = {y}, relative = false }})"
     )
+
+
+def _hyprland_move_popup(title: str, x: int, y: int) -> None:
+    expression = _hyprland_move_expression(title, x, y)
     subprocess.run(
         ["hyprctl", "dispatch", expression],
         check=False,
@@ -362,6 +396,30 @@ def _hyprland_move_popup(title: str, x: int, y: int) -> None:
         text=True,
         timeout=1.0,
     )
+
+
+def _hyprland_move_popup_fast(title: str, x: int, y: int) -> None:
+    """Move without spawning hyprctl, so a growing window can be re-pinned every frame."""
+    expression = "dispatch " + _hyprland_move_expression(title, x, y)
+    signature = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE", "")
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+    if not signature or not runtime:
+        _hyprland_move_popup(title, x, y)
+        return
+    path = os.path.join(runtime, "hypr", signature, ".socket.sock")
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(0.05)
+            client.connect(path)
+            client.sendall(expression.encode())
+            client.shutdown(socket.SHUT_WR)
+            try:
+                while client.recv(4096):
+                    pass
+            except TimeoutError:
+                return
+    except OSError:
+        _hyprland_move_popup(title, x, y)
 
 
 def schedule_popup_position(callback: Callable[[], bool | None]) -> None:

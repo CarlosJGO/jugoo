@@ -61,11 +61,11 @@ for _, entry in ipairs(interactive) do
     })
 end
 
--- Door animations live in GTK; suppress Hyprland layer slide.
+-- Door and edge-slide animations live in GTK; suppress Hyprland layer slide.
 hl.layer_rule({
     name = "jugoo-puertas-no-anim",
     match = {
-        namespace = "^shell-(app-launcher|clipboard-picker|emoji-picker)$",
+        namespace = "^shell-(app-launcher|clipboard-picker|emoji-picker|steam-games)$",
     },
     no_anim = true,
 })

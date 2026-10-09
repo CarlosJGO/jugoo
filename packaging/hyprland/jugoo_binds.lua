@@ -21,6 +21,7 @@ hl.bind(mainMod .. " + Z", jugoo_cmd("action settings"))
 hl.bind(mainMod .. " + X", jugoo_cmd("action control-center"))
 hl.bind(mainMod .. " + A", jugoo_cmd("action notifications"))
 hl.bind(mainMod .. " + ALT + C", jugoo_cmd("action session"))
+hl.bind(mainMod .. " + ALT + S", jugoo_action("steam"))
 
 hl.bind(mainMod .. " + F10", jugoo_cmd("action playStopMusic"), { locked = true })
 hl.bind(mainMod .. " + SHIFT + F10", jugoo_cmd("action media"), { locked = true })
