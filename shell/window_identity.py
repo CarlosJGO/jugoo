@@ -400,26 +400,159 @@ def _hyprland_move_popup(title: str, x: int, y: int) -> None:
 
 def _hyprland_move_popup_fast(title: str, x: int, y: int) -> None:
     """Move without spawning hyprctl, so a growing window can be re-pinned every frame."""
-    expression = "dispatch " + _hyprland_move_expression(title, x, y)
+    _hyprland_dispatch_fast(_hyprland_move_expression(title, x, y))
+
+
+def set_popup_compositor_animations(title: str, enabled: bool) -> None:
+    """Toggle Hyprland's animations for one shell popup (``no_anim`` prop)."""
+    if not is_wayland_session():
+        return
+    safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
+    value = "0" if enabled else "1"
+    _hyprland_dispatch_fast(
+        f'hl.dsp.window.set_prop({{ window = "title:^{safe_title}$", '
+        f'prop = "no_anim", value = "{value}" }})'
+    )
+
+
+def move_window_under(
+    title: str, x: int, y: int, *, above_title: str, animate: bool = False
+) -> None:
+    """Move ``title`` and keep it right under ``above_title``.
+
+    Hyprland raises a floating window it moves, and ``alter_zorder`` with
+    ``bottom`` sinks it under every window of the workspace. Raising this one
+    and then ``above_title`` in the same Lua chunk leaves no frame between.
+
+    ``animate`` lets Hyprland slide it with ``windowsMove``; otherwise it
+    jumps. The ``no_anim`` prop is left as set: putting it back in the same
+    chunk would land before the move starts and undo it.
+    """
+    if not is_wayland_session():
+        return
+    window = _title_selector(title)
+    above = _title_selector(above_title)
+    no_anim = "0" if animate else "1"
+    _hyprland_eval_fast(
+        f'hl.dispatch(hl.dsp.window.set_prop({{ window = {window}, prop = "no_anim", value = "{no_anim}" }})) '
+        f"hl.dispatch({_hyprland_move_expression(title, int(x), int(y))}) "
+        f'hl.dispatch(hl.dsp.window.alter_zorder({{ window = {window}, mode = "top" }})) '
+        f'hl.dispatch(hl.dsp.window.alter_zorder({{ window = {above}, mode = "top" }}))'
+    )
+
+
+def force_window_opaque(title: str) -> None:
+    """Paint the window at full opacity, active or not.
+
+    The rule string ``"1.0 override"`` still leaves the theme's ~0.96, and a
+    window kept behind this one would show through.
+    """
+    if not is_wayland_session():
+        return
+    window = _title_selector(title)
+    _hyprland_eval_fast(
+        " ".join(
+            f"hl.dispatch(hl.dsp.window.set_prop({{ window = {window}, "
+            f'prop = "{prop}", value = "1" }}))'
+            for prop in ("opacity_override", "opacity_inactive_override", "opacity")
+        )
+    )
+
+
+def _title_selector(title: str) -> str:
+    safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"title:^{safe_title}$"'
+
+
+def _hyprland_dispatch_fast(expression: str) -> None:
+    """Blocking dispatch over the Hyprland socket: it lands before GTK commits
+    the frame that triggered it.
+    """
+    if _hyprland_socket_request("dispatch " + expression):
+        return
+    subprocess.run(
+        ["hyprctl", "dispatch", expression],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=1.0,
+    )
+
+
+def _hyprland_eval_fast(lua: str) -> None:
+    """Several dispatches in one request: Hyprland runs them in the same loop
+    turn, so no frame shows a state in between.
+    """
+    if _hyprland_socket_request("eval " + lua):
+        return
+    subprocess.run(
+        ["hyprctl", "eval", lua],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=1.0,
+    )
+
+
+def hyprland_cursor_position() -> tuple[int, int] | None:
+    """Global pointer position in layout coordinates, from Hyprland.
+
+    Wayland gives a client no global pointer position, and crossing events
+    between two of its windows get lost in Hyprland's border-grab strip.
+    """
+    reply = _hyprland_socket_query("j/cursorpos")
+    if not reply:
+        return None
+    try:
+        payload = json.loads(reply)
+        return int(payload["x"]), int(payload["y"])
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def _hyprland_socket_query(command: str) -> str | None:
     signature = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE", "")
     runtime = os.environ.get("XDG_RUNTIME_DIR", "")
-    if not signature or not runtime:
-        _hyprland_move_popup(title, x, y)
-        return
+    if not (signature and runtime):
+        return None
+    path = os.path.join(runtime, "hypr", signature, ".socket.sock")
+    chunks: list[bytes] = []
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(0.05)
+            client.connect(path)
+            client.sendall(command.encode())
+            client.shutdown(socket.SHUT_WR)
+            while True:
+                chunk = client.recv(4096)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+    except OSError:
+        return None
+    return b"".join(chunks).decode(errors="replace")
+
+
+def _hyprland_socket_request(command: str) -> bool:
+    signature = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE", "")
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+    if not (signature and runtime):
+        return False
     path = os.path.join(runtime, "hypr", signature, ".socket.sock")
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
             client.settimeout(0.05)
             client.connect(path)
-            client.sendall(expression.encode())
+            client.sendall(command.encode())
             client.shutdown(socket.SHUT_WR)
             try:
                 while client.recv(4096):
                     pass
             except TimeoutError:
-                return
+                pass
+        return True
     except OSError:
-        _hyprland_move_popup(title, x, y)
+        return False
 
 
 def schedule_popup_position(callback: Callable[[], bool | None]) -> None:

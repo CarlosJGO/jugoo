@@ -25,6 +25,7 @@ def test_hover_opens_group_immediately() -> None:
     row._group_snapshots = ["a", "b"]
     row._hover_opened = False
     row._open_group_window = mock.Mock()
+    row._host_popup = lambda: None
 
     event = SimpleNamespace(mode=None, detail=None)
     with mock.patch(

@@ -2209,8 +2209,63 @@ box.notification-popup-split {
     background-color: transparent;
 }
 
+/* The grouped card rests behind this window: nothing of it may show through. */
+window#shell-notifications.notification-deck-host {
+    background-color: @theme_surface_alt;
+}
+
+window#shell-notification-deck {
+    background-color: transparent;
+}
+
+box.notification-deck-pane {
+    background-color: @shell_surface_bg_panel;
+    background-image: -gtk-gradient(
+        linear,
+        left top,
+        right bottom,
+        from(alpha(@shell_secondary, 0.16)),
+        color-stop(0.48, alpha(@shell_text_primary, 0.035)),
+        to(alpha(@shell_special, 0.10))
+    );
+    border: 1px solid alpha(@shell_secondary, 0.34);
+    border-radius: 0;
+    padding: 8px 10px;
+}
+
+button.notification-deck-more {
+    margin-top: 4px;
+    padding: 4px 8px;
+    color: alpha(@shell_text_primary, 0.75);
+}
+
+button.notification-deck-more:hover {
+    color: @shell_text_primary;
+    background-color: alpha(@shell_secondary, 0.18);
+}
+
+scrolledwindow.notification-deck-scroll scrollbar {
+    background-color: transparent;
+    border: none;
+}
+
+scrolledwindow.notification-deck-scroll scrollbar slider {
+    min-width: 4px;
+    border-radius: 2px;
+    border: none;
+    background-color: alpha(@shell_secondary, 0.45);
+}
+
+scrolledwindow.notification-deck-scroll scrollbar slider:hover {
+    background-color: alpha(@shell_secondary, 0.75);
+}
+
 box.notification-popup-main {
     min-width: 360px;
+}
+
+eventbox.notification-popup-hover-region {
+    background-color: transparent;
 }
 
 box.notification-stack-pane {
@@ -2396,7 +2451,7 @@ box.notification-group-row {
     background-color: @shell_surface_bg;
     border: 1px solid @shell_border_strong;
     border-radius: 10px;
-    padding: 10px 12px;
+    padding: 7px 12px;
     min-width: 0;
 }
 

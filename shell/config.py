@@ -191,7 +191,7 @@ NOTIFICATION_POPUP_WIDTH = 360
 NOTIFICATION_POPUP_MAX_HEIGHT = 540
 NOTIFICATION_POPUP_ICON_SIZE = 20
 NOTIFICATION_POPUP_ROW_BODY_LINES = 4
-NOTIFICATION_POPUP_LIST_SPACING = 8
+NOTIFICATION_POPUP_LIST_SPACING = 6
 # Chrome maps first. Each block then slides in on its own; the next one waits
 # this long so a batch already in memory still stacks one by one. The row
 # duration is how long that block (and the window) takes to grow.
@@ -201,6 +201,29 @@ NOTIFICATION_POPUP_ROW_APPEAR_MS = 200
 # Stacked group window: whole-block page slide when changing parent.
 # Deliberately long so rapid parent changes feel like continuous navigation.
 NOTIFICATION_GROUP_SLIDE_DURATION_MS = 700
+
+# Grouped notifications as a card that slides out from behind the popup
+# (separate window that Hyprland slides with its windowsMove animation).
+# Disabled = the older pane inside the popup, which widens the window.
+NOTIFICATIONS_DECK_ENABLED = True
+# How long Hyprland's windowsMove takes (speed 5 in hypr/config/animations.lua
+# = 500 ms); the next group only loads after it.
+NOTIFICATIONS_DECK_DURATION_MS = 500
+NOTIFICATIONS_DECK_DIRECTION = "auto"  # auto | left | right
+NOTIFICATIONS_DECK_REDUCED_MOTION = False
+# Popup ∪ card form one hover region, read from Hyprland's pointer position
+# every NOTIFICATIONS_HOVER_POLL_MS while the popup is open. The card goes
+# back once the pointer has been out of it for NOTIFICATIONS_DECK_HOVER_GRACE_MS.
+NOTIFICATIONS_DECK_HOVER_GRACE_MS = 120
+# The pointer must rest this long on a parent before the card acts on it.
+NOTIFICATIONS_DECK_HOVER_INTENT_MS = 140
+NOTIFICATIONS_HOVER_POLL_MS = 40
+# Laying out a long list takes ~1 ms per row; past this the card says "y N más".
+NOTIFICATIONS_DECK_MAX_ROWS = 30
+# The card is the popup minus this inset per side, so at rest no edge shows.
+NOTIFICATION_DECK_INSET = 6
+# Width still tucked under the popup when the card is out.
+NOTIFICATION_DECK_OVERLAP = 18
 
 # Timeouts (milliseconds). 0 = persist until manually dismissed.
 NOTIFICATIONS_DEFAULT_TIMEOUT_MS = 5000

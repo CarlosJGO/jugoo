@@ -725,6 +725,107 @@ def build_settings_catalog() -> tuple[SettingDef, ...]:
             tier="A",
             section="Agrupación",
         ),
+        SettingDef(
+            key="notificaciones.deck_enabled",
+            category=CategoryId.NOTIFICACIONES,
+            label="Agrupadas como carta",
+            description=(
+                "Las agrupadas salen de detrás del panel en una ventana propia. "
+                "Desactivado vuelve al panel lateral anterior, que ensancha la ventana."
+            ),
+            value_type="bool",
+            default=shell_config.NOTIFICATIONS_DECK_ENABLED,
+            config_attr="NOTIFICATIONS_DECK_ENABLED",
+            apply=APPLY_LIVE,
+            tier="A",
+            section="Panel agrupado",
+        ),
+        SettingDef(
+            key="notificaciones.deck_duration_ms",
+            category=CategoryId.NOTIFICACIONES,
+            label="Duración del deslizamiento",
+            description=(
+                "Lo que tarda la animación windowsMove de Hyprland (velocidad × 100 ms). "
+                "La carta cambia de grupo cuando termina."
+            ),
+            value_type="int",
+            default=shell_config.NOTIFICATIONS_DECK_DURATION_MS,
+            config_attr="NOTIFICATIONS_DECK_DURATION_MS",
+            apply=APPLY_LIVE,
+            minimum=100,
+            maximum=1500,
+            step=50,
+            tier="B",
+            section="Panel agrupado",
+            unit="ms",
+        ),
+        SettingDef(
+            key="notificaciones.deck_direction",
+            category=CategoryId.NOTIFICACIONES,
+            label="Lado de salida",
+            description="Automático usa la izquierda y cambia de lado si no cabe.",
+            value_type="choice",
+            default=shell_config.NOTIFICATIONS_DECK_DIRECTION,
+            config_attr="NOTIFICATIONS_DECK_DIRECTION",
+            apply=APPLY_LIVE,
+            choices=(
+                ("auto", "Automático"),
+                ("left", "Izquierda"),
+                ("right", "Derecha"),
+            ),
+            tier="B",
+            section="Panel agrupado",
+        ),
+        SettingDef(
+            key="notificaciones.deck_reduced_motion",
+            category=CategoryId.NOTIFICACIONES,
+            label="Movimiento reducido",
+            description="La carta aparece en su sitio sin deslizarse.",
+            value_type="bool",
+            default=shell_config.NOTIFICATIONS_DECK_REDUCED_MOTION,
+            config_attr="NOTIFICATIONS_DECK_REDUCED_MOTION",
+            apply=APPLY_LIVE,
+            tier="B",
+            section="Panel agrupado",
+        ),
+        SettingDef(
+            key="notificaciones.deck_hover_grace_ms",
+            category=CategoryId.NOTIFICACIONES,
+            label="Margen al salir del panel",
+            description=(
+                "Tiempo que el cursor debe seguir fuera del panel y de la carta "
+                "antes de que la carta vuelva; evita cierres al rozar el borde."
+            ),
+            value_type="int",
+            default=shell_config.NOTIFICATIONS_DECK_HOVER_GRACE_MS,
+            config_attr="NOTIFICATIONS_DECK_HOVER_GRACE_MS",
+            apply=APPLY_LIVE,
+            minimum=0,
+            maximum=500,
+            step=10,
+            tier="C",
+            section="Panel agrupado",
+            unit="ms",
+        ),
+        SettingDef(
+            key="notificaciones.deck_hover_intent_ms",
+            category=CategoryId.NOTIFICACIONES,
+            label="Espera antes de cambiar de grupo",
+            description=(
+                "Tiempo que el cursor debe quedarse sobre una notificación antes "
+                "de que la carta muestre su grupo; al pasar rápido no hace nada."
+            ),
+            value_type="int",
+            default=shell_config.NOTIFICATIONS_DECK_HOVER_INTENT_MS,
+            config_attr="NOTIFICATIONS_DECK_HOVER_INTENT_MS",
+            apply=APPLY_LIVE,
+            minimum=0,
+            maximum=600,
+            step=10,
+            tier="C",
+            section="Panel agrupado",
+            unit="ms",
+        ),
         # —— Multimedia ——
         SettingDef(
             key="multimedia.position_poll_ms",

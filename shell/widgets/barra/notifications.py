@@ -49,6 +49,7 @@ from ...ui import ShellModule
 from ..notificaciones.assistant_presenter import AssistantPresenter
 from ..notificaciones.bell_icon import BellIcon
 from ..notificaciones.notification_activate import activate_notification_sender
+from ..notificaciones.notification_deck import NotificationDeck
 from ..notificaciones.notification_popup import NotificationPopup
 from ..notificaciones.notification_toast_manager import NotificationToastManager
 
@@ -97,6 +98,12 @@ class NotificationsWidget(ShellModule):
         self._overlay.add_overlay(self._badge)
         self.pack_start(self._overlay, False, False, 0)
 
+        self._deck = NotificationDeck(
+            shell_window,
+            on_dismiss=self._dismiss,
+            on_activate=self._activate_notification,
+            on_hover_changed=self._on_popup_hover_changed,
+        )
         self._popup = PopupHandle(self._create_popup)
         self._toast_manager = NotificationToastManager(
             shell_window,
@@ -151,9 +158,18 @@ class NotificationsWidget(ShellModule):
             on_toggle_app_sound_mute=self._toggle_app_sound_mute,
             on_toggle_app_blocked=self._toggle_app_blocked,
             on_preload_group_pages=None,
+            deck=self._deck,
         )
 
+    def _on_popup_hover_changed(self, inside: bool) -> None:
+        """Nothing expires while the pointer is over the popup or its card."""
+        if inside:
+            self._service.hold_expirations()
+        else:
+            self._service.resume_expirations()
+
     def _on_destroy(self, *_args) -> None:
+        self._deck.close()
         self._icon.stop()
         if self._refresh_source_id:
             GLib.source_remove(self._refresh_source_id)
@@ -326,6 +342,8 @@ class NotificationsWidget(ShellModule):
             (self._button,),
             self.close_popup,
             self._event_bus,
+            # The grouped card is part of the popup: a click on it is inside.
+            extra_windows=(self._deck.ensure_window(),),
         )
 
     def toggle_popup(self) -> None:
@@ -360,6 +378,16 @@ class NotificationsWidget(ShellModule):
     def _invoke_action(self, notification_id: int, action_key: str) -> None:
         self._service.invoke_action(notification_id, action_key)
 
+    def _activate_notification(self, snapshot: NotificationSnapshot) -> None:
+        """A click on a row of the grouped card: same as on a popup row."""
+        default_action = next(
+            (action.key for action in snapshot.actions if action.key == "default"),
+            snapshot.actions[0].key if snapshot.actions else None,
+        )
+        if default_action is not None:
+            self._invoke_action(snapshot.id, default_action)
+        self._open_app(snapshot)
+
     def _open_app(self, snapshot: NotificationSnapshot) -> None:
         from ...models import ApplicationsSnapshot
 
@@ -392,6 +420,7 @@ class NotificationsWidget(ShellModule):
             popup.show_stacked(group_snapshots)
 
     def _close_group_window(self) -> None:
+        self._deck.close()
         popup = self._popup.maybe
         if popup is not None:
             popup.hide_stacked()

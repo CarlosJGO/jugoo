@@ -337,6 +337,9 @@ class NotificationService:
         self._active_bus_name: str | None = None
         self._production_retry_source_id = 0
         self._expire_timers: dict[int, int] = {}
+        self._expire_deadlines: dict[int, float] = {}
+        # While held (pointer over the popup), what each one had left, in ms.
+        self._expire_held: dict[int, int] | None = None
         self._persist_lock = threading.Lock()
         self._persist_pending: tuple[
             tuple[NotificationSnapshot, ...],
@@ -758,15 +761,51 @@ class NotificationService:
         if timeout_ms <= 0:
             return
         self._cancel_expire_timer(snapshot.id)
+        if self._expire_held is not None:
+            self._expire_held[snapshot.id] = timeout_ms
+            return
+        self._start_expire_timer(snapshot.id, timeout_ms)
 
-        def on_timeout(notification_id: int = snapshot.id) -> bool:
+    def _start_expire_timer(self, notification_id: int, timeout_ms: int) -> None:
+        def on_timeout() -> bool:
+            self._expire_timers.pop(notification_id, None)
+            self._expire_deadlines.pop(notification_id, None)
             self.expire(notification_id)
             return False
 
-        source_id = GLib.timeout_add(timeout_ms, on_timeout)
-        self._expire_timers[snapshot.id] = source_id
+        self._expire_deadlines[notification_id] = _monotonic_ms() + timeout_ms
+        self._expire_timers[notification_id] = GLib.timeout_add(timeout_ms, on_timeout)
+
+    def hold_expirations(self) -> None:
+        """Stop the expiration clocks; each keeps the time it had left."""
+        if self._expire_held is not None:
+            return
+        now = _monotonic_ms()
+        held: dict[int, int] = {}
+        for notification_id, source_id in self._expire_timers.items():
+            GLib.source_remove(source_id)
+            deadline = self._expire_deadlines.get(notification_id, now)
+            held[notification_id] = max(0, round(deadline - now))
+        self._expire_timers.clear()
+        self._expire_deadlines.clear()
+        self._expire_held = held
+
+    def resume_expirations(self) -> None:
+        held = self._expire_held
+        if held is None:
+            return
+        self._expire_held = None
+        for notification_id, remaining_ms in held.items():
+            self._start_expire_timer(notification_id, max(1, remaining_ms))
+
+    @property
+    def expirations_held(self) -> bool:
+        return self._expire_held is not None
 
     def _cancel_expire_timer(self, notification_id: int) -> None:
+        self._expire_deadlines.pop(notification_id, None)
+        if self._expire_held is not None:
+            self._expire_held.pop(notification_id, None)
         source_id = self._expire_timers.pop(notification_id, None)
         if source_id:
             GLib.source_remove(source_id)
@@ -775,6 +814,9 @@ class NotificationService:
         for source_id in self._expire_timers.values():
             GLib.source_remove(source_id)
         self._expire_timers.clear()
+        self._expire_deadlines.clear()
+        if self._expire_held is not None:
+            self._expire_held.clear()
 
     def _request_primary_ownership(self) -> None:
         if self._closing or self._primary_owner_id:
@@ -1093,6 +1135,10 @@ class NotificationService:
     @staticmethod
     def _log(message: str) -> None:
         print(f"shell: notifications: {message}")
+
+
+def _monotonic_ms() -> float:
+    return time.monotonic() * 1000.0
 
 
 def _snapshot_to_dbus_dict(snapshot: NotificationSnapshot) -> dict[str, GLib.Variant]:

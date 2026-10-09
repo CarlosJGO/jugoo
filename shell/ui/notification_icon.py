@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from functools import lru_cache
 from pathlib import Path
 
 import gi
@@ -61,6 +63,17 @@ def _candidate_icon_names(snapshot: NotificationSnapshot) -> tuple[str, ...]:
 
 
 def _pixbuf_from_path(path: str, pixel_size: int) -> GdkPixbuf.Pixbuf | None:
+    try:
+        stamp = os.stat(path).st_mtime_ns
+    except OSError:
+        return None
+    return _decode_pixbuf(path, stamp, pixel_size)
+
+
+# Many notifications of one app share an image; decoding it is most of the
+# cost of building a row.
+@lru_cache(maxsize=256)
+def _decode_pixbuf(path: str, _stamp: int, pixel_size: int) -> GdkPixbuf.Pixbuf | None:
     try:
         return GdkPixbuf.Pixbuf.new_from_file_at_size(path, pixel_size, pixel_size)
     except GLibError:

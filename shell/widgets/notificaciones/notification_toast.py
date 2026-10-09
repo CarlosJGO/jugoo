@@ -152,6 +152,12 @@ class NotificationToast(Gtk.EventBox):
         self._actions_box.set_no_show_all(True)
         self._card.pack_start(self._actions_box, False, False, 0)
 
+    def do_get_preferred_width(self):
+        # Wrapped labels ask for their whole text on one line; the card wraps
+        # at its own width instead of growing with the text.
+        cap = NOTIFICATIONS_TOAST_WIDTH
+        return cap, cap
+
     def do_get_preferred_height(self):
         minimum, natural = Gtk.EventBox.do_get_preferred_height(self)
         cap = NOTIFICATIONS_TOAST_MAX_HEIGHT
@@ -217,6 +223,10 @@ class NotificationToast(Gtk.EventBox):
             for action in action_list:
                 btn = Gtk.Button(label=action.label, relief=Gtk.ReliefStyle.NONE)
                 btn.get_style_context().add_class("notification-toast-action-btn")
+                btn.set_tooltip_text(action.label)
+                label = btn.get_child()
+                if isinstance(label, Gtk.Label):
+                    label.set_ellipsize(Pango.EllipsizeMode.END)
                 btn.connect(
                     "clicked",
                     lambda _btn, key=action.key: self._on_action_clicked(key),

@@ -6,10 +6,11 @@ from typing import Callable
 
 import gi
 
+gi.require_version("Gdk", "3.0")
 gi.require_version("Gtk", "3.0")
 gi.require_version("Pango", "1.0")
 
-from gi.repository import Gtk, Pango
+from gi.repository import Gdk, Gtk, Pango
 
 from ...config import NOTIFICATION_POPUP_ICON_SIZE
 from ...models import NotificationSnapshot
@@ -25,11 +26,15 @@ class NotificationMiniRow(Gtk.EventBox):
         snapshot: NotificationSnapshot,
         *,
         on_dismiss: Callable[[int], None],
+        on_activate: Callable[[NotificationSnapshot], None] | None = None,
     ) -> None:
         super().__init__()
         self._snapshot = snapshot
+        self._on_activate = on_activate
         self._dismiss_drag = connect_right_drag_dismiss(self, snapshot.id, on_dismiss)
         self.set_tooltip_text("Arrastra a izquierda o derecha con clic derecho para eliminar")
+        if on_activate is not None and (snapshot.actions or snapshot.desktop_entry):
+            self.connect("button-press-event", self._on_clicked)
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         row.get_style_context().add_class("notification-mini-row")
@@ -77,3 +82,10 @@ class NotificationMiniRow(Gtk.EventBox):
         row.pack_start(text_box, True, True, 0)
 
         self.add(row)
+
+    def _on_clicked(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
+        if event.button != 1 or event.type != Gdk.EventType.BUTTON_PRESS:
+            return False
+        assert self._on_activate is not None
+        self._on_activate(self._snapshot)
+        return True
