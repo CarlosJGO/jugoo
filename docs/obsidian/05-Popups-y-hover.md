@@ -26,11 +26,11 @@ Hyprland no debe animar estas layers (`layers` → `slide` las hace “caer” d
 
 ## Salida desde la barra
 
-Los popups anclados a un bloque de la barra son ventanas normales. Jugoo publica su sitio (centrado en el bloque si cabe, y por debajo de la barra) y Hyprland las coloca y anima la entrada y la salida (`jugoo_popup_place.lua`, `popin`). Las puertas centradas no entran aquí. Las notificaciones apiladas no son otra ventana: el mismo panel crece a la izquierda y muestra solo el grupo bajo el cursor.
+Los popups anclados a un bloque de la barra son ventanas normales. Jugoo publica su sitio (centrado en el bloque si cabe, y por debajo de la barra) y Hyprland las coloca y anima la entrada y la salida (`jugoo_popup_place.lua`, `popin`). Las puertas centradas no entran aquí. Las notificaciones agrupadas salen en una carta aparte, detrás del popup, que nunca se mueve ni cambia de tamaño. Detalle en [10-Ventana-de-grupo-tipo-mazo](10-Ventana-de-grupo-tipo-mazo.md).
 
-- **Hover**: la lista padre (huecos incluidos) y el bloque de apiladas forman una sola región. El bloque se cierra al salir de esa región o al pasar por una notificación sin apiladas, nunca al cruzar el hueco entre tarjetas. No hay temporizadores.
-- **Sin rebote**: Hyprland hace crecer desde el centro una ventana flotante cuando el cliente cambia de ancho. Jugoo la recoloca con el borde derecho fijo desde `configure-event`, justo cuando GTK fija el tamaño nuevo, y no desde `size-allocate`, que llega un fotograma tarde. Si Hyprland animara ese movimiento las notificaciones padre se desplazarían y volverían. Por eso, desde la primera apertura del bloque, el panel lleva `no_anim` (`set_popup_compositor_animations`). Se devuelve antes de cerrar para conservar el `popin` de salida.
-- **Sin parpadeo**: GTK 3 publica el tamaño nuevo un fotograma antes que la imagen nueva. Durante ese fotograma, Hyprland estira o recorta la imagen vieja al marco nuevo. Por eso el ancho de la ventana cambia una sola vez al abrir y otra al cerrar (`_stack_revealer` sin transición). El movimiento visible es el bloque deslizándose dentro de un hueco que ya tiene su ancho final (`_stack_slide`). Al cerrar, el hueco se pliega cuando el bloque terminó de salir. Animar el ancho de la ventana fotograma a fotograma deformaba la lista padre en cerca del 40 % de los fotogramas.
+- **Hover**: el popup y la carta forman una sola región, comprobada con la posición del cursor que da Hyprland. Los huecos entre tarjetas no la cortan; salir de ella devuelve la carta tras un margen corto.
+- **Foco**: la carta recibe el puntero (rueda incluida) pero no el foco de teclado (`no_follow_mouse`), así que el borde del popup no cambia al cruzar.
+- **Movimiento**: lo hace Hyprland con `windowsMove`; Jugoo envía una sola orden por salida o vuelta.
 
 ## Dónde localizar cada popup
 

@@ -173,8 +173,8 @@ Implementada en `shell/widgets/notificaciones/notification_deck_motion.py`
 
 - `notification_grouping.py` (claves y agrupación) tal cual.
 - `notification_mini_row.py` y la región de hover del popup actual.
-- De `notification_group_window.py`: el paginador por bloques y la medida de
-  alturas; su colocación propia se sustituye por la geometría del mazo.
+- `notification_group_window.py` (ventana de grupo anterior) y el panel
+  lateral dentro del popup se eliminaron al cerrar la tarea 6.5.
 
 ## Decisión
 
@@ -191,3 +191,36 @@ mismo `eval` que el `move` (con `animate=False` la pone a 1, para mapear y
 hundir sin animación). No sirve volver a poner `no_anim` en el mismo `eval`
 después del `move`: se aplica antes de que empiece la animación y la anula. El
 fin se da por tiempo (ver arriba).
+
+## Estado final (tarea 6.5)
+
+- **Piezas:** `NotificationDeck` y `NotificationDeckWindow`
+  (`notification_deck.py`), `DeckMachine`, `HoverRegion` y `deck_track`
+  (`notification_deck_motion.py`), y `move_window_under(..., animate=)` en
+  `window_identity.py`. El popup solo delega: `show_stacked` y `hide_stacked`
+  pasan el grupo a la carta.
+- **Regla `SHELL-NOTIFICATION-DECK`:** flotante, sin borde ni sombra,
+  `no_anim = true` (Jugoo la levanta por movimiento), enfocable pero sin foco
+  inicial ni por activación, `no_follow_mouse = true`.
+- **Peticiones:** cuentan tras `deck_hover_intent_ms` sobre el mismo padre y
+  solo si el cursor de Hyprland está sobre el popup (GTK repite un *enter* en
+  la fila que quedó bajo una posición antigua del cursor al reabrir).
+- **Validación en sesión real** (puntero virtual `zwlr_virtual_pointer_v1`,
+  `j/clients` cada ~2 ms, ráfagas de `grim`):
+  - el popup tuvo una sola geometría en más de 8000 muestras y nunca se cerró;
+  - un barrido rápido entre padres no movió la carta y terminó en un solo
+    cambio;
+  - una vuelta a mitad de camino invierte sin recargar;
+  - la ventana activa sigue siendo el popup al cruzar a la carta y usar la
+    rueda;
+  - al cerrar con la carta fuera, la carta desaparece y el popup conserva su
+    `popin`; al abrir, la carta no aparece.
+- **Comparación con el panel lateral anterior:** el popup cambiaba de ancho
+  (360 ↔ 720) al abrir y cerrar el panel, con un fotograma estirado en cada
+  cambio, y desactivaba su animación de Hyprland mientras estaba abierto.
+  Ahora su geometría no cambia y conserva el `popin`.
+- **Límites:** el fin del movimiento se da por tiempo (500 ms ligados a
+  `windowsMove`); si cambia esa velocidad hay que cambiar
+  `deck_duration_ms`. Varios monitores y escalado fraccional solo están
+  cubiertos por pruebas de geometría (la sesión tiene un monitor a escala 1).
+

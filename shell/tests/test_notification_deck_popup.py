@@ -1,15 +1,13 @@
-"""With the card enabled the popup hands groups to it and never resizes."""
+"""The popup hands groups to the card and never resizes."""
 
 from __future__ import annotations
 
 import gi
 
-gi.require_version("Gdk", "3.0")
 gi.require_version("Gtk", "3.0")
 
-from gi.repository import Gdk, Gtk
+from gi.repository import Gtk
 
-from shell import config as shell_config
 from shell.tests.test_notification_popup_reveal import _Service, _noop, _snap
 from shell.widgets.notificaciones import notification_popup as popup_module
 from shell.widgets.notificaciones.notification_deck_motion import Rect
@@ -64,12 +62,6 @@ def _popup(deck: _FakeDeck, service: _Service | None = None) -> NotificationPopu
     return popup
 
 
-def _leave() -> Gdk.EventCrossing:
-    event = Gdk.Event.new(Gdk.EventType.LEAVE_NOTIFY)
-    event.crossing.detail = Gdk.NotifyType.NONLINEAR
-    return event.crossing
-
-
 def test_group_goes_to_the_card_and_the_popup_keeps_its_width() -> None:
     if not Gtk.init_check()[0]:
         raise AssertionError("GTK could not initialize")
@@ -81,21 +73,7 @@ def test_group_goes_to_the_card_and_the_popup_keeps_its_width() -> None:
     kind, ids, parent, _monitor = deck.calls[-1]
     assert (kind, ids) == ("show", (1, 2))
     assert parent == Rect(1500, 40, 360, 420)
-    assert popup._stack_revealer.get_reveal_child() is False
-    assert popup._stack_slide.get_reveal_child() is False
     assert popup.get_size_request().width == 360
-    popup.destroy()
-
-
-def test_leaving_the_parent_list_does_not_send_the_card_back() -> None:
-    """The deck decides by pointer position over popup ∪ card, not by crossings."""
-    if not Gtk.init_check()[0]:
-        raise AssertionError("GTK could not initialize")
-
-    deck = _FakeDeck()
-    popup = _popup(deck)
-    popup._on_hover_region_leave(popup._list_event, _leave())
-    assert deck.calls == []
     popup.destroy()
 
 
@@ -147,29 +125,9 @@ def test_unmapping_the_popup_closes_the_card() -> None:
     popup.destroy()
 
 
-def test_flag_off_brings_back_the_side_pane() -> None:
-    if not Gtk.init_check()[0]:
-        raise AssertionError("GTK could not initialize")
-
-    deck = _FakeDeck()
-    popup = _popup(deck)
-    previous = shell_config.NOTIFICATIONS_DECK_ENABLED
-    shell_config.NOTIFICATIONS_DECK_ENABLED = False
-    try:
-        popup.show_stacked([_snap(1, "Ana"), _snap(2, "Ana")])
-        assert not any(call[0] == "show" for call in deck.calls)
-        assert popup._stack_revealer.get_reveal_child() is True
-    finally:
-        shell_config.NOTIFICATIONS_DECK_ENABLED = previous
-        popup.close_popup()
-        popup.destroy()
-
-
 if __name__ == "__main__":
     test_group_goes_to_the_card_and_the_popup_keeps_its_width()
-    test_leaving_the_parent_list_does_not_send_the_card_back()
     test_hiding_releases_the_card_at_once()
     test_refresh_keeps_following_the_group_on_the_card()
     test_unmapping_the_popup_closes_the_card()
-    test_flag_off_brings_back_the_side_pane()
     print("ok")

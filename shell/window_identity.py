@@ -28,7 +28,6 @@ from .identity import (
     TITLE_MEDIA_POPUP,
     TITLE_MEMORY_POPUP,
     TITLE_NETWORK_PANEL,
-    TITLE_NOTIFICATION_GROUP,
     TITLE_NOTIFICATION_TOAST,
     TITLE_NOTIFICATIONS,
     TITLE_PINNED_OVERFLOW,
@@ -401,18 +400,6 @@ def _hyprland_move_popup(title: str, x: int, y: int) -> None:
 def _hyprland_move_popup_fast(title: str, x: int, y: int) -> None:
     """Move without spawning hyprctl, so a growing window can be re-pinned every frame."""
     _hyprland_dispatch_fast(_hyprland_move_expression(title, x, y))
-
-
-def set_popup_compositor_animations(title: str, enabled: bool) -> None:
-    """Toggle Hyprland's animations for one shell popup (``no_anim`` prop)."""
-    if not is_wayland_session():
-        return
-    safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
-    value = "0" if enabled else "1"
-    _hyprland_dispatch_fast(
-        f'hl.dsp.window.set_prop({{ window = "title:^{safe_title}$", '
-        f'prop = "no_anim", value = "{value}" }})'
-    )
 
 
 def move_window_under(

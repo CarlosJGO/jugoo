@@ -14,16 +14,9 @@ from shell.config import (
     NOTIFICATION_POPUP_REVEAL_STAGGER_MS,
 )
 from shell.models import NotificationSnapshot
-from shell.widgets.notificaciones import notification_popup as popup_module
 from shell.widgets.notificaciones.notification_popup import (
     _FIRST_BLOCK_DELAY_MS,
     NotificationPopup,
-    stack_pane_left,
-)
-
-_ANIMATION_TOGGLES: list[bool] = []
-popup_module.set_popup_compositor_animations = (
-    lambda _title, enabled: _ANIMATION_TOGGLES.append(enabled)
 )
 
 
@@ -89,160 +82,6 @@ def _popup(items: tuple[NotificationSnapshot, ...]) -> NotificationPopup:
     )
 
 
-def test_stacked_rows_do_not_stretch_the_window() -> None:
-    if not Gtk.init_check()[0]:
-        raise AssertionError("GTK could not initialize")
-
-    popup = _popup(tuple(_snap(index, "Ana") for index in range(1, 8)))
-    assert popup._stack_scrolled.get_propagate_natural_height() is False
-    assert popup._main.get_hexpand() is False
-    assert popup._main.get_halign() == Gtk.Align.END
-    parent_request = popup._main.get_size_request()
-    popup.show_stacked([_snap(index, "Ana") for index in range(1, 8)])
-    popup.hide_stacked()
-    assert popup._main.get_size_request().width == parent_request.width
-    assert popup._main.get_size_request().height == parent_request.height
-    assert popup._stack_revealer.get_reveal_child() is False
-    assert popup.get_size_request().width == 360
-    popup._cancel_top_pin()
-    popup.destroy()
-
-
-def test_stack_pane_grows_left_of_the_list() -> None:
-    assert stack_pane_left(1000, 360) == 640
-    assert stack_pane_left(1000, 720) == 280
-
-
-def test_hover_group_opens_the_left_pane() -> None:
-    if not Gtk.init_check()[0]:
-        raise AssertionError("GTK could not initialize")
-
-    popup = _popup((_snap(1, "Ana"), _snap(2, "Ana"), _snap(3, "Luis")))
-    popup.show_stacked([_snap(1, "Ana"), _snap(2, "Ana")])
-    assert popup._stack_revealer.get_reveal_child() is True
-    assert len(popup._stack_list.get_children()) == 2
-    assert "Ana" in popup._stack_title.get_text()
-
-    popup.show_stacked([_snap(3, "Luis")])
-    assert popup._stack_revealer.get_reveal_child() is False
-
-    popup.show_stacked([_snap(1, "Ana"), _snap(2, "Ana")])
-    popup.hide_stacked()
-    assert popup._stack_revealer.get_reveal_child() is False
-    assert popup.get_size_request().width == 360
-    assert popup._main.get_size_request().width == 360
-    popup._cancel_top_pin()
-    popup.destroy()
-
-
-def test_gaps_between_rows_keep_the_stack_open() -> None:
-    if not Gtk.init_check()[0]:
-        raise AssertionError("GTK could not initialize")
-
-    popup = _popup((_snap(1, "Ana"), _snap(2, "Ana")))
-    popup.show_stacked([_snap(1, "Ana"), _snap(2, "Ana")])
-    leave = Gdk.Event.new(Gdk.EventType.LEAVE_NOTIFY)
-    leave.crossing.detail = Gdk.NotifyType.NONLINEAR
-
-    inside = {"value": True}
-    original = popup_module.pointer_inside_widget
-    popup_module.pointer_inside_widget = lambda widget: (
-        inside["value"] and widget is popup._list_event
-    )
-    try:
-        popup._on_hover_region_leave(popup._list_event, leave.crossing)
-        assert popup._stack_revealer.get_reveal_child() is True
-        popup._on_hover_region_leave(popup._stack_event, leave.crossing)
-        assert popup._stack_revealer.get_reveal_child() is True
-
-        inside["value"] = False
-        popup._on_hover_region_leave(popup._list_event, leave.crossing)
-        assert popup._stack_revealer.get_reveal_child() is False
-    finally:
-        popup_module.pointer_inside_widget = original
-    popup._cancel_top_pin()
-    popup.destroy()
-
-
-def test_hyprland_animation_is_off_only_while_the_panel_is_open() -> None:
-    if not Gtk.init_check()[0]:
-        raise AssertionError("GTK could not initialize")
-
-    _ANIMATION_TOGGLES.clear()
-    popup = _popup((_snap(1, "Ana"), _snap(2, "Ana"), _snap(3, "Luis"), _snap(4, "Luis")))
-    popup.show_stacked([_snap(1, "Ana"), _snap(2, "Ana")])
-    popup.show_stacked([_snap(3, "Luis"), _snap(4, "Luis")])
-    popup.hide_stacked()
-    popup.show_stacked([_snap(1, "Ana"), _snap(2, "Ana")])
-    assert _ANIMATION_TOGGLES == [False]
-    popup.close_popup()
-    assert _ANIMATION_TOGGLES == [False, True]
-    popup.destroy()
-
-
-def test_parent_list_keeps_its_place_from_the_right_edge() -> None:
-    if not Gtk.init_check()[0]:
-        raise AssertionError("GTK could not initialize")
-
-    popup = _popup((_snap(1, "Ana"), _snap(2, "Ana")))
-    popup.show_all()
-    popup._stack_revealer.set_reveal_child(False)
-    _pump(60)
-
-    def gap_to_right_and_width() -> tuple[int, int, int]:
-        allocation = popup._main.get_allocation()
-        window_width = popup.get_allocated_width()
-        return (
-            window_width - (allocation.x + allocation.width),
-            allocation.width,
-            allocation.y,
-        )
-
-    before = gap_to_right_and_width()
-    popup.show_stacked([_snap(1, "Ana"), _snap(2, "Ana")])
-    samples = []
-    for _ in range(12):
-        _pump(20)
-        samples.append(gap_to_right_and_width())
-    popup.hide_stacked()
-    for _ in range(12):
-        _pump(20)
-        samples.append(gap_to_right_and_width())
-
-    assert before[1] == 360
-    assert all(sample == before for sample in samples), (before, samples)
-    popup._cancel_top_pin()
-    popup.destroy()
-
-
-def test_window_width_changes_once_per_open_and_close() -> None:
-    """Every intermediate width is one frame Hyprland stretches: none allowed."""
-    if not Gtk.init_check()[0]:
-        raise AssertionError("GTK could not initialize")
-
-    popup = _popup((_snap(1, "Ana"), _snap(2, "Ana")))
-    popup.show_all()
-    popup._stack_revealer.set_reveal_child(False)
-    _pump(60)
-
-    widths: list[int] = []
-    popup.connect("size-allocate", lambda _w, alloc: widths.append(alloc.width))
-    for _ in range(2):
-        popup.show_stacked([_snap(1, "Ana"), _snap(2, "Ana")])
-        for _ in range(15):
-            _pump(20)
-        popup.hide_stacked()
-        assert popup._stack_revealer.get_reveal_child() is True
-        for _ in range(15):
-            _pump(20)
-        assert popup._stack_revealer.get_reveal_child() is False
-
-    assert set(widths) <= {360, 720}, sorted(set(widths))
-    assert 720 in widths
-    popup._cancel_top_pin()
-    popup.destroy()
-
-
 def test_blocks_stack_one_at_a_time_after_the_window() -> None:
     if not Gtk.init_check()[0]:
         raise AssertionError("GTK could not initialize")
@@ -306,13 +145,6 @@ def test_each_taller_frame_repins_the_top() -> None:
 
 
 if __name__ == "__main__":
-    test_stacked_rows_do_not_stretch_the_window()
-    test_stack_pane_grows_left_of_the_list()
-    test_hover_group_opens_the_left_pane()
-    test_gaps_between_rows_keep_the_stack_open()
-    test_hyprland_animation_is_off_only_while_the_panel_is_open()
-    test_parent_list_keeps_its_place_from_the_right_edge()
-    test_window_width_changes_once_per_open_and_close()
     test_blocks_stack_one_at_a_time_after_the_window()
     test_each_taller_frame_repins_the_top()
     print("ok")

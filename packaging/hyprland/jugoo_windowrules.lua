@@ -26,20 +26,6 @@ hl.window_rule({
     suppress_event = "activate activatefocus",
 })
 
-hl.window_rule({
-    name = "SHELL-NOTIFICATION-GROUP",
-    match = {
-        class = "^com\\.jugoo\\.Shell$",
-        title = "^Jugoo Notification Group$",
-    },
-    float = true,
-    center = false,
-    persistent_size = false,
-    no_focus = false,
-    no_initial_focus = false,
-    focus_on_activate = true,
-})
-
 -- Grouped-notifications card: kept under the notifications popup. A border or
 -- shadow would show around the popup while the card rests behind it. No
 -- animation by default (mapping and sinking it behind the popup are instant);

@@ -198,14 +198,8 @@ NOTIFICATION_POPUP_LIST_SPACING = 6
 NOTIFICATION_POPUP_REVEAL_STAGGER_MS = 120
 NOTIFICATION_POPUP_ROW_APPEAR_MS = 200
 
-# Stacked group window: whole-block page slide when changing parent.
-# Deliberately long so rapid parent changes feel like continuous navigation.
-NOTIFICATION_GROUP_SLIDE_DURATION_MS = 700
-
 # Grouped notifications as a card that slides out from behind the popup
 # (separate window that Hyprland slides with its windowsMove animation).
-# Disabled = the older pane inside the popup, which widens the window.
-NOTIFICATIONS_DECK_ENABLED = True
 # How long Hyprland's windowsMove takes (speed 5 in hypr/config/animations.lua
 # = 500 ms); the next group only loads after it.
 NOTIFICATIONS_DECK_DURATION_MS = 500

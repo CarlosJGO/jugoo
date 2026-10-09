@@ -157,7 +157,6 @@ class NotificationsWidget(ShellModule):
             on_toggle_paused=self._toggle_paused,
             on_toggle_app_sound_mute=self._toggle_app_sound_mute,
             on_toggle_app_blocked=self._toggle_app_blocked,
-            on_preload_group_pages=None,
             deck=self._deck,
         )
 
@@ -272,7 +271,6 @@ class NotificationsWidget(ShellModule):
         popup = self._popup.maybe
         if popup is not None and popup.get_visible():
             popup.refresh()
-        self._sync_group_window()
         return False
 
     def _handle_notification_received(self, snapshot: NotificationSnapshot) -> bool:
@@ -424,9 +422,6 @@ class NotificationsWidget(ShellModule):
         popup = self._popup.maybe
         if popup is not None:
             popup.hide_stacked()
-
-    def _sync_group_window(self) -> None:
-        return None
 
     def _toggle_paused(self) -> None:
         self._service.toggle_paused()

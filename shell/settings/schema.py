@@ -726,21 +726,6 @@ def build_settings_catalog() -> tuple[SettingDef, ...]:
             section="Agrupación",
         ),
         SettingDef(
-            key="notificaciones.deck_enabled",
-            category=CategoryId.NOTIFICACIONES,
-            label="Agrupadas como carta",
-            description=(
-                "Las agrupadas salen de detrás del panel en una ventana propia. "
-                "Desactivado vuelve al panel lateral anterior, que ensancha la ventana."
-            ),
-            value_type="bool",
-            default=shell_config.NOTIFICATIONS_DECK_ENABLED,
-            config_attr="NOTIFICATIONS_DECK_ENABLED",
-            apply=APPLY_LIVE,
-            tier="A",
-            section="Panel agrupado",
-        ),
-        SettingDef(
             key="notificaciones.deck_duration_ms",
             category=CategoryId.NOTIFICACIONES,
             label="Duración del deslizamiento",
