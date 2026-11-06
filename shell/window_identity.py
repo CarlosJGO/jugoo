@@ -59,6 +59,7 @@ class MonitorRect:
     y: int
     width: int
     height: int
+    focused: bool = False
 
 
 @dataclass(frozen=True)
@@ -289,6 +290,11 @@ def query_hyprland_monitors() -> tuple[MonitorRect, ...]:
     except json.JSONDecodeError:
         return ()
 
+    return monitors_from_hyprland_payload(payload)
+
+
+def monitors_from_hyprland_payload(payload: object) -> tuple[MonitorRect, ...]:
+    """Parse Hyprland monitor geometry, including the focused-output marker."""
     if not isinstance(payload, list):
         return ()
 
@@ -303,6 +309,7 @@ def query_hyprland_monitors() -> tuple[MonitorRect, ...]:
                     y=int(entry["y"]),
                     width=int(entry["width"]),
                     height=int(entry["height"]),
+                    focused=entry.get("focused") is True,
                 )
             )
         except (KeyError, TypeError, ValueError):

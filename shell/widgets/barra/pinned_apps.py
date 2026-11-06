@@ -168,7 +168,7 @@ class PinnedAppsOverflowPopup(Gtk.Window):
         self._root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self._root.get_style_context().add_class("pinned-apps-overflow-content")
 
-        self._title = Gtk.Label(label="Extras", xalign=0)
+        self._title = Gtk.Label(label="Aplicaciones fijadas", xalign=0)
         self._title.get_style_context().add_class("pinned-apps-overflow-title")
         self._root.pack_start(self._title, False, False, 0)
 
@@ -215,7 +215,13 @@ class PinnedAppsOverflowPopup(Gtk.Window):
         self._fixed_top = None
         hide_popup(self)
 
-    def host_buttons(self, buttons: tuple[Gtk.Widget, ...]) -> None:
+    def host_buttons(
+        self,
+        buttons: tuple[Gtk.Widget, ...],
+        *,
+        title: str = "Aplicaciones fijadas",
+    ) -> None:
+        self._title.set_text(title)
         self._apply_max_height()
         for child in list(self._content.get_children()):
             inner = child.get_child()
@@ -251,12 +257,19 @@ class PinnedAppsOverflowPopup(Gtk.Window):
 
 
 class PinnedAppsWidget(ShellModule):
-    """Stable 9-slot strip; overflow opens a drop-down extension of the bar."""
+    """Single radial-launcher button with a context menu for managing pinned apps."""
 
-    def __init__(self, event_bus: EventBus, shell_window: Gtk.Window) -> None:
+    def __init__(
+        self,
+        event_bus: EventBus,
+        shell_window: Gtk.Window,
+        *,
+        on_radial_launcher: Callable[[], None] | None = None,
+    ) -> None:
         super().__init__("pinned-apps-widget", spacing=PINNED_APP_SPACING)
         self._event_bus = event_bus
         self._shell_window = shell_window
+        self._on_radial_launcher = on_radial_launcher
         self._snapshot = ApplicationsSnapshot()
         self._hyprland: HyprlandSnapshot | None = None
         self._active_address = ""
@@ -268,29 +281,27 @@ class PinnedAppsWidget(ShellModule):
         self._pin_dragging = False
         self._suppress_activate = False
 
-        self._primary = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=PINNED_APP_SPACING)
-        self._primary.get_style_context().add_class("pinned-apps-primary")
-        self.pack_start(self._primary, False, False, 0)
-
-        self._expand_button = Gtk.Button()
-        self._expand_button.get_style_context().add_class("pinned-apps-expand")
-        self._expand_button.set_relief(Gtk.ReliefStyle.NONE)
-        self._expand_icon = Gtk.Image.new_from_icon_name(
-            "view-app-grid-symbolic",
-            Gtk.IconSize.DIALOG,
+        self._launcher_button = Gtk.Button()
+        self._launcher_button.set_name("shell-radial-launcher-button")
+        self._launcher_button.get_style_context().add_class("radial-launcher-button")
+        self._launcher_button.set_relief(Gtk.ReliefStyle.NONE)
+        self._launcher_button.set_tooltip_text(
+            "Aplicaciones fijadas (clic para abrir, clic derecho para administrar)"
         )
-        self._expand_icon.set_pixel_size(PINNED_APP_ICON_SIZE)
-        self._expand_button.set_image(self._expand_icon)
-        self._expand_button.set_always_show_image(True)
-        self._expand_icon.show()
-        self._expand_button.connect("clicked", self._on_toggle_expand)
-        self.pack_start(self._expand_button, False, False, 0)
+        self._launcher_icon = Gtk.Image.new_from_icon_name(
+            "view-app-grid-symbolic",
+            Gtk.IconSize.BUTTON,
+        )
+        self._launcher_icon.set_pixel_size(PINNED_APP_ICON_SIZE)
+        self._launcher_button.set_image(self._launcher_icon)
+        self._launcher_button.set_always_show_image(True)
+        self._launcher_icon.show()
+        self._launcher_button.connect("clicked", self._on_radial_launcher_clicked)
+        self._launcher_button.connect("button-press-event", self._on_launcher_button_press)
+        self.pack_start(self._launcher_button, False, False, 0)
 
         self._overflow = PopupHandle(lambda: PinnedAppsOverflowPopup(shell_window))
         self._outside_click = PopupOutsideDismiss()
-
-        self._expand_button.set_no_show_all(True)
-        self._expand_button.hide()
 
         self._event_bus.subscribe(APPLICATIONS_CHANGED, self._on_applications_changed)
         self._event_bus.subscribe(WORKSPACE_CHANGED, self._on_hyprland_snapshot)
@@ -324,53 +335,36 @@ class PinnedAppsWidget(ShellModule):
 
     def _apply_snapshot(self, snapshot: ApplicationsSnapshot) -> bool:
         previous_ids = self._snapshot.pinned_ids
+        previous_apps = self._snapshot.pinned_apps()
         self._snapshot = snapshot
-        if previous_ids != snapshot.pinned_ids:
+        if previous_ids != snapshot.pinned_ids or previous_apps != snapshot.pinned_apps():
             self._render_pinned()
         self._apply_runtime()
         return False
 
     def _render_pinned(self) -> None:
-        visible_ids, overflow_ids, has_overflow = split_pinned_dock(
-            self._snapshot.pinned_ids,
-            PINNED_APPS_VISIBLE_LIMIT,
-        )
-        live_ids = set(visible_ids) | set(overflow_ids)
+        live_ids = set(self._snapshot.pinned_ids)
         for app_id in tuple(self._buttons):
             if app_id not in live_ids:
                 button = self._buttons.pop(app_id)
                 _detach_widget(button)
 
-        self._fill_row(self._primary, visible_ids)
+        for app_id in self._snapshot.pinned_ids:
+            self._button_for(self._application_for(app_id))
         overflow_popup = self._overflow.maybe
         if overflow_popup is not None:
-            overflow_popup.host_buttons(self._overflow_buttons(overflow_ids))
-
-        if self._snapshot.pinned_ids:
-            self.set_no_show_all(False)
-            self.show_all()
-            if has_overflow:
-                self._expand_button.show()
-                self._expand_icon.show()
-            else:
-                self._close_overflow()
-                self._expand_button.hide()
-        else:
+            if self._overflow_open:
+                overflow_popup.host_buttons(self._pinned_buttons())
+        if not self._snapshot.pinned_ids and self._overflow_open:
             self._close_overflow()
-            self.hide()
-        self._sync_expand_button()
+        self.set_no_show_all(False)
+        self.show_all()
 
-    def _fill_row(self, row: Gtk.Box, app_ids: tuple[str, ...]) -> None:
-        for child in list(row.get_children()):
-            row.remove(child)
-        for app_id in app_ids:
-            button = self._button_for(self._application_for(app_id))
-            _detach_widget(button)
-            row.pack_start(button, False, False, 0)
-            button.show()
-
-    def _overflow_buttons(self, app_ids: tuple[str, ...]) -> tuple[Gtk.Widget, ...]:
-        return tuple(self._button_for(self._application_for(app_id)) for app_id in app_ids)
+    def _pinned_buttons(self) -> tuple[Gtk.Widget, ...]:
+        return tuple(
+            self._button_for(self._application_for(app_id))
+            for app_id in self._snapshot.pinned_ids
+        )
 
     def _application_for(self, app_id: str) -> DesktopApplication:
         return self._snapshot.app_by_id(app_id) or DesktopApplication(
@@ -507,29 +501,38 @@ class PinnedAppsWidget(ShellModule):
         )
         return False
 
-    def _on_toggle_expand(self, *_args) -> None:
-        _, overflow_ids, has_overflow = split_pinned_dock(
-            self._snapshot.pinned_ids,
-            PINNED_APPS_VISIBLE_LIMIT,
-        )
-        if not has_overflow:
-            self._close_overflow()
+    def _on_radial_launcher_clicked(self, *_args) -> None:
+        if self._on_radial_launcher is not None:
+            self._on_radial_launcher()
+
+    def _on_launcher_button_press(
+        self,
+        _button: Gtk.Widget,
+        event: Gdk.EventButton,
+    ) -> bool:
+        if event.button != 3:
+            return False
+        self._show_pinned_manager()
+        return True
+
+    def _show_pinned_manager(self) -> None:
+        if not self._snapshot.pinned_ids:
             return
         if self._overflow_open:
             self._close_overflow()
             return
         popup = self._overflow.get()
-        popup.host_buttons(self._overflow_buttons(overflow_ids))
-        popup.open_for(self._expand_button)
+        popup.host_buttons(self._pinned_buttons())
+        popup.open_for(self._launcher_button)
         self._overflow_open = True
         self._outside_click.install(
             popup,
             self._shell_window,
-            (self._expand_button,),
+            (self._launcher_button,),
             self._close_overflow,
             self._event_bus,
         )
-        self._sync_expand_button()
+        self._sync_manager_button()
 
     def _close_overflow(self) -> None:
         self._overflow_open = False
@@ -537,14 +540,13 @@ class PinnedAppsWidget(ShellModule):
         popup = self._overflow.maybe
         if popup is not None:
             popup.close_popup()
-        self._sync_expand_button()
+        self._sync_manager_button()
 
-    def _sync_expand_button(self) -> None:
-        expanded = self._overflow_open
-        self._expand_icon.set_pixel_size(self._icon_size())
-        self._expand_icon.show()
-        context = self._expand_button.get_style_context()
-        if expanded:
+    def _sync_manager_button(self) -> None:
+        self._launcher_icon.set_pixel_size(self._icon_size())
+        self._launcher_icon.show()
+        context = self._launcher_button.get_style_context()
+        if self._overflow_open:
             context.add_class("expanded")
         else:
             context.remove_class("expanded")
@@ -613,7 +615,8 @@ class PinnedAppsWidget(ShellModule):
         return False
 
     def _pin_id_at_widget_point(self, widget: Gtk.Widget, x: float, y: float) -> str | None:
-        pointer = _xy(widget.translate_coordinates(self, int(x), int(y)))
+        root = widget.get_toplevel()
+        pointer = _xy(widget.translate_coordinates(root, int(x), int(y)))
         if pointer is None:
             return None
         pointer_x, pointer_y = pointer
@@ -621,9 +624,9 @@ class PinnedAppsWidget(ShellModule):
         for app_id, button in self._buttons.items():
             if app_id == source_id or not button.get_mapped():
                 continue
-            if button.get_toplevel() is not self.get_toplevel():
+            if button.get_toplevel() is not root:
                 continue
-            origin = _xy(button.translate_coordinates(self, 0, 0))
+            origin = _xy(button.translate_coordinates(root, 0, 0))
             if origin is None:
                 continue
             button_x, button_y = origin

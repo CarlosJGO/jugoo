@@ -74,7 +74,14 @@ from .widgets.barra.workspace import WorkspaceWidget
 from .ui import ShellModuleGroup
 from .ui.starfield import StarfieldBackground
 from .ui.theme import ThemeManager
-from .window_identity import APPLICATION_ID, TITLE_BAR, configure_toplevel, init_window_identity
+from .window_identity import (
+    APPLICATION_ID,
+    TITLE_BAR,
+    configure_toplevel,
+    hyprland_cursor_position,
+    init_window_identity,
+    query_hyprland_monitors,
+)
 
 APP_ID = "shell"
 
@@ -184,7 +191,11 @@ class ShellApplication(Gtk.Window):
         self.layout.left.set_halign(Gtk.Align.START)
         self.layout.left.add(self.active_window_widget)
 
-        self.pinned_apps_widget = PinnedAppsWidget(self.event_bus, self)
+        self.pinned_apps_widget = PinnedAppsWidget(
+            self.event_bus,
+            self,
+            on_radial_launcher=self.toggle_radial_launcher_from_bar,
+        )
         self.layout.left.add(self.pinned_apps_widget)
         self.keyboard_cat_widget = KeyboardCatWidget(self.event_bus, self._bar_host)
         self.layout.left.add(self.keyboard_cat_widget)
@@ -331,6 +342,7 @@ class ShellApplication(Gtk.Window):
 
     def toggle_control_center(self) -> None:
         self.steam_controller.close_panel()
+        self.applications_controller.close_launcher()
         self.control_center_controller.toggle_full_control_center()
 
     def toggle_bluetooth_panel(self) -> None:
@@ -371,6 +383,89 @@ class ShellApplication(Gtk.Window):
         self.pickers_controller.close_pickers()
         self.steam_controller.close_panel()
         self.applications_controller.toggle_launcher()
+
+    def toggle_radial_launcher(self) -> None:
+        self._toggle_radial_launcher(at_cursor=False)
+
+    def toggle_radial_launcher_at_cursor(self) -> None:
+        self._toggle_radial_launcher(at_cursor=True)
+
+    def toggle_radial_launcher_from_bar(self) -> None:
+        display = Gdk.Display.get_default()
+        monitor = None
+        if display is not None and self.get_window() is not None:
+            monitor = display.get_monitor_at_window(self.get_window())
+        if monitor is None:
+            monitor = _gdk_monitor()
+        if monitor is None:
+            print("shell: radial launcher: bar monitor is unavailable", flush=True)
+            return
+        self._toggle_radial_launcher(at_cursor=False, monitor=monitor)
+
+    def _toggle_radial_launcher(
+        self,
+        *,
+        at_cursor: bool,
+        monitor: Gdk.Monitor | None = None,
+    ) -> None:
+        if self.applications_controller.radial_launcher_visible:
+            self.applications_controller.close_radial_launcher()
+            return
+
+        self.ai_prompt_controller.close()
+        self.pickers_controller.close_pickers()
+        self.steam_controller.close_panel()
+        self.control_center_controller.close_popup()
+        self.settings_controller.close()
+
+        display = Gdk.Display.get_default()
+        if display is None:
+            print("shell: radial launcher: no GDK display is available", flush=True)
+            return
+
+        cursor = hyprland_cursor_position() if at_cursor else None
+        origin = None
+        if monitor is None and cursor is not None:
+            monitor = display.get_monitor_at_point(*cursor)
+            if monitor is not None:
+                geometry = monitor.get_geometry()
+                origin = (cursor[0] - geometry.x, cursor[1] - geometry.y)
+            else:
+                print(
+                    "shell: radial launcher: pointer did not match a GDK monitor; "
+                    "opening centered on the focused monitor",
+                    flush=True,
+                )
+        elif at_cursor:
+            print(
+                "shell: radial launcher: pointer position unavailable; "
+                "opening at the focused monitor center",
+                flush=True,
+            )
+
+        if monitor is None:
+            focused = next(
+                (item for item in query_hyprland_monitors() if item.focused),
+                None,
+            )
+            if focused is not None:
+                monitor = display.get_monitor_at_point(
+                    focused.x + focused.width // 2,
+                    focused.y + focused.height // 2,
+                )
+            if monitor is None:
+                print(
+                    "shell: radial launcher: focused monitor unavailable; "
+                    "falling back to the GDK primary monitor",
+                    flush=True,
+                )
+            if monitor is None:
+                monitor = _gdk_monitor()
+
+        if monitor is None:
+            print("shell: radial launcher: no monitor is available", flush=True)
+            return
+        self.applications_controller.toggle_radial_launcher(monitor, origin=origin)
 
     def toggle_ai_prompt(self) -> None:
         self.ai_prompt_controller.toggle()
@@ -418,6 +513,7 @@ class ShellApplication(Gtk.Window):
         self.ai_prompt_controller.close()
         self.pickers_controller.close_pickers()
         self.steam_controller.close_panel()
+        self.applications_controller.close_launcher()
         self.settings_controller.toggle()
 
     def open_tasks_panel(self) -> None:
@@ -539,7 +635,7 @@ class ShellApplication(Gtk.Window):
         self.settings_controller.close()
         self.pickers_controller.close()
         self.steam_controller.close()
-        self.applications_controller.close_launcher()
+        self.applications_controller.close()
         self.clipboard_service.close()
         self.applications.close()
         self.steam_launcher.close()

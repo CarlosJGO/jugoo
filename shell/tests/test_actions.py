@@ -21,6 +21,21 @@ def test_resolve_preferred_action_form() -> None:
     )
 
 
+def test_radial_launcher_actions_dispatch_to_the_shared_shell_entrypoints() -> None:
+    calls: list[str] = []
+
+    class Shell:
+        def toggle_radial_launcher(self) -> None:
+            calls.append("center")
+
+        def toggle_radial_launcher_at_cursor(self) -> None:
+            calls.append("cursor")
+
+    assert dispatch_action("radial-launcher", Shell()) is None
+    assert dispatch_action("radial-launcher-cursor", Shell()) is None
+    assert calls == ["center", "cursor"]
+
+
 def test_resolve_legacy_flags() -> None:
     assert resolve_actions_from_argv(["--toggle-launcher"]) == ("launcher",)
     assert resolve_actions_from_argv(["--toggle-control-center"]) == ("control-center",)
@@ -152,6 +167,7 @@ def test_dispatch_bluetooth_actions() -> None:
 
 if __name__ == "__main__":
     test_resolve_preferred_action_form()
+    test_radial_launcher_actions_dispatch_to_the_shared_shell_entrypoints()
     test_resolve_legacy_flags()
     test_resolve_music_action()
     test_dispatch_music_action_uses_strawberry_transport()

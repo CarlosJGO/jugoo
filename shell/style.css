@@ -13,6 +13,15 @@ window#shell {
     background-color: transparent;
 }
 
+window#shell-radial-launcher,
+drawingarea#shell-radial-launcher-canvas {
+    background-color: transparent;
+}
+
+drawingarea.radial-launcher-canvas {
+    color: @shell_text_primary;
+}
+
 box.shell-bar-host {
     background-color: transparent;
 }
@@ -52,6 +61,29 @@ window#shell box#shell-left > eventbox.active-window-widget {
 window#shell box#shell-left > box.pinned-apps-widget {
     margin-top: 4px;
     margin-bottom: 4px;
+    padding: 0;
+    background-color: transparent;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+button.radial-launcher-button {
+    min-width: 24px;
+    min-height: 24px;
+    padding: 2px;
+    color: @shell_text_secondary;
+    background-color: @shell_surface_bg_elevated;
+    background-image: none;
+    border: 1px solid @shell_border_medium;
+    border-radius: 50%;
+    box-shadow: none;
+}
+
+button.radial-launcher-button:hover,
+button.radial-launcher-button.expanded {
+    color: @shell_text_primary;
+    background-color: @shell_accent_soft;
+    border-color: @shell_accent;
 }
 
 /* Restore the old 4px bar inset for regions that should not touch the edges. */

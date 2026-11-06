@@ -9,6 +9,7 @@ gi.require_version("Gdk", "3.0")
 gi.require_version("Gtk", "3.0")
 
 from shell.identity import APPLICATION_NAME
+from shell.window_identity import monitors_from_hyprland_payload
 from shell.popup_spawn import (
     SpawnMonitor,
     SpawnPlacement,
@@ -30,6 +31,27 @@ def test_monitors_from_hyprctl_payload_skips_invalid_entries() -> None:
     assert len(monitors) == 2
     assert monitors[0].name == "DP-1"
     assert monitors[1].x == 1920
+
+
+def test_hyprland_monitor_parser_identifies_focused_output() -> None:
+    monitors = monitors_from_hyprland_payload(
+        [
+            {"x": 0, "y": 0, "width": 1920, "height": 1080},
+            {
+                "x": 1920,
+                "y": 0,
+                "width": 2560,
+                "height": 1440,
+                "focused": True,
+            },
+            {"x": "invalid", "y": 0, "width": 800, "height": 600},
+        ]
+    )
+
+    assert len(monitors) == 2
+    assert not monitors[0].focused
+    assert monitors[1].focused
+    assert (monitors[1].x, monitors[1].width) == (1920, 2560)
 
 
 def test_bar_origin_unites_block_and_popup() -> None:

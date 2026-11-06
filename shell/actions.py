@@ -54,6 +54,14 @@ ACTIONS: tuple[ShellAction, ...] = (
         legacy_flags=("--toggle-launcher",),
     ),
     ShellAction(
+        "radial-launcher",
+        "Toggle the radial launcher on the focused monitor",
+    ),
+    ShellAction(
+        "radial-launcher-cursor",
+        "Toggle the radial launcher at the pointer position",
+    ),
+    ShellAction(
         "clipboard",
         "Toggle clipboard history picker",
         legacy_flags=("--toggle-clipboard",),
@@ -276,6 +284,8 @@ def dispatch_action(
     handlers: dict[str, Callable[[], None]] = {
         "ask": lambda: shell.toggle_ai_prompt(),
         "launcher": lambda: shell.toggle_launcher(),
+        "radial-launcher": lambda: shell.toggle_radial_launcher(),
+        "radial-launcher-cursor": lambda: shell.toggle_radial_launcher_at_cursor(),
         "clipboard": lambda: shell.toggle_clipboard_picker(),
         "emoji": lambda: shell.toggle_emoji_picker(),
         "steam": lambda: shell.toggle_steam_games(),

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import gi
 
+gi.require_version("Gdk", "3.0")
 gi.require_version("Gtk", "3.0")
 
-from gi.repository import GLib, Gtk
+from gi.repository import Gdk, GLib, Gtk
 
 from ..eventbus import EventBus
 from ..models import (
@@ -33,6 +34,7 @@ from ..servicios.aplicaciones.applications import (
 from ..servicios.escritorio.hyprland import WINDOW_FOCUS_REQUESTED, HyprlandService
 from ..servicios.sistema.system import SystemStatsService
 from ..widgets.aplicaciones.launcher import AppLauncherWindow
+from ..widgets.aplicaciones.radial_launcher import RadialLauncherOverlay
 
 
 class ApplicationsController:
@@ -67,6 +69,12 @@ class ApplicationsController:
                 system_stats=system_stats,
             )
         )
+        self._radial_launcher = PopupHandle(
+            lambda: RadialLauncherOverlay(
+                shell_window,
+                on_activate=lambda application: self._activate_application(application.id),
+            )
+        )
 
         event_bus.subscribe(APP_ACTIVATE_REQUESTED, self._on_activate_requested)
         event_bus.subscribe(LAUNCHER_TOGGLE_REQUESTED, self._on_launcher_toggle)
@@ -76,9 +84,46 @@ class ApplicationsController:
         launcher = self._launcher.maybe
         if launcher is not None:
             launcher.close_launcher()
+        self.close_radial_launcher()
+
+    def close_radial_launcher(self) -> None:
+        launcher = self._radial_launcher.maybe
+        if launcher is not None:
+            launcher.close_animated()
+
+    @property
+    def radial_launcher_visible(self) -> bool:
+        return self._radial_launcher.is_visible()
+
+    def toggle_radial_launcher(
+        self,
+        monitor: Gdk.Monitor,
+        *,
+        origin: tuple[float, float] | None = None,
+    ) -> None:
+        launcher = self._radial_launcher.get()
+        if launcher.get_visible():
+            launcher.close_animated()
+            return
+        current_launcher = self._launcher.maybe
+        if current_launcher is not None and current_launcher.get_visible():
+            current_launcher.close_launcher()
+        launcher.set_applications(self._applications.snapshot.pinned_apps())
+        launcher.open_on_monitor(monitor, origin=origin)
 
     def toggle_launcher(self) -> None:
+        self.close_radial_launcher()
         self._launcher.get().toggle_launcher()
+
+    def close(self) -> None:
+        self.close_launcher()
+        radial_launcher = self._radial_launcher.maybe
+        if radial_launcher is not None:
+            radial_launcher.dismiss_immediately()
+            radial_launcher.destroy()
+        self._event_bus.unsubscribe(APP_ACTIVATE_REQUESTED, self._on_activate_requested)
+        self._event_bus.unsubscribe(LAUNCHER_TOGGLE_REQUESTED, self._on_launcher_toggle)
+        self._event_bus.unsubscribe(APPLICATIONS_CHANGED, self._on_applications_changed)
 
     def open_search(self) -> None:
         self._launcher.get().open_search_mode()
@@ -98,9 +143,11 @@ class ApplicationsController:
 
     def _on_applications_changed(self, snapshot: ApplicationsSnapshot) -> None:
         launcher = self._launcher.maybe
-        if launcher is None or not launcher.get_visible():
-            return
-        GLib.idle_add(launcher.set_snapshot, snapshot)
+        if launcher is not None and launcher.get_visible():
+            GLib.idle_add(launcher.set_snapshot, snapshot)
+        radial_launcher = self._radial_launcher.maybe
+        if radial_launcher is not None:
+            GLib.idle_add(radial_launcher.set_applications, snapshot.pinned_apps())
 
     def _on_activate_requested(self, app_id: object) -> None:
         if isinstance(app_id, str):
