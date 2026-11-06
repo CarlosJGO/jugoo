@@ -10,6 +10,8 @@ _CENTER_RADIUS = 36
 _PREFERRED_RADIUS_RATIO = 0.11
 _ICON_RADIUS_RATIO = 0.68
 _ICON_GAP = 5
+_MAX_SECTORS_PER_RING = 12
+_RING_THICKNESS = 38
 _CENTER_LABEL_HALF_WIDTH = 78
 _EMPTY_WIDTH = 200
 _EMPTY_HEIGHT = 84
@@ -34,6 +36,7 @@ class RadialPosition:
     center_x: float
     center_y: float
     size: float
+    ring: int
     start_angle: float
     end_angle: float
     inner_radius: float
@@ -50,6 +53,7 @@ class RadialLayout:
     half_width: float
     half_height: float
     node_size: float
+    ring_count: int
 
 
 def radial_layout(
@@ -92,56 +96,86 @@ def radial_layout(
             origin_y,
             offsets,
             node_size=0.0,
+            ring_count=0,
         )
 
     preferred_icon_size = _preferred_icon_size(count)
     max_radius = min(width_f, height_f) / 2 - _EDGE_MARGIN
+    ring_count = math.ceil(count / _MAX_SECTORS_PER_RING)
     preferred_ratio = (
         0.07 if count <= 2 else 0.085 if count <= 4 else _PREFERRED_RADIUS_RATIO
     )
     preferred_radius = min(width_f, height_f) * preferred_ratio
-    half_angle_sine = math.sin(math.pi / count) if count > 1 else 1.0
-    required_radius = max(
+    ring_counts = [count // ring_count] * ring_count
+    for index in range(count % ring_count):
+        ring_counts[index] += 1
+    first_ring_radius = max(
+        preferred_radius,
         (_CENTER_RADIUS + _ICON_GAP + preferred_icon_size / 2)
         / _ICON_RADIUS_RATIO,
-        (preferred_icon_size + _ICON_GAP)
-        / (2 * _ICON_RADIUS_RATIO * half_angle_sine),
     )
-    radius = min(max_radius, max(preferred_radius, required_radius))
-    icon_size = min(
-        preferred_icon_size,
-        max(
-            1.0,
-            2 * (_ICON_RADIUS_RATIO * radius - _CENTER_RADIUS - _ICON_GAP),
-        ),
-    )
-    if count > 1:
-        icon_size = min(
-            icon_size,
-            max(
-                1.0,
-                2 * _ICON_RADIUS_RATIO * radius * half_angle_sine - _ICON_GAP,
-            ),
+    min_ring_thickness = max(24.0, preferred_icon_size + _ICON_GAP * 2)
+    if ring_count > 1:
+        max_first_radius = max_radius - (ring_count - 1) * min_ring_thickness
+        if max_first_radius < first_ring_radius:
+            raise ValueError(
+                f"{count} applications do not fit on a {width}x{height} monitor"
+            )
+        first_ring_radius = min(first_ring_radius, max_first_radius)
+        ring_thickness = min(
+            _RING_THICKNESS,
+            (max_radius - first_ring_radius) / (ring_count - 1),
+        )
+    else:
+        ring_thickness = 0.0
+    if ring_thickness and ring_thickness < min_ring_thickness:
+        raise ValueError(
+            f"{count} applications do not fit on a {width}x{height} monitor"
         )
 
     positions: list[RadialPosition] = []
-    sector_angle = math.tau / count
-    for item_index in range(count):
-        angle = -math.pi / 2 + sector_angle * item_index
-        icon_radius = radius * _ICON_RADIUS_RATIO
-        positions.append(
-            RadialPosition(
-                math.cos(angle) * icon_radius,
-                math.sin(angle) * icon_radius,
-                icon_size,
-                angle - sector_angle / 2,
-                angle + sector_angle / 2,
-                0.0,
-                radius,
-            )
+    ring_inner_radius = 0.0
+    for ring_index, ring_app_count in enumerate(ring_counts):
+        ring_outer_radius = first_ring_radius + ring_index * ring_thickness
+        sector_angle = math.tau / ring_app_count
+        icon_radius = (
+            ring_outer_radius * _ICON_RADIUS_RATIO
+            if ring_index == 0
+            else (ring_inner_radius + ring_outer_radius) / 2
         )
+        half_angle_sine = math.sin(math.pi / ring_app_count)
+        icon_size = min(
+            preferred_icon_size,
+            max(
+                1.0,
+                2 * icon_radius * half_angle_sine - _ICON_GAP,
+            ),
+        )
+        if ring_index > 0:
+            icon_size = min(
+                icon_size,
+                max(
+                    1.0,
+                    ring_outer_radius - ring_inner_radius - _ICON_GAP * 2,
+                ),
+            )
+        for item_index in range(ring_app_count):
+            angle = -math.pi / 2 + sector_angle * item_index
+            positions.append(
+                RadialPosition(
+                    math.cos(angle) * icon_radius,
+                    math.sin(angle) * icon_radius,
+                    icon_size,
+                    ring_index,
+                    angle - sector_angle / 2,
+                    angle + sector_angle / 2,
+                    ring_inner_radius,
+                    ring_outer_radius,
+                )
+            )
+        ring_inner_radius = ring_outer_radius
 
-    radial_extent = max(radius, _CENTER_LABEL_HALF_WIDTH)
+    radial_extent = max(ring_inner_radius, _CENTER_LABEL_HALF_WIDTH)
     bounds = (-radial_extent, radial_extent, -radial_extent, radial_extent)
     return _clamp_layout(
         tuple(positions),
@@ -150,7 +184,8 @@ def radial_layout(
         origin_x,
         origin_y,
         bounds,
-        node_size=icon_size,
+        node_size=preferred_icon_size,
+        ring_count=ring_count,
     )
 
 
@@ -163,6 +198,7 @@ def _clamp_layout(
     bounds: tuple[float, float, float, float],
     *,
     node_size: float,
+    ring_count: int,
 ) -> RadialLayout:
     left, right, top, bottom = bounds
     min_center_x, max_center_x = -left, width - right
@@ -176,6 +212,7 @@ def _clamp_layout(
             center_x + position.center_x,
             center_y + position.center_y,
             position.size,
+            position.ring,
             position.start_angle,
             position.end_angle,
             position.inner_radius,
@@ -192,4 +229,5 @@ def _clamp_layout(
         half_width=max(abs(left), abs(right)),
         half_height=max(abs(top), abs(bottom)),
         node_size=node_size,
+        ring_count=ring_count,
     )

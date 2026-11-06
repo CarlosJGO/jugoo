@@ -10,7 +10,7 @@ from shell.models import ApplicationsSnapshot, DesktopApplication
 from shell.eventbus import EventBus
 
 _OUTPUTS_AND_COUNTS = (
-    ((1920, 1080), (1, 2, 3, 4, 6, 8, 12, 16, 20, 24, 32, 48, 64)),
+    ((1920, 1080), (1, 2, 3, 4, 6, 8, 12, 13, 16, 20, 24, 25, 32, 48, 64)),
     ((1366, 768), (1, 2, 3, 4, 6, 8, 12, 16, 20, 24, 32, 48)),
     ((1280, 1024), (1, 2, 3, 4, 6, 8, 12, 16, 20, 24, 32, 48, 64)),
     ((800, 600), (1, 2, 3, 4, 6, 8, 12, 16, 20, 24)),
@@ -49,19 +49,30 @@ class RadialLayoutTests(unittest.TestCase):
                     self.assertLessEqual(layout.center_x + layout.half_width, width)
                     self.assertGreaterEqual(layout.center_y - layout.half_height, 0)
                     self.assertLessEqual(layout.center_y + layout.half_height, height)
-                    sector_angles: list[float] = []
+                    rings: dict[int, list[float]] = {}
                     for position in layout.positions:
-                        sector_angles.append(
+                        rings.setdefault(position.ring, []).append(
                             position.end_angle - position.start_angle
                         )
-                        self.assertEqual(position.inner_radius, 0)
+                        self.assertGreaterEqual(position.inner_radius, 0)
                         self.assertGreater(position.outer_radius, 0)
+                        self.assertLess(
+                            position.inner_radius,
+                            position.outer_radius,
+                        )
+                        if position.ring == 0:
+                            self.assertEqual(position.inner_radius, 0)
+                            expected_icon_radius = position.outer_radius * 0.68
+                        else:
+                            expected_icon_radius = (
+                                position.inner_radius + position.outer_radius
+                            ) / 2
                         self.assertAlmostEqual(
                             math.hypot(
                                 position.center_x - layout.center_x,
                                 position.center_y - layout.center_y,
                             ),
-                            position.outer_radius * 0.68,
+                            expected_icon_radius,
                         )
                         half = position.size / 2
                         self.assertLessEqual(half, position.center_x)
@@ -76,7 +87,12 @@ class RadialLayoutTests(unittest.TestCase):
                             )
                             half_sum = (left.size + right.size) / 2
                             self.assertGreaterEqual(distance + 1e-6, half_sum)
-                    self.assertAlmostEqual(sum(sector_angles), math.tau)
+                    self.assertEqual(len(rings), layout.ring_count)
+                    self.assertTrue(
+                        all(len(angles) <= 12 for angles in rings.values())
+                    )
+                    for angles in rings.values():
+                        self.assertAlmostEqual(sum(angles), math.tau)
 
     def test_clamping_preserves_opening_origin(self) -> None:
         for origin in (
@@ -136,8 +152,39 @@ class RadialLayoutTests(unittest.TestCase):
         crowded = radial_layout(64, 1920, 1080)
 
         self.assertLess(crowded.node_size, typical.node_size)
+        self.assertEqual(crowded.ring_count, 6)
         self.assertLess(crowded.half_width * 2, 650)
         self.assertLess(crowded.half_height * 2, 650)
+        with self.assertRaisesRegex(ValueError, "do not fit"):
+            radial_layout(64, 320, 240)
+
+    def test_outer_rings_are_added_after_twelve_apps_and_balanced(self) -> None:
+        one_ring = radial_layout(12, 1920, 1080)
+        two_rings = radial_layout(13, 1920, 1080)
+        three_rings = radial_layout(25, 1920, 1080)
+
+        self.assertEqual(one_ring.ring_count, 1)
+        self.assertEqual(two_rings.ring_count, 2)
+        self.assertEqual(
+            [sum(position.ring == ring for position in two_rings.positions) for ring in range(2)],
+            [7, 6],
+        )
+        self.assertEqual(three_rings.ring_count, 3)
+        self.assertEqual(
+            [
+                sum(position.ring == ring for position in three_rings.positions)
+                for ring in range(3)
+            ],
+            [9, 8, 8],
+        )
+        for layout in (two_rings, three_rings):
+            rings = {
+                ring: [position for position in layout.positions if position.ring == ring]
+                for ring in range(layout.ring_count)
+            }
+            for ring in range(1, layout.ring_count):
+                inner = rings[ring][0].inner_radius
+                self.assertEqual(inner, rings[ring - 1][0].outer_radius)
 
     def test_empty_state_geometry_is_clamped(self) -> None:
         layout = radial_layout(0, 320, 240, origin=(0, 0))
@@ -286,6 +333,21 @@ class RadialLayoutTests(unittest.TestCase):
                     )
                 )
                 close.assert_called_once_with()
+                self.assertEqual(selected, [])
+
+                close.reset_mock()
+                self.assertTrue(
+                    overlay._on_click(
+                        overlay._canvas,
+                        SimpleNamespace(
+                            button=1,
+                            x=799,
+                            y=599,
+                        ),
+                    )
+                )
+                close.assert_called_once_with()
+                self.assertEqual(selected, [])
 
                 close.reset_mock()
                 self.assertTrue(
@@ -320,6 +382,280 @@ class RadialLayoutTests(unittest.TestCase):
         finally:
             overlay.destroy()
             shell_window.destroy()
+
+    def test_outer_ring_sector_selects_app_outside_icon_hitbox(self) -> None:
+        import gi
+
+        gi.require_version("Gtk", "3.0")
+        gi.require_version("GtkLayerShell", "0.1")
+        from gi.repository import Gtk
+
+        if not Gtk.init_check()[0]:
+            self.skipTest("GTK display unavailable")
+
+        from shell.widgets.aplicaciones.radial_launcher import RadialLauncherOverlay
+
+        shell_window = Gtk.Window()
+        overlay = RadialLauncherOverlay(shell_window)
+        try:
+            applications = tuple(
+                DesktopApplication(
+                    id=f"app-{index}",
+                    name=f"App {index}",
+                    icon="application-x-executable",
+                )
+                for index in range(14)
+            )
+            overlay.set_applications(applications)
+            overlay._width, overlay._height = 800, 600
+            overlay._set_origin((400, 300))
+            overlay._progress = 1.0
+            layout = overlay.layout
+            self.assertIsNotNone(layout)
+            assert layout is not None
+            self.assertEqual(layout.ring_count, 2)
+
+            target_index = next(
+                index
+                for index, position in enumerate(layout.positions)
+                if position.ring == 1
+            )
+            target = layout.positions[target_index]
+            angle = (target.start_angle + target.end_angle) / 2
+            radius = target.inner_radius + (
+                target.outer_radius - target.inner_radius
+            ) * 0.85
+            x = layout.center_x + math.cos(angle) * radius
+            y = layout.center_y + math.sin(angle) * radius
+            self.assertGreater(
+                math.hypot(x - target.center_x, y - target.center_y),
+                target.size / 2,
+            )
+            self.assertEqual(overlay._hit_test(x, y), target_index)
+        finally:
+            overlay.destroy()
+            shell_window.destroy()
+
+    def test_pinned_updates_are_deferred_until_overlay_closes(self) -> None:
+        import gi
+
+        gi.require_version("Gtk", "3.0")
+        gi.require_version("GtkLayerShell", "0.1")
+        from gi.repository import Gtk
+
+        if not Gtk.init_check()[0]:
+            self.skipTest("GTK display unavailable")
+
+        from shell.widgets.aplicaciones.radial_launcher import RadialLauncherOverlay
+
+        shell_window = Gtk.Window()
+        overlay = RadialLauncherOverlay(shell_window)
+        try:
+            initial = tuple(
+                DesktopApplication(
+                    id=f"app-{index}",
+                    name=f"App {index}",
+                    icon="application-x-executable",
+                )
+                for index in range(13)
+            )
+            overlay.set_applications(initial)
+            overlay._width, overlay._height = 800, 600
+            overlay._set_origin((400, 300))
+            overlay._selected = 12
+            updated = (
+                DesktopApplication(
+                    id="app-0",
+                    name="Renamed app",
+                    icon="updated-app-icon",
+                ),
+                *initial[1:],
+                DesktopApplication(
+                    id="app-13",
+                    name="New app",
+                    icon="application-x-executable",
+                ),
+            )
+            overlay._progress = 1.0
+            with mock.patch.object(overlay, "get_visible", return_value=True):
+                overlay.set_applications(updated)
+
+            self.assertEqual(overlay.applications, initial)
+            self.assertEqual(overlay._pending_applications, updated)
+            overlay._apply_pending_applications()
+            self.assertEqual(overlay.applications, updated)
+            self.assertEqual(overlay._selected, 12)
+            self.assertEqual(overlay.layout.ring_count, 2)
+            self.assertEqual(overlay.applications[0].icon, "updated-app-icon")
+        finally:
+            overlay.destroy()
+            shell_window.destroy()
+
+    def test_monitor_open_uses_its_logical_center_by_default(self) -> None:
+        import gi
+
+        gi.require_version("Gdk", "3.0")
+        gi.require_version("Gtk", "3.0")
+        gi.require_version("GtkLayerShell", "0.1")
+        from gi.repository import Gdk, Gtk
+
+        if not Gtk.init_check()[0]:
+            self.skipTest("GTK display unavailable")
+        display = Gdk.Display.get_default()
+        if display is None or display.get_n_monitors() == 0:
+            self.skipTest("GDK monitor unavailable")
+        from shell.widgets.aplicaciones.radial_launcher import RadialLauncherOverlay
+
+        shell_window = Gtk.Window()
+        overlay = RadialLauncherOverlay(shell_window)
+        monitor = display.get_monitor(0)
+        geometry = monitor.get_geometry()
+        try:
+            overlay.set_applications(
+                (DesktopApplication(id="firefox", name="Firefox", icon="firefox"),)
+            )
+            with (
+                mock.patch.object(overlay, "show_all"),
+                mock.patch.object(overlay, "present"),
+                mock.patch.object(overlay._canvas, "grab_focus"),
+                mock.patch.object(overlay, "_animate_to") as animate,
+            ):
+                overlay.open_on_monitor(monitor)
+
+            self.assertEqual(
+                (overlay._width, overlay._height),
+                (geometry.width, geometry.height),
+            )
+            self.assertIsNotNone(overlay.layout)
+            assert overlay.layout is not None
+            self.assertEqual(
+                (overlay.layout.origin_x, overlay.layout.origin_y),
+                (geometry.width / 2, geometry.height / 2),
+            )
+            animate.assert_called_once_with(1.0)
+        finally:
+            overlay.destroy()
+            shell_window.destroy()
+
+    def test_shell_routes_focused_and_cursor_monitors_to_shared_controller(self) -> None:
+        import gi
+
+        gi.require_version("Gdk", "3.0")
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import Gdk, Gtk
+
+        if not Gtk.init_check()[0]:
+            self.skipTest("GTK display unavailable")
+        display = Gdk.Display.get_default()
+        if display is None or display.get_n_monitors() == 0:
+            self.skipTest("GDK monitor unavailable")
+        from shell import app as shell_app
+        from shell.window_identity import MonitorRect
+
+        monitor = display.get_monitor(0)
+        geometry = monitor.get_geometry()
+        calls: list[tuple[object, tuple[float, float] | None]] = []
+
+        class ApplicationsController:
+            radial_launcher_visible = False
+
+            def toggle_radial_launcher(self, target, *, origin=None) -> None:
+                calls.append((target, origin))
+
+        class OverlayController:
+            def close(self) -> None:
+                pass
+
+            def close_pickers(self) -> None:
+                pass
+
+            def close_panel(self) -> None:
+                pass
+
+            def close_popup(self) -> None:
+                pass
+
+        shell = SimpleNamespace(
+            applications_controller=ApplicationsController(),
+            ai_prompt_controller=OverlayController(),
+            pickers_controller=OverlayController(),
+            steam_controller=OverlayController(),
+            control_center_controller=OverlayController(),
+            settings_controller=OverlayController(),
+        )
+        cursor = (geometry.x + 37, geometry.y + 79)
+        with mock.patch.object(
+            shell_app,
+            "hyprland_cursor_position",
+            return_value=cursor,
+        ):
+            shell_app.ShellApplication._toggle_radial_launcher(
+                shell,
+                at_cursor=True,
+            )
+        self.assertEqual(calls, [(monitor, (37, 79))])
+
+        calls.clear()
+        focused_monitor = MonitorRect(
+            x=geometry.x,
+            y=geometry.y,
+            width=geometry.width,
+            height=geometry.height,
+            focused=True,
+        )
+        with mock.patch.object(
+            shell_app,
+            "query_hyprland_monitors",
+            return_value=(focused_monitor,),
+        ):
+            shell_app.ShellApplication._toggle_radial_launcher(
+                shell,
+                at_cursor=False,
+            )
+        self.assertEqual(calls, [(monitor, None)])
+
+    def test_repeated_animation_request_reverses_from_current_progress(self) -> None:
+        import gi
+
+        gi.require_version("Gtk", "3.0")
+        gi.require_version("GtkLayerShell", "0.1")
+        from gi.repository import Gtk
+
+        if not Gtk.init_check()[0]:
+            self.skipTest("GTK display unavailable")
+
+        from shell.widgets.aplicaciones.radial_launcher import RadialLauncherOverlay
+
+        shell_window = Gtk.Window()
+        overlay = RadialLauncherOverlay(shell_window)
+        try:
+            with (
+                mock.patch(
+                    "shell.widgets.aplicaciones.radial_launcher.animation_duration_ms",
+                    return_value=190,
+                ),
+                mock.patch.object(
+                    overlay._canvas,
+                    "add_tick_callback",
+                    side_effect=(17, 18),
+                ) as add_tick,
+                mock.patch.object(
+                    overlay._canvas,
+                    "remove_tick_callback",
+                ) as remove_tick,
+            ):
+                overlay._animate_to(1.0)
+                self.assertTrue(overlay.animating)
+                overlay._progress = 0.4
+                overlay._animate_to(0.0)
+
+                remove_tick.assert_called_once_with(17)
+                self.assertEqual(add_tick.call_count, 2)
+                self.assertEqual(overlay._anim_from, 0.4)
+                self.assertEqual(overlay._anim_to, 0.0)
+                self.assertTrue(overlay.animating)
+        finally:
+            overlay.destroy()
 
     def test_animation_duration_uses_theme_and_global_motion_gate(self) -> None:
         from types import SimpleNamespace

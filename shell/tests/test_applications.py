@@ -468,6 +468,16 @@ def test_read_desktop_application_skips_hidden(tmp_path: Path) -> None:
     assert read_desktop_application(hidden) is None
 
 
+def test_read_desktop_application_skips_malformed_entries(tmp_path: Path) -> None:
+    malformed = tmp_path / "malformed.desktop"
+    malformed.write_text(
+        "this is not a desktop entry\n[Desktop Entry\nName=Broken\n",
+        encoding="utf-8",
+    )
+
+    assert read_desktop_application(malformed) is None
+
+
 def test_scan_desktop_applications_can_include_hidden_entries(tmp_path: Path) -> None:
     visible = tmp_path / "visible.desktop"
     visible.write_text(
