@@ -5,8 +5,8 @@ from __future__ import annotations
 from unittest import mock
 
 from shell.eventbus import EventBus
-from shell.models import AudioDevice, AudioStream, Window, WorkspaceAudioState
-from shell.servicios.audio.audio import AudioService
+from shell.models import AudioDevice, AudioStream, SystemVolumeState, Window, WorkspaceAudioState
+from shell.servicios.audio.audio import AudioService, audio_output_icon_name
 from shell.widgets.audio.audio_stream_row import group_streams_by_app
 
 
@@ -208,6 +208,53 @@ def test_capture_stream_kind_routes_volume_command() -> None:
     assert calls and calls[0][:3] == ["pactl", "set-source-input-volume", "200"]
 
 
+def test_set_stream_volume_coalesces_pending_updates_per_stream() -> None:
+    service = _service_with_windows()
+    scheduled: list[object] = []
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str]) -> bool:
+        commands.append(command)
+        if len(commands) == 1:
+            service.set_stream_volume("100", 0.9)
+        return True
+
+    with mock.patch.object(
+        service,
+        "_start_operation",
+        side_effect=lambda _name, operation: scheduled.append(operation),
+    ):
+        with mock.patch.object(service, "_run_command", side_effect=fake_run):
+            service.set_stream_volume("100", 0.25)
+            service.set_stream_volume("100", 0.5)
+            assert len(scheduled) == 1
+            scheduled[0]()
+
+    assert commands == [
+        ["pactl", "set-sink-input-volume", "100", "50%"],
+        ["pactl", "set-sink-input-volume", "100", "90%"],
+    ]
+
+
+def test_audio_output_icon_tracks_headphones_and_speakers() -> None:
+    headphones = SystemVolumeState(
+        sink_name="alsa_output.analog-stereo",
+        sink_description="Auriculares",
+        volume=0.5,
+        is_muted=False,
+    )
+    speakers = SystemVolumeState(
+        sink_name="alsa_output.analog-stereo",
+        sink_description="Parlantes",
+        volume=0.5,
+        is_muted=False,
+    )
+
+    assert audio_output_icon_name(headphones) == "audio-headphones-symbolic"
+    assert audio_output_icon_name(speakers) == "audio-speakers-symbolic"
+    assert audio_output_icon_name(None) == "audio-speakers-symbolic"
+
+
 if __name__ == "__main__":
     test_query_output_devices_parses_pactl_json()
     test_query_input_devices_skips_monitors()
@@ -215,4 +262,6 @@ if __name__ == "__main__":
     test_group_streams_by_app_merges_roles()
     test_set_playback_sink_invokes_pactl_move()
     test_capture_stream_kind_routes_volume_command()
+    test_set_stream_volume_coalesces_pending_updates_per_stream()
+    test_audio_output_icon_tracks_headphones_and_speakers()
     print("audio safe tests OK")

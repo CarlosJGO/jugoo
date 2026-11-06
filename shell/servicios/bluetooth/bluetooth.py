@@ -37,12 +37,30 @@ BATTERY_INTERFACE = "org.bluez.Battery1"
 
 DBUS_TIMEOUT_MS = 3_000
 DEVICE_CALL_TIMEOUT_MS = 30_000
-DISCOVERY_TIMEOUT_MS = 15_000
+# Gamepads often need a long window to enter pairing mode after the scan starts.
+DISCOVERY_TIMEOUT_MS = 60_000
 RECEIVE_TIMEOUT_MS = 180_000
 FALLBACK_POLL_SEC = 30
 REFRESH_DEBOUNCE_MS = 150
+PAIRABLE_WHILE_SCANNING_SEC = 90
 
 _ADDRESS_RE = re.compile(r"^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$")
+
+# Bluetooth CoD major class (bits 8-12).
+_COD_MAJOR_PERIPHERAL = 5
+_COD_MAJOR_AUDIO = 4
+_COD_MAJOR_PHONE = 2
+_COD_MAJOR_COMPUTER = 1
+_COD_MAJOR_IMAGING = 6
+
+# BLE Appearance values commonly used by HID controllers.
+_APPEARANCE_HID = {
+    0x03C0: ("input-gaming-symbolic", "Mando"),  # HID Generic
+    0x03C1: ("input-keyboard-symbolic", "Teclado"),
+    0x03C2: ("input-mouse-symbolic", "Ratón"),
+    0x03C3: ("input-gaming-symbolic", "Joystick"),
+    0x03C4: ("input-gaming-symbolic", "Mando"),
+}
 
 _ICON_MAP = {
     "audio-card": "audio-card-symbolic",
@@ -103,23 +121,78 @@ def build_bluetooth_tooltip(snapshot: BluetoothSnapshot) -> str:
 def device_type_from_icon(icon: str) -> str:
     if not icon:
         return ""
-    if "headphone" in icon or "headset" in icon:
+    lowered = icon.casefold()
+    if "headphone" in lowered or "headset" in lowered:
         return "Auriculares"
-    if "audio" in icon:
+    if "audio" in lowered:
         return "Audio"
-    if "mouse" in icon:
+    if "mouse" in lowered:
         return "Ratón"
-    if "keyboard" in icon:
+    if "keyboard" in lowered:
         return "Teclado"
-    if "phone" in icon:
+    if "phone" in lowered:
         return "Teléfono"
-    if "computer" in icon:
+    if "computer" in lowered:
         return "Ordenador"
-    if "gaming" in icon:
+    if "gaming" in lowered or "joystick" in lowered:
         return "Mando"
-    if "printer" in icon:
+    if "printer" in lowered:
         return "Impresora"
     return ""
+
+
+def device_class_major(class_code: int) -> int:
+    return (int(class_code) >> 8) & 0x1F
+
+
+def icon_and_type_from_class(class_code: int) -> tuple[str, str]:
+    """Fallback icon/type from Bluetooth Class Of Device when Icon is empty."""
+    major = device_class_major(class_code)
+    if major == _COD_MAJOR_PERIPHERAL:
+        # BlueZ client/agent.c style: bits 6-7 keyboard/pointing, bits 1-4 type.
+        combo = (int(class_code) & 0xC0) >> 6
+        peripheral = (int(class_code) & 0x1E) >> 1
+        if combo == 0x01 or peripheral == 0x03:
+            return "input-keyboard-symbolic", "Teclado"
+        if combo == 0x02 or peripheral == 0x04:
+            return "input-mouse-symbolic", "Ratón"
+        if peripheral in {0x01, 0x02}:
+            return "input-gaming-symbolic", "Mando"
+        return "input-gaming-symbolic", "Mando"
+    if major == _COD_MAJOR_AUDIO:
+        return "audio-headphones-symbolic", "Auriculares"
+    if major == _COD_MAJOR_PHONE:
+        return "phone-symbolic", "Teléfono"
+    if major == _COD_MAJOR_COMPUTER:
+        return "computer-symbolic", "Ordenador"
+    if major == _COD_MAJOR_IMAGING:
+        return "camera-photo-symbolic", "Cámara"
+    return "", ""
+
+
+def icon_and_type_from_appearance(appearance: int) -> tuple[str, str]:
+    return _APPEARANCE_HID.get(int(appearance), ("", ""))
+
+
+def resolve_device_icon_and_type(
+    *,
+    icon: str,
+    class_code: int | None = None,
+    appearance: int | None = None,
+) -> tuple[str, str]:
+    mapped = _ICON_MAP.get(icon, icon)
+    device_type = device_type_from_icon(mapped or icon)
+    if mapped and device_type:
+        return mapped, device_type
+    if appearance:
+        app_icon, app_type = icon_and_type_from_appearance(appearance)
+        if app_icon:
+            return app_icon, app_type
+    if class_code:
+        class_icon, class_type = icon_and_type_from_class(class_code)
+        if class_icon:
+            return class_icon, class_type
+    return mapped or "bluetooth-symbolic", device_type
 
 
 def normalize_address(value: str) -> str:
@@ -146,6 +219,15 @@ def _props_dict(raw: Any) -> dict[str, Any]:
     return {str(key): _variant_value(val) for key, val in raw.items()}
 
 
+def _optional_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def compose_device_snapshot(
     path: str,
     props: dict[str, Any],
@@ -163,6 +245,11 @@ def compose_device_snapshot(
     if paired and not can_send and not uuids:
         # UUIDs often empty until services resolve; allow send attempt for paired.
         can_send = True
+    resolved_icon, device_type = resolve_device_icon_and_type(
+        icon=icon,
+        class_code=_optional_int(props.get("Class")),
+        appearance=_optional_int(props.get("Appearance")),
+    )
     return BluetoothDeviceSnapshot(
         address=address,
         name=display,
@@ -170,8 +257,8 @@ def compose_device_snapshot(
         paired=paired,
         connected=bool(props.get("Connected")),
         trusted=bool(props.get("Trusted")),
-        icon=_ICON_MAP.get(icon, icon),
-        device_type=device_type_from_icon(icon),
+        icon=resolved_icon,
+        device_type=device_type,
         battery_percent=battery_percent,
         can_send_files=can_send,
     )
@@ -633,11 +720,21 @@ class BluetoothService:
             passkey=pending.passkey,
             hint=pending.hint,
         )
-        if pending.kind in {"display_pin", "display_passkey"}:
+        # Display-only / auto-accepted Just Works: keep an ephemeral hint in UI.
+        if pending.kind in {"display_pin", "display_passkey", "authorization"}:
             self._display_hint = challenge
+            if pending.kind == "authorization":
+                # Clear the toast after a few seconds; pairing continues in BlueZ.
+                GLib.timeout_add_seconds(8, self._clear_display_hint)
         else:
             self._display_hint = None
         self._refresh_snapshot(emit=True)
+
+    def _clear_display_hint(self) -> bool:
+        if self._display_hint is not None and self._display_hint.kind == "authorization":
+            self._display_hint = None
+            self._refresh_snapshot(emit=True)
+        return False
 
     def _on_agent_cancelled(self) -> None:
         self._display_hint = None
@@ -674,11 +771,91 @@ class BluetoothService:
                 DBUS_TIMEOUT_MS,
                 None,
             )
+            adapter = self._objects.setdefault(self._adapter_path, {}).setdefault(
+                ADAPTER_INTERFACE,
+                {},
+            )
+            adapter[name] = _variant_value(value)
             return True
         except GLib.Error as exc:
             self._last_error = exc.message
             _logger.debug("Set Adapter1.%s failed: %s", name, exc.message)
             return False
+
+    def _set_device_property(self, path: str, name: str, value: GLib.Variant) -> bool:
+        if self._bus is None:
+            return False
+        try:
+            self._bus.call_sync(
+                BLUEZ_BUS_NAME,
+                path,
+                PROPERTIES_INTERFACE,
+                "Set",
+                GLib.Variant("(ssv)", (DEVICE_INTERFACE, name, value)),
+                None,
+                Gio.DBusCallFlags.NONE,
+                DBUS_TIMEOUT_MS,
+                None,
+            )
+            props = self._objects.setdefault(path, {}).setdefault(DEVICE_INTERFACE, {})
+            props[name] = _variant_value(value)
+            return True
+        except GLib.Error as exc:
+            _logger.debug("Set Device1.%s failed: %s", name, exc.message)
+            return False
+
+    def _trust_device(self, path: str) -> None:
+        """Mark device Trusted so HID/A2DP reconnect and AuthorizeService stay quiet."""
+        self._set_device_property(path, "Trusted", GLib.Variant("b", True))
+
+    def _prepare_adapter_for_pairing(self) -> None:
+        """Make the adapter accept new bonds (needed for many gamepads)."""
+        if not self._adapter_path:
+            return
+        self._set_adapter_property("Pairable", GLib.Variant("b", True))
+        self._set_adapter_property(
+            "PairableTimeout",
+            GLib.Variant("u", PAIRABLE_WHILE_SCANNING_SEC),
+        )
+
+    def _apply_discovery_filter(self) -> None:
+        """Discover classic + LE so DualSense / Xbox / Switch / etc. appear."""
+        if self._bus is None or not self._adapter_path:
+            return
+        try:
+            self._bus.call_sync(
+                BLUEZ_BUS_NAME,
+                self._adapter_path,
+                ADAPTER_INTERFACE,
+                "SetDiscoveryFilter",
+                GLib.Variant(
+                    "(a{sv})",
+                    (
+                        {
+                            "Transport": GLib.Variant("s", "auto"),
+                            "DuplicateData": GLib.Variant("b", False),
+                        },
+                    ),
+                ),
+                None,
+                Gio.DBusCallFlags.NONE,
+                DBUS_TIMEOUT_MS,
+                None,
+            )
+        except GLib.Error as exc:
+            # Older bluez without filters still discovers; non-fatal.
+            _logger.debug("SetDiscoveryFilter failed: %s", exc.message)
+
+    def _ensure_discovery_stopped(self) -> None:
+        """BlueZ often refuses Connect/Pair while the adapter is still scanning."""
+        if not self._snapshot.discovering and not (
+            self._objects.get(self._adapter_path, {})
+            .get(ADAPTER_INTERFACE, {})
+            .get("Discovering")
+        ):
+            self._cancel_discovery_timeout()
+            return
+        self._stop_discovery_idle()
 
     def _call_device(self, path: str, method: str) -> bool:
         if self._bus is None:
@@ -698,8 +875,13 @@ class BluetoothService:
             self._last_error = ""
             return True
         except GLib.Error as exc:
-            self._last_error = exc.message
-            _logger.debug("Device1.%s(%s) failed: %s", method, path, exc.message)
+            message = exc.message or str(exc)
+            # Already paired/connected are not real failures for our UI.
+            if "AlreadyExists" in message or "Already Connected" in message:
+                self._last_error = ""
+                return True
+            self._last_error = message
+            _logger.debug("Device1.%s(%s) failed: %s", method, path, message)
             self._refresh_snapshot(emit=True)
             return False
 
@@ -730,6 +912,11 @@ class BluetoothService:
             return False
         if not self._snapshot.powered:
             self._set_powered_idle(True)
+        # Reclaim default agent so pairing prompts (or Just Works) hit Jugoo.
+        if self._bus is not None:
+            self._agent.register(self._bus)
+        self._prepare_adapter_for_pairing()
+        self._apply_discovery_filter()
         try:
             self._bus.call_sync(
                 BLUEZ_BUS_NAME,
@@ -751,8 +938,18 @@ class BluetoothService:
             self._arm_discovery_timeout()
             self._refresh_snapshot(emit=True)
         except GLib.Error as exc:
-            self._last_error = exc.message
-            _logger.debug("StartDiscovery failed: %s", exc.message)
+            message = exc.message or str(exc)
+            if "InProgress" in message:
+                self._last_error = ""
+                adapter = self._objects.setdefault(self._adapter_path, {}).setdefault(
+                    ADAPTER_INTERFACE,
+                    {},
+                )
+                adapter["Discovering"] = True
+                self._arm_discovery_timeout()
+            else:
+                self._last_error = message
+                _logger.debug("StartDiscovery failed: %s", message)
             self._refresh_snapshot(emit=True)
         return False
 
@@ -773,12 +970,21 @@ class BluetoothService:
                 None,
             )
         except GLib.Error as exc:
-            _logger.debug("StopDiscovery failed: %s", exc.message)
+            message = exc.message or str(exc)
+            if "NotReady" not in message and "Failed" not in message:
+                _logger.debug("StopDiscovery failed: %s", message)
         adapter = self._objects.setdefault(self._adapter_path, {}).setdefault(
             ADAPTER_INTERFACE,
             {},
         )
         adapter["Discovering"] = False
+        # Keep Pairable for a bit so a follow-up Emparejar still works; receiving
+        # mode owns Discoverable separately.
+        if not self._receiving:
+            self._set_adapter_property(
+                "PairableTimeout",
+                GLib.Variant("u", PAIRABLE_WHILE_SCANNING_SEC),
+            )
         self._refresh_snapshot(emit=True)
         return False
 
@@ -805,7 +1011,13 @@ class BluetoothService:
             self._last_error = f"Dispositivo no encontrado: {address}"
             self._refresh_snapshot(emit=True)
             return False
-        self._call_device(path, "Connect")
+        self._ensure_discovery_stopped()
+        if not self._snapshot.powered:
+            self._set_powered_idle(True)
+        self._trust_device(path)
+        if self._call_device(path, "Connect"):
+            props = self._objects.setdefault(path, {}).setdefault(DEVICE_INTERFACE, {})
+            props["Connected"] = True
         self._schedule_refresh()
         return False
 
@@ -815,7 +1027,9 @@ class BluetoothService:
             self._last_error = f"Dispositivo no encontrado: {address}"
             self._refresh_snapshot(emit=True)
             return False
-        self._call_device(path, "Disconnect")
+        if self._call_device(path, "Disconnect"):
+            props = self._objects.setdefault(path, {}).setdefault(DEVICE_INTERFACE, {})
+            props["Connected"] = False
         self._schedule_refresh()
         return False
 
@@ -825,7 +1039,25 @@ class BluetoothService:
             self._last_error = f"Dispositivo no encontrado: {address}"
             self._refresh_snapshot(emit=True)
             return False
-        self._call_device(path, "Pair")
+        self._ensure_discovery_stopped()
+        if not self._snapshot.powered:
+            self._set_powered_idle(True)
+        if self._bus is not None:
+            self._agent.register(self._bus)
+        self._prepare_adapter_for_pairing()
+        props = self._objects.get(path, {}).get(DEVICE_INTERFACE, {})
+        already_paired = bool(props.get("Paired"))
+        if not already_paired:
+            if not self._call_device(path, "Pair"):
+                return False
+            props = self._objects.setdefault(path, {}).setdefault(DEVICE_INTERFACE, {})
+            props["Paired"] = True
+        self._trust_device(path)
+        # Mandos / auriculares: conectar perfiles en el mismo gesto de emparejar.
+        if self._call_device(path, "Connect"):
+            props = self._objects.setdefault(path, {}).setdefault(DEVICE_INTERFACE, {})
+            props["Connected"] = True
+            self._last_error = ""
         self._schedule_refresh()
         return False
 

@@ -235,7 +235,8 @@ class ControlCenterBluetoothSection(ShellModule):
         hint = pairing.hint or "Confirmar emparejamiento"
         self._pairing_hint.set_text(f"{name}\n{hint}")
         needs_input = pairing.kind in {"pin", "passkey"}
-        interactive = pairing.kind in {"confirmation", "authorization", "pin", "passkey"}
+        # authorization / display_* are informational (Just Works auto-accepted).
+        interactive = pairing.kind in {"confirmation", "pin", "passkey"}
         self._pairing_entry.set_visible(needs_input)
         self._pairing_entry.set_sensitive(needs_input)
         if not needs_input:
@@ -247,6 +248,9 @@ class ControlCenterBluetoothSection(ShellModule):
         self._pairing_box.show_all()
         if not needs_input:
             self._pairing_entry.hide()
+        if not interactive:
+            self._pairing_accept.hide()
+            self._pairing_reject.hide()
 
     def _sync_incoming(self, snapshot: BluetoothSnapshot) -> None:
         incoming = snapshot.incoming_file
@@ -310,7 +314,11 @@ class ControlCenterBluetoothSection(ShellModule):
         self._clear_devices()
         devices = snapshot.devices
         if not devices:
-            empty = Gtk.Label(label="No hay dispositivos conectados", xalign=0)
+            if snapshot.discovering:
+                empty_text = "Buscando mandos, auriculares y otros dispositivos…"
+            else:
+                empty_text = "Sin dispositivos. Pulsa «Buscar dispositivos»."
+            empty = Gtk.Label(label=empty_text, xalign=0)
             empty.get_style_context().add_class("control-center-detail-muted")
             self._device_list.add(empty)
             self._device_list.show_all()
@@ -379,8 +387,12 @@ class ControlCenterBluetoothSection(ShellModule):
             )
             actions.pack_start(button, False, False, 0)
         else:
-            button = Gtk.Button(label="Emparejar", relief=Gtk.ReliefStyle.NONE)
+            # Pair trusts the device and connects profiles (HID/A2DP) in one step.
+            button = Gtk.Button(label="Emparejar y conectar", relief=Gtk.ReliefStyle.NONE)
             button.get_style_context().add_class("control-center-action")
+            button.set_tooltip_text(
+                "Empareja el dispositivo, lo marca como de confianza y conecta sus perfiles"
+            )
             button.connect(
                 "clicked",
                 lambda *_args, address=device.address: self._on_pair(address),

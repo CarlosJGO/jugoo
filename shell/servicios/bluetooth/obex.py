@@ -346,6 +346,24 @@ class ObexTransferManager:
                 None,
                 None,
             )
+        except GLib.Error as exc:
+            _logger.warning("OBEX agent register_object failed: %s", exc.message)
+            self._agent_id = 0
+            return True
+
+        if not self._call_register_agent():
+            # Stale agent from a previous Jugoo instance: drop it and retry once.
+            self._force_unregister_remote_agent()
+            if not self._call_register_agent():
+                _logger.warning("OBEX agent registration failed after retry")
+                self._unregister_agent()
+        # Client send can still work without a receive agent.
+        return True
+
+    def _call_register_agent(self) -> bool:
+        if self._bus is None:
+            return False
+        try:
             self._bus.call_sync(
                 OBEX_BUS_NAME,
                 OBEX_ROOT_PATH,
@@ -359,10 +377,26 @@ class ObexTransferManager:
             )
             return True
         except GLib.Error as exc:
-            _logger.warning("OBEX agent registration failed: %s", exc.message)
-            self._unregister_agent()
-            # Client send can still work without a receive agent.
-            return True
+            _logger.debug("OBEX RegisterAgent: %s", exc.message)
+            return False
+
+    def _force_unregister_remote_agent(self) -> None:
+        if self._bus is None:
+            return
+        try:
+            self._bus.call_sync(
+                OBEX_BUS_NAME,
+                OBEX_ROOT_PATH,
+                OBEX_AGENT_MANAGER_INTERFACE,
+                "UnregisterAgent",
+                GLib.Variant("(o)", (OBEX_AGENT_PATH,)),
+                None,
+                Gio.DBusCallFlags.NONE,
+                DBUS_TIMEOUT_MS,
+                None,
+            )
+        except GLib.Error:
+            pass
 
     def _unregister_agent(self) -> None:
         if self._bus is None:

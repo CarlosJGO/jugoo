@@ -30,9 +30,15 @@ _WORKSPACE_RULE_RE = re.compile(
     r'workspace\s*=\s*"(?:special:|name:)?([^"]+)"',
     re.IGNORECASE,
 )
+_WORKSPACE_RULE_DECLARATION_RE = re.compile(
+    r"hl\.workspace_rule\s*\(\s*\{(.*?)\}\s*\)",
+    re.IGNORECASE | re.DOTALL,
+)
+_SPECIAL_WORKSPACE_RE = re.compile(r"\bspecial:([A-Za-z0-9_-]+)\b", re.IGNORECASE)
 
 _current_colors: dict[str, str] = dict(DEFAULT_ACCENT_COLORS)
 _css_provider = None  # Gtk.CssProvider | None — lazy to avoid import cost at module load
+_live_accent_keys: tuple[str, ...] = ()
 
 
 def is_hypr_special_name(name: str) -> bool:
@@ -143,6 +149,24 @@ def current_accent_colors() -> dict[str, str]:
     return dict(_current_colors)
 
 
+def register_workspace_accent_names(names: Iterable[str]) -> None:
+    """Include live named workspaces in the generated GTK accent stylesheet."""
+    global _live_accent_keys
+    keys = tuple(
+        sorted(
+            {
+                key
+                for name in names
+                if (key := accent_key_for_workspace(name)) is not None
+            }
+        )
+    )
+    if keys == _live_accent_keys:
+        return
+    _live_accent_keys = keys
+    _refresh_css_provider()
+
+
 def accent_class_for_workspace(name: str) -> str | None:
     key = accent_key_for_workspace(name)
     if key is None:
@@ -185,6 +209,40 @@ def default_hypr_workspace_paths() -> tuple[Path, ...]:
     )
 
 
+def configured_workspace_names(
+    hypr_config_paths: Iterable[Path] | None = None,
+) -> tuple[str, ...]:
+    """Return named and special workspaces referenced by active Hyprland config."""
+    if hypr_config_paths is None:
+        root = Path.home() / ".config" / "hypr"
+        paths = set(default_hypr_workspace_paths())
+        config_dir = root / "config"
+        if config_dir.is_dir():
+            paths.update(config_dir.rglob("*.lua"))
+            paths.update(config_dir.rglob("*.conf"))
+    else:
+        paths = set(hypr_config_paths)
+
+    names: set[str] = set()
+    for path in paths:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        active_text = "\n".join(line.partition("--")[0] for line in text.splitlines())
+        for match in _SPECIAL_WORKSPACE_RE.finditer(active_text):
+            names.add(f"special:{match.group(1)}")
+        for declaration in _WORKSPACE_RULE_DECLARATION_RE.finditer(active_text):
+            match = _WORKSPACE_RULE_RE.search(declaration.group(1))
+            if match is None:
+                continue
+            name = match.group(1).strip()
+            if not name or name.isdigit() or '"special:' in match.group(0).casefold():
+                continue
+            names.add(name)
+    return tuple(sorted(names, key=str.casefold))
+
+
 def _keys_from_hypr_file(path: Path) -> set[str]:
     try:
         text = path.read_text(encoding="utf-8")
@@ -209,8 +267,16 @@ def _keys_from_hypr_file(path: Path) -> set[str]:
     return found
 
 
-def build_accent_css(colors: Mapping[str, str] | None = None) -> str:
-    table = colors if colors is not None else _current_colors
+def build_accent_css(
+    colors: Mapping[str, str] | None = None,
+    *,
+    workspace_names: Iterable[str] = (),
+) -> str:
+    table = dict(colors if colors is not None else _current_colors)
+    for name in (*_live_accent_keys, *workspace_names):
+        key = accent_key_for_workspace(name)
+        if key is not None:
+            table.setdefault(key, resolve_accent_color(key, table))
     chunks: list[str] = []
     for key, color in sorted(table.items()):
         hex_color = normalize_hex(str(color))
@@ -219,20 +285,16 @@ def build_accent_css(colors: Mapping[str, str] | None = None) -> str:
         safe = css_safe_key(key)
         chunks.append(
             f"""
-button.workspace-button.ws-accent-{safe} {{
-    background-color: alpha({hex_color}, 0.14);
-    border: 1px solid alpha({hex_color}, 0.42);
-    border-radius: 0;
+button.workspace-button.named-workspace.ws-accent-{safe} image.workspace-empty-icon {{
+    color: alpha({hex_color}, 0.90);
 }}
-button.workspace-button.ws-accent-{safe}:hover {{
-    background-color: alpha({hex_color}, 0.20);
+button.workspace-button.named-workspace.ws-accent-{safe}:hover {{
+    background-color: alpha({hex_color}, 0.08);
+    border-radius: 5px;
 }}
-button.workspace-button.ws-accent-{safe}.active {{
-    background-color: alpha({hex_color}, 0.28);
-}}
-button.workspace-button.ws-accent-{safe}.active.audio-has-stream,
-button.workspace-button.ws-accent-{safe}.active.audio-playing {{
-    background-color: alpha({hex_color}, 0.28);
+button.workspace-button.named-workspace.ws-accent-{safe}.active {{
+    background-color: transparent;
+    box-shadow: inset 0 -2px 0 {hex_color};
 }}
 """.strip()
         )

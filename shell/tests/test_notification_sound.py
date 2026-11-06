@@ -111,6 +111,7 @@ def test_incoming_notification_requests_sound_playback() -> None:
         _service=service,
         _animate_bell=lambda: None,
         _sound_path=sound_path,
+        _sender_in_view=lambda _snapshot: False,
     )
 
     with (

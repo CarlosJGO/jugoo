@@ -659,7 +659,7 @@ def compose_workspaces(
     special_ids = {
         workspace_id
         for workspace_id, record in known.items()
-        if record.is_special and windows_by_workspace.get(workspace_id)
+        if record.is_special
     }
     special_ids.update(
         workspace_id
@@ -671,8 +671,8 @@ def compose_workspaces(
     special_ids.update(
         workspace_id
         for workspace_id, record in known.items()
+        if not record.is_special
         if accent_key_for_workspace(record.name) is not None
-        and windows_by_workspace.get(workspace_id)
         and workspace_id not in regular_ids
     )
 
@@ -695,7 +695,7 @@ def compose_workspaces(
                     is_hypr_special_name(str(workspace_id)),
                 ),
             ),
-            windows_by_workspace[workspace_id],
+            windows_by_workspace.get(workspace_id, ()),
             workspace_id == active_workspace_id,
             focused_window_address,
             icon_for_window,

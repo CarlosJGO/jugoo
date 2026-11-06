@@ -33,7 +33,10 @@ from ...models import (
     compose_workspace_blocks,
 )
 from ...servicios.audio.audio_visualizer import AUDIO_VISUALIZER_CHANGED
-from ...ui.workspace_accents import accent_class_for_workspace
+from ...ui.workspace_accents import (
+    accent_class_for_workspace,
+    register_workspace_accent_names,
+)
 from .workspace_mini_cava import WorkspaceMiniCava
 
 WORKSPACE_CHANGED = "workspace_changed"
@@ -49,6 +52,22 @@ WORKSPACE_ACCENTS_CHANGED = "workspace_accents_changed"
 AUDIO_CHANGED = "audio_changed"
 _WORKSPACE_DRAG_THRESHOLD_PX = 8
 _ACCENT_CLASS_PREFIX = "ws-accent-"
+_NAMED_WORKSPACE_PRESENTATION = {
+    "gaming": ("Juegos", "applications-games-symbolic"),
+    "special:minimizados": ("Minimizados", "window-minimize-symbolic"),
+    "special:scratch": ("Scratch", "view-restore-symbolic"),
+    "special:special": ("Temporal", "view-dual-symbolic"),
+}
+
+
+def workspace_presentation(name: str) -> tuple[str, str]:
+    """Return a readable label and semantic icon for a workspace."""
+    if name.isdigit():
+        return f"Workspace {name}", "view-paged-symbolic"
+    if name in _NAMED_WORKSPACE_PRESENTATION:
+        return _NAMED_WORKSPACE_PRESENTATION[name]
+    label = name.split(":", 1)[-1].replace("_", " ").replace("-", " ").title()
+    return label or "Workspace", "view-grid-symbolic"
 
 
 class WorkspaceButton(Gtk.Button):
@@ -94,10 +113,13 @@ class WorkspaceButton(Gtk.Button):
         self._content.set_homogeneous(False)
         self._content.set_halign(Gtk.Align.CENTER)
         self._content.set_valign(Gtk.Align.CENTER)
-        self._dot = self._make_dot()
+        self._empty_icon = Gtk.Image()
+        self._empty_icon.get_style_context().add_class("workspace-empty-icon")
+        self._empty_icon.set_from_icon_name("view-paged-symbolic", Gtk.IconSize.MENU)
+        self._empty_icon.set_pixel_size(16)
         self._icons = Gtk.Box(spacing=APPLICATION_ICON_SPACING)
         self._icons.get_style_context().add_class("application-icons")
-        self._content.add_named(self._dot, "dot")
+        self._content.add_named(self._empty_icon, "empty-icon")
         self._content.add_named(self._icons, "icons")
         self._mini_cava = WorkspaceMiniCava(on_redraw=self._hover_surface.queue_draw)
         self._hover_surface.add(self._content)
@@ -156,7 +178,17 @@ class WorkspaceButton(Gtk.Button):
         else:
             context.remove_class("active")
 
-        if workspace.icons:
+        label, _icon = workspace_presentation(workspace.name)
+        if workspace.windows:
+            count = len(workspace.windows)
+            detail = "1 ventana" if count == 1 else f"{count} ventanas"
+        else:
+            detail = "vacío"
+        self.set_tooltip_text(f"{label} · {detail}")
+
+        named_workspace = workspace.is_special or workspace.id < 0 or not workspace.name.isdigit()
+        if workspace.windows:
+            context.remove_class("named-workspace")
             context.remove_class("empty-active")
             if (
                 previous is None
@@ -167,13 +199,23 @@ class WorkspaceButton(Gtk.Button):
                 self._set_icons(workspace)
             self._content.set_visible_child_name("icons")
         else:
+            if named_workspace:
+                context.add_class("named-workspace")
+            else:
+                context.remove_class("named-workspace")
             if workspace.active:
                 context.add_class("empty-active")
             else:
                 context.remove_class("empty-active")
-            self._content.set_visible_child_name("dot")
+            self._show_empty_workspace(workspace)
+            self._content.set_visible_child_name("empty-icon")
 
         self._workspace = workspace
+
+    def _show_empty_workspace(self, workspace: Workspace) -> None:
+        _label, icon = workspace_presentation(workspace.name)
+        self._empty_icon.set_from_icon_name(icon, Gtk.IconSize.MENU)
+        self._empty_icon.set_pixel_size(16)
 
     def _apply_accent_classes(self, workspace_name: str) -> None:
         context = self.get_style_context()
@@ -221,12 +263,6 @@ class WorkspaceButton(Gtk.Button):
     @property
     def workspace(self) -> Workspace | None:
         return self._workspace
-
-    @staticmethod
-    def _make_dot() -> Gtk.Label:
-        dot = Gtk.Label(label="●")
-        dot.get_style_context().add_class("workspace-dot")
-        return dot
 
     def _set_icons(self, workspace: Workspace) -> None:
         for child in self._icons.get_children():
@@ -329,6 +365,7 @@ class WorkspaceWidget(Gtk.Box):
 
     def render(self, workspaces: Iterable[Workspace]) -> None:
         workspaces = tuple(workspaces)
+        register_workspace_accent_names(workspace.name for workspace in workspaces)
         self._all_workspaces = workspaces
         blocks = compose_workspace_blocks(workspaces, WORKSPACES_PER_BLOCK)
         block_map = {block.block_index: block for block in blocks}

@@ -231,6 +231,8 @@ NOTIFICATIONS_TOAST_STACK_STEP = 88
 NOTIFICATIONS_TOAST_WIDTH = 400
 NOTIFICATIONS_TOAST_MAX_HEIGHT = 120
 NOTIFICATIONS_TOAST_TIMEOUT_MS = 5000
+# No toast/sound when the sender has a window on the active workspace (critical still shows).
+NOTIFICATIONS_SUPPRESS_ON_ACTIVE_WORKSPACE = True
 
 # Fullscreen "whisper": own compact HUD chip (not a scaled-down toast).
 NOTIFICATIONS_WHISPER_WIDTH = 300

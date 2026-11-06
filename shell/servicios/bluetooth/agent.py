@@ -21,6 +21,8 @@ AGENT_MANAGER_PATH = "/org/bluez"
 AGENT_MANAGER_INTERFACE = "org.bluez.AgentManager1"
 AGENT_INTERFACE = "org.bluez.Agent1"
 AGENT_OBJECT_PATH = "/com/jugoo/shell/bluetooth/agent"
+# DisplayYesNo covers passkey confirmation; Just Works hits RequestAuthorization
+# which we auto-accept so gamepads/HID can pair without the panel open.
 AGENT_CAPABILITY = "DisplayYesNo"
 
 # XML introspection for Gio.DBusConnection.register_object.
@@ -112,6 +114,16 @@ class BluetoothAgent:
             self._registration_id = 0
             return False
 
+        if not self._register_with_manager(bus):
+            # Stale registration from a previous Jugoo instance on this bus.
+            self._unregister_from_manager(bus)
+            if not self._register_with_manager(bus):
+                _logger.warning("Bluetooth AgentManager registration failed")
+                self.unregister()
+                return False
+        return True
+
+    def _register_with_manager(self, bus: Gio.DBusConnection) -> bool:
         try:
             bus.call_sync(
                 BLUEZ_BUS_NAME,
@@ -135,11 +147,26 @@ class BluetoothAgent:
                 3_000,
                 None,
             )
+            return True
         except GLib.Error as exc:
-            _logger.warning("Bluetooth AgentManager registration failed: %s", exc.message)
-            self.unregister()
+            _logger.debug("Bluetooth AgentManager register: %s", exc.message)
             return False
-        return True
+
+    def _unregister_from_manager(self, bus: Gio.DBusConnection) -> None:
+        try:
+            bus.call_sync(
+                BLUEZ_BUS_NAME,
+                AGENT_MANAGER_PATH,
+                AGENT_MANAGER_INTERFACE,
+                "UnregisterAgent",
+                GLib.Variant("(o)", (AGENT_OBJECT_PATH,)),
+                None,
+                Gio.DBusCallFlags.NONE,
+                3_000,
+                None,
+            )
+        except GLib.Error:
+            pass
 
     def unregister(self) -> None:
         self.reject_pending()
@@ -258,6 +285,8 @@ class BluetoothAgent:
             )
             return
         if method_name == "RequestAuthorization":
+            # Just Works (typical for gamepads / mice / keyboards): accept
+            # immediately and surface an ephemeral hint in the UI.
             device_path = args[0]
             address, name = self._lookup_device(str(device_path))
             self._queue_challenge(
@@ -267,11 +296,12 @@ class BluetoothAgent:
                 device_name=name,
                 passkey=None,
                 invocation=invocation,
-                hint="Autorizar emparejamiento",
+                hint="Emparejando (Just Works)…",
+                auto_complete=True,
             )
             return
         if method_name == "AuthorizeService":
-            # Trusted / already-paired devices: allow services without UI.
+            # Allow HID / A2DP / etc. without prompting; pairing already approved.
             invocation.return_value(None)
             return
         if method_name == "RequestPinCode":

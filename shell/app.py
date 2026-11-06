@@ -197,6 +197,7 @@ class ShellApplication(Gtk.Window):
             self.event_bus,
             self.notification_service,
             self,
+            self.audio_service,
         )
         self.status_cluster = ShellModuleGroup(
             "status-cluster",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -48,8 +49,15 @@ class HyprlandService:
     """Owns one socket listener, the current snapshot, and all Hyprland commands."""
 
     def __init__(self, event_bus: EventBus, persistent_workspaces: int | None) -> None:
+        from ...ui.workspace_accents import (
+            configured_workspace_names,
+            is_hypr_special_name,
+        )
+
         self._event_bus = event_bus
         self._persistent_workspaces = persistent_workspaces
+        self._configured_workspace_names = configured_workspace_names()
+        self._is_hypr_special_name = is_hypr_special_name
         self._snapshot: HyprlandSnapshot | None = None
         self._snapshot_lock = threading.RLock()
         self._floating_clients: tuple[FloatingClient, ...] = ()
@@ -382,7 +390,18 @@ class HyprlandService:
 
     def _refresh_full(self) -> HyprlandSnapshot:
         clients_raw = self._json("clients")
-        records = tuple(self._workspace(item) for item in self._json("workspaces"))
+        records = [self._workspace(item) for item in self._json("workspaces")]
+        known_workspace_names = {record.name for record in records}
+        for name in self._configured_workspace_names:
+            if name in known_workspace_names:
+                continue
+            records.append(
+                WorkspaceRecord(
+                    id=self._workspace_id({"name": name}),
+                    name=name,
+                    is_special=self._is_hypr_special_name(name),
+                )
+            )
         windows = tuple(self._window(item) for item in clients_raw)
         active_workspace_id = int(self._json("activeworkspace").get("id", 0))
         active_window = self._active_window(self._json("activewindow"))
@@ -455,8 +474,8 @@ class HyprlandService:
     def _workspace(item: dict[str, Any]) -> WorkspaceRecord:
         from ...ui.workspace_accents import is_hypr_special_name
 
-        workspace_id = int(item["id"])
-        name = str(item.get("name", item["id"]))
+        workspace_id = HyprlandService._workspace_id(item)
+        name = str(item.get("name") or item.get("id") or workspace_id)
         return WorkspaceRecord(
             id=workspace_id,
             name=name,
@@ -464,6 +483,22 @@ class HyprlandService:
             # Hypr ``special:…`` scratchpads are true specials for toggle.
             is_special=is_hypr_special_name(name),
         )
+
+    @staticmethod
+    def _workspace_id(item: dict[str, Any]) -> int:
+        workspace_id = item.get("id")
+        if workspace_id is not None:
+            return int(workspace_id)
+
+        from ...ui.workspace_accents import is_hypr_special_name
+
+        name = str(item.get("name") or item.get("address") or "")
+        if name and (is_hypr_special_name(name) or not name.isdigit()):
+            digest = hashlib.blake2b(name.encode("utf-8"), digest_size=8).digest()
+            return -1 - (int.from_bytes(digest, byteorder="big") & 0x7FFFFFFF)
+        if name.isdigit():
+            return int(name)
+        raise HyprlandError("Hyprland workspace is missing its numeric id")
 
     @staticmethod
     def _window(item: dict[str, Any]) -> Window:
@@ -479,7 +514,7 @@ class HyprlandService:
             address=str(item.get("address", "")),
             app_class=app_class,
             title=str(item.get("title", "")),
-            workspace_id=int(workspace.get("id", 0)),
+            workspace_id=HyprlandService._workspace_id(workspace) if workspace else 0,
             pid=pid,
         )
         application = application_for_window(window)

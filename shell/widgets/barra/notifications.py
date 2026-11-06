@@ -17,12 +17,15 @@ from ...config import (
 )
 from ... import config as shell_config
 from ...eventbus import EventBus
-from ...identity import assets_dir
+from ...identity import APPLICATION_ID, assets_dir
 from ...models import (
     NOTIFICATION_KIND_ASSISTANT,
     ActiveWindow,
+    ApplicationsSnapshot,
+    AudioSnapshot,
     HyprlandSnapshot,
     NotificationSnapshot,
+    normalize_desktop_id,
 )
 from ...popup_handle import (
     PopupHandle,
@@ -30,6 +33,7 @@ from ...popup_handle import (
     pointer_inside_widget,
 )
 from ...servicios.aplicaciones.applications import APP_ACTIVATE_REQUESTED
+from ...servicios.audio.audio import AUDIO_CHANGED, AudioService, audio_output_icon_name
 from ...servicios.escritorio.hyprland import (
     ACTIVE_WINDOW_CHANGED,
     FULLSCREEN_CHANGED,
@@ -47,8 +51,10 @@ from ...servicios.notificaciones.notifications import (
 from ...settings.manager import SETTINGS_CHANGED
 from ...ui import ShellModule
 from ..notificaciones.assistant_presenter import AssistantPresenter
-from ..notificaciones.bell_icon import BellIcon
-from ..notificaciones.notification_activate import activate_notification_sender
+from ..notificaciones.notification_activate import (
+    activate_notification_sender,
+    sender_on_active_workspace,
+)
 from ..notificaciones.notification_deck import NotificationDeck
 from ..notificaciones.notification_popup import NotificationPopup
 from ..notificaciones.notification_toast_manager import NotificationToastManager
@@ -61,6 +67,7 @@ _GROUPING_SETTING_KEYS = frozenset(
     }
 )
 _REFRESH_COALESCE_MS = 40
+_URGENCY_CRITICAL = 2
 
 class NotificationsWidget(ShellModule):
     """Bar button that opens the notification popup and shows unread count."""
@@ -70,6 +77,7 @@ class NotificationsWidget(ShellModule):
         event_bus: EventBus,
         notification_service: NotificationService,
         shell_window: Gtk.Window,
+        audio_service: AudioService,
     ) -> None:
         super().__init__("notifications-widget", spacing=0)
 
@@ -81,7 +89,11 @@ class NotificationsWidget(ShellModule):
         self._overlay = Gtk.Overlay()
         self._button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
         self._button.get_style_context().add_class("notifications-button")
-        self._icon = BellIcon(NOTIFICATION_ICON_SIZE)
+        self._icon = Gtk.Image.new_from_icon_name(
+            audio_output_icon_name(audio_service.snapshot.system_volume),
+            Gtk.IconSize.MENU,
+        )
+        self._icon.set_pixel_size(NOTIFICATION_ICON_SIZE)
         self._button.add(self._icon)
         self._button.connect("clicked", self._on_button_clicked)
 
@@ -127,11 +139,13 @@ class NotificationsWidget(ShellModule):
         self._event_bus.subscribe(NOTIFICATIONS_PAUSED_CHANGED, self._on_paused_changed)
         self._event_bus.subscribe(NOTIFICATIONS_SOUND_MUTE_CHANGED, self._on_sound_mute_changed)
         self._event_bus.subscribe(NOTIFICATIONS_BLOCKED_CHANGED, self._on_blocked_changed)
+        self._event_bus.subscribe(AUDIO_CHANGED, self._on_audio_changed)
         self._event_bus.subscribe(SETTINGS_CHANGED, self._on_settings_changed)
         self._event_bus.subscribe(FULLSCREEN_CHANGED, self._on_fullscreen_changed)
         self._event_bus.subscribe(ACTIVE_WINDOW_CHANGED, self._on_active_window_changed)
         self.connect("destroy", self._on_destroy)
         GLib.idle_add(self._sync_badge)
+        GLib.idle_add(self._apply_audio_snapshot, audio_service.snapshot)
         GLib.idle_add(self._sync_fullscreen_from_hyprland)
         # Build the Gtk window off the critical click path (first open otherwise stalls).
         GLib.idle_add(self._warm_popup)
@@ -169,7 +183,6 @@ class NotificationsWidget(ShellModule):
 
     def _on_destroy(self, *_args) -> None:
         self._deck.close()
-        self._icon.stop()
         if self._refresh_source_id:
             GLib.source_remove(self._refresh_source_id)
             self._refresh_source_id = 0
@@ -178,6 +191,7 @@ class NotificationsWidget(ShellModule):
         self._event_bus.unsubscribe(NOTIFICATIONS_PAUSED_CHANGED, self._on_paused_changed)
         self._event_bus.unsubscribe(NOTIFICATIONS_SOUND_MUTE_CHANGED, self._on_sound_mute_changed)
         self._event_bus.unsubscribe(NOTIFICATIONS_BLOCKED_CHANGED, self._on_blocked_changed)
+        self._event_bus.unsubscribe(AUDIO_CHANGED, self._on_audio_changed)
         self._event_bus.unsubscribe(SETTINGS_CHANGED, self._on_settings_changed)
         self._event_bus.unsubscribe(FULLSCREEN_CHANGED, self._on_fullscreen_changed)
         self._event_bus.unsubscribe(ACTIVE_WINDOW_CHANGED, self._on_active_window_changed)
@@ -185,6 +199,19 @@ class NotificationsWidget(ShellModule):
         self._close_group_window()
         self._toast_manager.destroy()
         self._assistant.destroy()
+
+    def _on_audio_changed(self, snapshot: AudioSnapshot) -> None:
+        if isinstance(snapshot, AudioSnapshot):
+            GLib.idle_add(self._apply_audio_snapshot, snapshot)
+
+    def _apply_audio_snapshot(self, snapshot: AudioSnapshot) -> bool:
+        state = snapshot.system_volume
+        icon_name = audio_output_icon_name(state)
+        self._icon.set_from_icon_name(icon_name, Gtk.IconSize.MENU)
+        self._icon.set_pixel_size(NOTIFICATION_ICON_SIZE)
+        output_label = state.sink_description if state is not None else "sin detectar"
+        self._button.set_tooltip_text(f"Notificaciones · salida: {output_label}")
+        return False
 
     def _on_notifications_changed(self, _snapshots: object) -> None:
         if self._refresh_source_id:
@@ -275,8 +302,7 @@ class NotificationsWidget(ShellModule):
 
     def _handle_notification_received(self, snapshot: NotificationSnapshot) -> bool:
         self._sync_badge()
-        if not self._service.paused:
-            self._animate_bell()
+        if not self._service.paused and not self._sender_in_view(snapshot):
             if shell_config.NOTIFICATIONS_SOUND_ENABLED and self._service.should_play_sound(snapshot):
                 play_notification_sound(self._sound_path, enabled=True)
             if snapshot.kind == NOTIFICATION_KIND_ASSISTANT:
@@ -287,6 +313,26 @@ class NotificationsWidget(ShellModule):
             elif shell_config.NOTIFICATIONS_TOAST_ENABLED:
                 self._toast_manager.enqueue(snapshot)
         return False
+
+    def _sender_in_view(self, snapshot: NotificationSnapshot) -> bool:
+        """The sender already has a window on the active workspace: stay quiet."""
+        if not shell_config.NOTIFICATIONS_SUPPRESS_ON_ACTIVE_WORKSPACE:
+            return False
+        if snapshot.kind == NOTIFICATION_KIND_ASSISTANT:
+            return False
+        if snapshot.urgency >= _URGENCY_CRITICAL:
+            return False
+        if normalize_desktop_id(snapshot.desktop_entry or "") == APPLICATION_ID:
+            return False
+        applications = getattr(self._shell_window, "applications", None)
+        hyprland = getattr(self._shell_window, "hyprland", None)
+        return sender_on_active_workspace(
+            snapshot,
+            applications=(
+                applications.snapshot if applications is not None else ApplicationsSnapshot()
+            ),
+            hyprland=hyprland.snapshot if hyprland is not None else None,
+        )
 
     def _handle_paused_changed(self) -> bool:
         self._sync_button_paused_style()
@@ -314,9 +360,6 @@ class NotificationsWidget(ShellModule):
             style.add_class("notifications-button-paused")
         else:
             style.remove_class("notifications-button-paused")
-
-    def _animate_bell(self) -> None:
-        self._icon.ring()
 
     def _ensure_shell_press_handler(self) -> None:
         if self._shell_press_bound:
@@ -387,8 +430,6 @@ class NotificationsWidget(ShellModule):
         self._open_app(snapshot)
 
     def _open_app(self, snapshot: NotificationSnapshot) -> None:
-        from ...models import ApplicationsSnapshot
-
         shell = self._shell_window
         applications = getattr(shell, "applications", None)
         hyprland = getattr(shell, "hyprland", None)

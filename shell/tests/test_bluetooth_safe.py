@@ -11,8 +11,11 @@ from shell.servicios.bluetooth.bluetooth import (
     build_bluetooth_tooltip,
     compose_device_snapshot,
     device_type_from_icon,
+    icon_and_type_from_appearance,
+    icon_and_type_from_class,
     is_bluetooth_address,
     normalize_address,
+    resolve_device_icon_and_type,
     sort_devices,
 )
 
@@ -103,7 +106,41 @@ def test_icon_and_tooltip_states() -> None:
 def test_device_type_from_icon() -> None:
     assert device_type_from_icon("audio-headphones") == "Auriculares"
     assert device_type_from_icon("input-mouse") == "Ratón"
+    assert device_type_from_icon("input-gaming") == "Mando"
     assert device_type_from_icon("") == ""
+
+
+def test_gamepad_from_class_and_appearance() -> None:
+    # Peripheral + gamepad minor (BlueZ CoD: major=5, (class & 0x1e) >> 1 == 2).
+    icon, kind = icon_and_type_from_class(0x002504)
+    assert icon == "input-gaming-symbolic"
+    assert kind == "Mando"
+    app_icon, app_kind = icon_and_type_from_appearance(0x03C4)
+    assert app_icon == "input-gaming-symbolic"
+    assert app_kind == "Mando"
+    resolved_icon, resolved_kind = resolve_device_icon_and_type(
+        icon="",
+        class_code=0x002504,
+        appearance=None,
+    )
+    assert resolved_icon == "input-gaming-symbolic"
+    assert resolved_kind == "Mando"
+
+
+def test_compose_falls_back_to_class_when_icon_missing() -> None:
+    device = compose_device_snapshot(
+        "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF",
+        {
+            "Address": "aa:bb:cc:dd:ee:ff",
+            "Name": "Xbox Wireless Controller",
+            "Paired": False,
+            "Connected": False,
+            "Trusted": False,
+            "Class": 0x002504,
+        },
+    )
+    assert device.device_type == "Mando"
+    assert device.icon == "input-gaming-symbolic"
 
 
 def test_service_degrades_without_bluez() -> None:
@@ -143,6 +180,8 @@ if __name__ == "__main__":
     test_sort_devices_connected_first()
     test_icon_and_tooltip_states()
     test_device_type_from_icon()
+    test_gamepad_from_class_and_appearance()
+    test_compose_falls_back_to_class_when_icon_missing()
     test_service_degrades_without_bluez()
     test_mutations_are_safe_when_unavailable()
     print("ok")

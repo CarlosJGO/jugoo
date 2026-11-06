@@ -558,6 +558,21 @@ def build_settings_catalog() -> tuple[SettingDef, ...]:
             section="Toasts",
         ),
         SettingDef(
+            key="notificaciones.suppress_on_active_workspace",
+            category=CategoryId.NOTIFICACIONES,
+            label="Silenciar si la app está a la vista",
+            description=(
+                "Sin toast ni sonido cuando la app emisora tiene una ventana en el "
+                "workspace activo. Las críticas se muestran igual; todas quedan en el historial."
+            ),
+            value_type="bool",
+            default=shell_config.NOTIFICATIONS_SUPPRESS_ON_ACTIVE_WORKSPACE,
+            config_attr="NOTIFICATIONS_SUPPRESS_ON_ACTIVE_WORKSPACE",
+            apply=APPLY_LIVE,
+            tier="A",
+            section="Toasts",
+        ),
+        SettingDef(
             key="notificaciones.sound_enabled",
             category=CategoryId.NOTIFICACIONES,
             label="Sonido de notificación",

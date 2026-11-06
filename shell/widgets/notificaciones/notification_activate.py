@@ -9,7 +9,6 @@ from pathlib import Path
 
 from ...models import (
     ApplicationsSnapshot,
-    DesktopApplication,
     HyprlandSnapshot,
     NotificationSnapshot,
     Window,
@@ -104,6 +103,50 @@ def windows_for_notification_keys(
     return tuple(matches)
 
 
+def notification_sender_windows(
+    snapshot: NotificationSnapshot,
+    applications: ApplicationsSnapshot,
+    windows: Sequence[Window],
+) -> tuple[Window, ...]:
+    """Mapped windows that belong to the app that posted ``snapshot``."""
+    app_id = resolve_notification_app_id(snapshot, applications)
+    application = applications.app_by_id(app_id) if app_id else None
+    matches: tuple[Window, ...] = ()
+    if application is not None:
+        matches = windows_for_application(application, windows)
+    if not matches:
+        matches = windows_for_notification_keys(windows, notification_identity_keys(snapshot))
+    return matches
+
+
+def sender_on_active_workspace(
+    snapshot: NotificationSnapshot,
+    *,
+    applications: ApplicationsSnapshot,
+    hyprland: HyprlandSnapshot | None,
+) -> bool:
+    """True when a window of the sender sits on the workspace the user is looking at.
+
+    The focused window's workspace counts too, so an open special workspace
+    (scratchpad) is treated as visible alongside the regular active one.
+    """
+    if hyprland is None:
+        return False
+    windows = snapshot_windows(hyprland)
+    visible_ids = {workspace.id for workspace in hyprland.workspaces if workspace.active}
+    active_address = hyprland.active_window.address if hyprland.active_window else ""
+    if active_address:
+        visible_ids.update(
+            window.workspace_id for window in windows if window.address == active_address
+        )
+    if not visible_ids:
+        return False
+    return any(
+        window.workspace_id in visible_ids
+        for window in notification_sender_windows(snapshot, applications, windows)
+    )
+
+
 def activate_notification_sender(
     snapshot: NotificationSnapshot,
     *,
@@ -122,15 +165,7 @@ def activate_notification_sender(
         active_address = hyprland.active_window.address or ""
 
     app_id = resolve_notification_app_id(snapshot, applications)
-    application: DesktopApplication | None = (
-        applications.app_by_id(app_id) if app_id else None
-    )
-
-    matches: tuple[Window, ...] = ()
-    if application is not None:
-        matches = windows_for_application(application, windows)
-    if not matches:
-        matches = windows_for_notification_keys(windows, notification_identity_keys(snapshot))
+    matches = notification_sender_windows(snapshot, applications, windows)
 
     target = next_window_to_focus(matches, active_address)
     if target is not None and target.address:

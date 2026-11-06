@@ -172,6 +172,25 @@ def build_system_volume_state(
     )
 
 
+def audio_output_icon_name(state: SystemVolumeState | None) -> str:
+    """Choose a symbolic icon for the active physical output when identifiable."""
+    if state is None:
+        return "audio-speakers-symbolic"
+    output_name = f"{state.sink_description} {state.sink_name}".casefold()
+    headphone_terms = (
+        "auricular",
+        "audifono",
+        "audífono",
+        "headphone",
+        "headset",
+        "earbud",
+        "earphone",
+    )
+    if any(term in output_name for term in headphone_terms):
+        return "audio-headphones-symbolic"
+    return "audio-speakers-symbolic"
+
+
 class AudioService:
     """Monitors audio streams and maps them to workspaces using EventBus snapshot events."""
 
@@ -187,6 +206,9 @@ class AudioService:
         self._subscribe_process: subprocess.Popen[str] | None = None
         self._operation_threads: set[threading.Thread] = set()
         self._operation_threads_lock = threading.Lock()
+        self._stream_volume_lock = threading.Lock()
+        self._pending_stream_volumes: dict[str, float] = {}
+        self._stream_volume_updates_running: set[str] = set()
 
         self._event_bus.subscribe(WORKSPACE_CHANGED, self._on_hyprland_workspace_changed, on_main=False)
         self._event_bus.subscribe(WINDOW_OPENED, self._on_hyprland_workspace_changed, on_main=False)
@@ -246,11 +268,31 @@ class AudioService:
 
     def set_stream_volume(self, stream_id: str, volume: float) -> None:
         """Set volume (0.0 to 1.0) for a playback or capture stream."""
+        if self._stop_event.is_set():
+            return
+        stream_id = str(stream_id)
         clamped_volume = max(0.0, min(1.0, volume))
-        vol_pct = f"{int(clamped_volume * 100)}%"
         stream_kind = self._stream_kind_for_id(stream_id)
+        with self._stream_volume_lock:
+            self._pending_stream_volumes[stream_id] = clamped_volume
+            if stream_id in self._stream_volume_updates_running:
+                return
+            self._stream_volume_updates_running.add(stream_id)
 
-        def _exec_set() -> None:
+        self._start_operation(
+            "audio-set-volume",
+            lambda: self._flush_stream_volume(stream_id, stream_kind),
+        )
+
+    def _flush_stream_volume(self, stream_id: str, stream_kind: str) -> None:
+        while not self._stop_event.is_set():
+            with self._stream_volume_lock:
+                volume = self._pending_stream_volumes.pop(stream_id, None)
+                if volume is None:
+                    self._stream_volume_updates_running.discard(stream_id)
+                    return
+
+            vol_pct = f"{int(volume * 100)}%"
             if stream_kind == "capture":
                 command = ["pactl", "set-source-input-volume", str(stream_id), vol_pct]
             else:
@@ -258,12 +300,14 @@ class AudioService:
             succeeded = self._run_command(command)
             if not succeeded and stream_kind != "capture":
                 succeeded = self._run_command(
-                    ["wpctl", "set-volume", str(stream_id), str(clamped_volume)],
+                    ["wpctl", "set-volume", str(stream_id), str(volume)],
                 )
             if succeeded and not self._stop_event.is_set():
-                self._update_stream_volume_local(stream_id, clamped_volume)
+                self._update_stream_volume_local(stream_id, volume)
 
-        self._start_operation("audio-set-volume", _exec_set)
+        with self._stream_volume_lock:
+            self._pending_stream_volumes.pop(stream_id, None)
+            self._stream_volume_updates_running.discard(stream_id)
 
     def toggle_stream_mute(self, stream_id: str) -> None:
         """Toggle mute state for a playback or capture stream."""
