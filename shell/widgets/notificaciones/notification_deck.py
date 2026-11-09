@@ -349,9 +349,7 @@ class NotificationDeck:
         parent: Rect,
         monitor: Rect | None,
     ) -> None:
-        self._parent = parent
-        self._monitor = monitor
-        self._start_watch()
+        self.set_parent(parent, monitor)
         # A popup hidden with the pointer on it keeps that position in GTK;
         # reopened, the row laid out there gets an enter the pointer never made.
         position = self._pointer()
@@ -412,9 +410,9 @@ class NotificationDeck:
     def set_parent(self, parent: Rect, monitor: Rect | None) -> None:
         """Where the popup is now; starts watching the pointer around it.
 
-        If it moved or resized, a card that is out or on its way comes back
-        and returns on the new track, and a resting one that no longer fits
-        under it is unmapped so no edge can show.
+        Height changes follow immediately. Other geometry changes bring an
+        exposed card back before loading its new track; a resting card that
+        no longer fits is unmapped so no edge can show.
         """
         changed = (parent, monitor) != (self._parent, self._monitor)
         self._parent = parent
@@ -422,12 +420,42 @@ class NotificationDeck:
         self._start_watch()
         if not changed:
             return
+        if self._resize_height_in_place():
+            return
         wanted = self.machine.wanted
         if wanted is not None and wanted[1] != self._track():
             group = self._groups.get(wanted)
             if group is not None:
                 self._apply(group)
         self._fit_resting_card()
+
+    def _resize_height_in_place(self) -> bool:
+        """Follow the popup's height without restarting a horizontal slide."""
+        machine = self.machine
+        old = machine.track
+        window = self._window
+        if old is None or window is None or machine.loading is not None:
+            return False
+        track = self._track()
+        if (old.hidden_x, old.visible_x, old.y, old.width) != (
+            track.hidden_x, track.visible_x, track.y, track.width
+        ):
+            return False
+        if old.height == track.height:
+            return False
+
+        def resized(key):
+            return None if key is None else (key[0], track)
+
+        # Content identity stays the same. Update both wishes and the shown
+        # key so the machine does not treat a height change as a new group.
+        self._groups = {resized(key): group for key, group in self._groups.items()}
+        machine.shown = resized(machine.shown)
+        machine.wanted = resized(machine.wanted)
+        machine.track = track
+        self._awaiting_paint = resized(self._awaiting_paint)
+        window.set_card_size(track.width, track.height)
+        return True
 
     def wanted_ids(self) -> tuple[int, ...]:
         wanted = self.machine.wanted

@@ -303,6 +303,41 @@ def test_parent_without_group_hides_without_loading() -> None:
     deck.close()
 
 
+def test_height_follows_parent_while_visible_exiting_and_hidden() -> None:
+    if not Gtk.init_check()[0]:
+        raise AssertionError("GTK could not initialize")
+
+    deck, card = _deck()
+    group = _group(10, 3, "Ana")
+    now = _open(deck, card, group)
+    moves = len(MOVES)
+    smaller = replace(PARENT, height=320)
+    # A refresh can hand the new geometry through show_group first.
+    deck.show_group(group, smaller, MONITOR)
+    assert deck.machine.state is DeckState.VISIBLE
+    assert card.card_size[1] == deck._track().height
+    assert deck.machine.card_rect().height == card.card_size[1]
+    assert len(MOVES) == moves
+    assert card.fills == ["Ana  ·  3"]
+
+    deck.release()
+    smaller = replace(PARENT, height=240)
+    deck.set_parent(smaller, MONITOR)
+    assert deck.machine.state is DeckState.EXITING
+    assert card.card_size[1] == deck._track().height
+    assert deck.machine.card_rect().height == card.card_size[1]
+    _run(deck, now, now + 2000)
+    assert deck.machine.state is DeckState.HIDDEN
+
+    deck.set_parent(replace(PARENT, height=200), MONITOR)
+    assert card.card_size[1] == deck._track().height
+    assert card.get_mapped()
+    deck.show_group(group, replace(PARENT, height=200), MONITOR)
+    assert deck.machine.state is DeckState.ENTERING
+    assert card.fills == ["Ana  ·  3"]
+    deck.close()
+
+
 if __name__ == "__main__":
     test_new_parent_keeps_the_visible_group_until_hidden()
     test_rapid_parent_changes_load_only_the_last_one()
@@ -311,4 +346,5 @@ if __name__ == "__main__":
     test_sweeping_across_parents_only_acts_on_where_the_pointer_rests()
     test_left_click_on_a_card_row_activates_it()
     test_parent_without_group_hides_without_loading()
+    test_height_follows_parent_while_visible_exiting_and_hidden()
     print("ok")

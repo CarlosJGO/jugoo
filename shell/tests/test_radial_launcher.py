@@ -268,7 +268,12 @@ class RadialLayoutTests(unittest.TestCase):
 
         shell_window = Gtk.Window()
         selected: list[DesktopApplication] = []
-        overlay = RadialLauncherOverlay(shell_window, on_activate=selected.append)
+        new_instances: list[DesktopApplication] = []
+        overlay = RadialLauncherOverlay(
+            shell_window,
+            on_activate=selected.append,
+            on_new_instance=new_instances.append,
+        )
         try:
             applications = (
                 DesktopApplication(id="firefox.desktop", name="Firefox", icon="firefox"),
@@ -358,7 +363,7 @@ class RadialLayoutTests(unittest.TestCase):
                 )
                 close.assert_called_once_with()
 
-            overlay._activation_dispatched = False
+            overlay._selection_dispatched = False
             overlay._anim_to = 1.0
             with (
                 mock.patch.object(overlay, "get_visible", return_value=True),
@@ -376,9 +381,27 @@ class RadialLayoutTests(unittest.TestCase):
                 )
                 self.assertEqual(selected, [applications[0]])
                 close.assert_called_once_with()
+                close.reset_mock()
+                overlay._selection_dispatched = False
+                self.assertTrue(
+                    overlay._on_click(
+                        overlay._canvas,
+                        SimpleNamespace(
+                            button=3,
+                            x=sample_x,
+                            y=sample_y,
+                        ),
+                    )
+                )
+                self.assertEqual(selected, [applications[0]])
+                self.assertEqual(new_instances, [applications[0]])
+                close.assert_called_once_with()
             overlay._activate_selected()
             overlay._activate_selected()
             self.assertEqual(selected, [applications[0]])
+            overlay._new_instance_selected()
+            overlay._new_instance_selected()
+            self.assertEqual(new_instances, [applications[0]])
         finally:
             overlay.destroy()
             shell_window.destroy()

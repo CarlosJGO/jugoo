@@ -73,6 +73,7 @@ class ApplicationsController:
             lambda: RadialLauncherOverlay(
                 shell_window,
                 on_activate=lambda application: self._activate_application(application.id),
+                on_new_instance=lambda application: self._new_instance(application.id),
             )
         )
 

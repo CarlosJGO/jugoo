@@ -69,13 +69,15 @@ class RadialLauncherOverlay(Gtk.Window):
         shell_window: Gtk.Window,
         *,
         on_activate: AppSelection | None = None,
+        on_new_instance: AppSelection | None = None,
     ) -> None:
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
         self._on_activate = on_activate
+        self._on_new_instance = on_new_instance
         self._applications: tuple[DesktopApplication, ...] = ()
         self._pending_applications: tuple[DesktopApplication, ...] | None = None
         self._selected = 0
-        self._activation_dispatched = False
+        self._selection_dispatched = False
         self._progress = 0.0
         self._anim_from = 0.0
         self._anim_to = 0.0
@@ -180,7 +182,7 @@ class RadialLauncherOverlay(Gtk.Window):
         if not self.get_visible():
             self._progress = 0.0
             self._anim_to = 0.0
-            self._activation_dispatched = False
+            self._selection_dispatched = False
             self.show_all()
             self.present()
             self._canvas.grab_focus()
@@ -601,14 +603,19 @@ class RadialLauncherOverlay(Gtk.Window):
         return False
 
     def _on_click(self, _canvas: Gtk.Widget, event: Gdk.EventButton) -> bool:
-        if event.button != 1:
+        if event.button not in (1, 3):
             return False
         index = self._hit_test(event.x, event.y)
         if index is None:
-            self.close_animated()
-            return True
+            if event.button == 1:
+                self.close_animated()
+                return True
+            return False
         self._selected = index
-        self._activate_selected()
+        if event.button == 1:
+            self._activate_selected()
+        elif self._on_new_instance is not None:
+            self._new_instance_selected()
         return True
 
     def _on_key_press(self, _window: Gtk.Window, event: Gdk.EventKey) -> bool:
@@ -627,11 +634,17 @@ class RadialLauncherOverlay(Gtk.Window):
         return False
 
     def _activate_selected(self) -> None:
-        if self._activation_dispatched or not self._applications:
+        self._dispatch_selected(self._on_activate)
+
+    def _new_instance_selected(self) -> None:
+        self._dispatch_selected(self._on_new_instance)
+
+    def _dispatch_selected(self, callback: AppSelection | None) -> None:
+        if self._selection_dispatched or not self._applications:
             return
-        self._activation_dispatched = True
-        if self._on_activate is not None:
-            self._on_activate(self._applications[self._selected])
+        self._selection_dispatched = True
+        if callback is not None:
+            callback(self._applications[self._selected])
         if self.get_visible() and self._anim_to != 0.0:
             self.close_animated()
 
